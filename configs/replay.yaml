@@ -1,0 +1,125 @@
+project:
+  name: Adaptive Portfolio Agent
+  run_name: deterministic_replay
+  timezone: America/New_York
+  database_path: runtime/replay.db
+  output_directory: outputs/replay
+
+market_data:
+  provider: replay
+  feed: IEX
+  stream_type: minute_bars
+  stale_after_seconds: 180
+  reconnect_initial_seconds: 1
+  reconnect_max_seconds: 60
+  historical_calendar_days: 900
+  minimum_completed_sessions: 450
+  cache_directory: data/cache
+  adjustment: all
+
+universe:
+  tickers:
+    - SPY
+    - QQQ
+    - IWM
+    - EFA
+    - EEM
+    - TLT
+    - GLD
+    - SHY
+  benchmark: SPY
+  asset_class: us_equity
+  require_fractionable: true
+
+schedule:
+  evaluation_time_et: "10:05"
+  catch_up_cutoff_et: "14:30"
+  heartbeat_interval_seconds: 30
+  risk_monitor_interval_seconds: 60
+  reconciliation_interval_seconds: 300
+  order_fill_timeout_seconds: 120
+  maximum_decisions_per_session: 1
+
+execution:
+  paper_only: true
+  paper_order_submission_enabled: false
+  required_enablement_value: I_ACKNOWLEDGE_PAPER_ONLY
+  regular_hours_only: true
+  order_type: market
+  time_in_force: day
+  minimum_order_notional: 25.0
+  required_cash_buffer: 0.02
+  maximum_orders_per_rebalance: 20
+  max_single_order_fraction_of_equity: 0.20
+  cancel_conflicting_open_orders: true
+
+momentum:
+  lookback_sessions: 63
+  volatility_lookback_sessions: 20
+  top_n: 3
+  require_positive_return: true
+
+mean_reversion:
+  zscore_lookback_sessions: 20
+  entry_zscore: -0.5
+  long_term_trend_sessions: 100
+  volatility_lookback_sessions: 20
+  top_n: 3
+
+regime:
+  benchmark: SPY
+  fast_moving_average_sessions: 50
+  slow_moving_average_sessions: 200
+  volatility_lookback_sessions: 20
+  volatility_threshold_lookback_sessions: 252
+  allocations:
+    bull_low_vol:
+      momentum: 0.70
+      mean_reversion: 0.30
+      strategic_cash: 0.00
+    bull_high_vol:
+      momentum: 0.45
+      mean_reversion: 0.35
+      strategic_cash: 0.20
+    bear_low_vol:
+      momentum: 0.25
+      mean_reversion: 0.35
+      strategic_cash: 0.40
+    bear_high_vol:
+      momentum: 0.10
+      mean_reversion: 0.15
+      strategic_cash: 0.75
+
+risk:
+  max_position_weight: 0.25
+  max_gross_exposure: 1.00
+  target_annual_volatility: 0.12
+  covariance_lookback_sessions: 60
+  max_turnover_per_rebalance: 0.35
+  drawdown_soft_limit: 0.10
+  soft_limit_max_gross_exposure: 0.50
+  drawdown_hard_limit: 0.15
+  daily_loss_limit: 0.03
+  required_cash_buffer: 0.02
+
+backtest:
+  start_date: "2016-01-01"
+  end_date: null
+  initial_capital: 100000.0
+  rebalance_frequency: daily
+  transaction_cost_bps: 5.0
+  slippage_bps: 5.0
+  annualization_factor: 252
+  comparison_period_start: "2020-01-01"
+
+reporting:
+  rolling_sharpe_window_sessions: 63
+  risk_free_rate: 0.0
+  save_csv: true
+  save_json: true
+  save_markdown: true
+  save_plots: true
+replay:
+  fixture_path: data/replay/synthetic_session.jsonl
+  speed_multiplier: 100.0
+  deterministic_seed: 20260808

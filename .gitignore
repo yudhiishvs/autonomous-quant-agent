@@ -1,0 +1,36 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+.venv/
+.DS_Store
+
+# Credentials and local environment overrides must never be committed.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.secret
+*.token
+credentials/
+.credentials/
+local_credentials/
+credentials.json
+local_credentials.json
+generated_secrets.json
+*.log
+*.pid
+observer*.tmp
+observer*.partial
+
+# Downloaded data, generated evidence, and mutable operational state are local artifacts.
+audit/
+data/
+runtime/
+outputs/
