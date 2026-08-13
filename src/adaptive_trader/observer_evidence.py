@@ -1,4 +1,4 @@
-"""Read-only Phase 2 observer evidence inspection and readiness reporting.
+"""Read-only observer evidence inspection and readiness reporting.
 
 This module never constructs a broker, never opens the primary database in
 writable mode, and never synthesizes evidence.  Session and dry-run evidence is
@@ -2292,7 +2292,7 @@ def evaluate_observer_readiness(
     evidence_directory: str | Path = "outputs/observer_evidence",
     project_root: str | Path = ".",
 ) -> dict[str, Any]:
-    """Evaluate every formal Phase 2 readiness group without network or writes."""
+    """Evaluate every formal observer-readiness group without network or writes."""
 
     root = Path(project_root).expanduser().resolve()
     database = Path(database_path).expanduser().resolve()
@@ -2354,7 +2354,7 @@ def evaluate_observer_readiness(
             if quality_status == "PASS" and junit_ok
             else ("FAIL" if quality_status == "FAIL" or final_junit.is_file() else "INCOMPLETE")
         ),
-        "a passing, current-source-hash-bound final Phase 2 JUnit report is required",
+        "a passing, current-source-hash-bound final JUnit report is required",
         path=final_junit,
         totals=junit_totals,
     )
@@ -2393,7 +2393,7 @@ def evaluate_observer_readiness(
         "account_and_data",
         "enablement_token_inactive",
         "PASS" if token_inactive else "FAIL",
-        "the paper-order acknowledgement must remain inactive during Phase 2",
+        "the paper-order acknowledgement must remain inactive during observer validation",
     )
 
     database_integrity: str | None = None

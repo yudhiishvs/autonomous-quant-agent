@@ -56,6 +56,15 @@ def test_dashboard_contains_no_order_mutation_path(project_root: Path) -> None:
     assert "PAPER TRADING — SIMULATED CAPITAL AND SIMULATED FILLS" in source
 
 
+def test_dashboard_honors_launcher_configuration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    selected = tmp_path / "read-only-dashboard.yaml"
+    monkeypatch.setenv("APA_DASHBOARD_CONFIG", str(selected))
+
+    assert dashboard._dashboard_config_path() == selected
+
+
 def test_forward_report_generation_is_read_only_and_complete(tmp_path: Path) -> None:
     database = tmp_path / "paper.db"
     with sqlite3.connect(database) as connection:

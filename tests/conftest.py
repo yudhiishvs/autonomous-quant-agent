@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import socket
+import sqlite3
+from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from adaptive_trader.config import AppConfig, load_config
 from adaptive_trader.data import MarketData, generate_synthetic_market_data
+from adaptive_trader.persistence import Database
 
 
 @pytest.fixture(autouse=True)
@@ -21,6 +25,35 @@ def deny_external_network(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(socket, "create_connection", blocked)
     monkeypatch.setattr(socket.socket, "connect", blocked)
+
+
+@pytest.fixture(autouse=True)
+def close_test_database_handles(monkeypatch: pytest.MonkeyPatch):
+    """Close SQLite resources created by a test, including failure paths."""
+
+    databases: list[Database] = []
+    connections: list[sqlite3.Connection] = []
+    original_database_init = Database.__init__
+    original_connect = sqlite3.connect
+
+    def tracked_database_init(self: Database, *args: Any, **kwargs: Any) -> None:
+        original_database_init(self, *args, **kwargs)
+        databases.append(self)
+
+    def tracked_connect(*args: Any, **kwargs: Any) -> sqlite3.Connection:
+        connection = original_connect(*args, **kwargs)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr(Database, "__init__", tracked_database_init)
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
+    yield
+    for database in reversed(databases):
+        with suppress(Exception):
+            database.close()
+    for connection in reversed(connections):
+        with suppress(Exception):
+            connection.close()
 
 
 @pytest.fixture(scope="session")

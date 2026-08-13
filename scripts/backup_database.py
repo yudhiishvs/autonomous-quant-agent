@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import os
 import sqlite3
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -41,9 +42,9 @@ def create_backup(source: Path, destination: Path | None = None) -> Path:
 
     source_uri = f"file:{source.as_posix()}?mode=ro"
     try:
-        with sqlite3.connect(source_uri, uri=True) as source_connection:
+        with closing(sqlite3.connect(source_uri, uri=True)) as source_connection:
             _integrity_check(source_connection, "Source")
-            with sqlite3.connect(destination) as destination_connection:
+            with closing(sqlite3.connect(destination)) as destination_connection:
                 source_connection.backup(destination_connection)
                 _integrity_check(destination_connection, "Backup")
         os.chmod(destination, 0o600)

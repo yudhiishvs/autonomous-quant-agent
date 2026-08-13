@@ -18,7 +18,7 @@ The project succeeds when it produces a reliable, candid, immutable forward reco
 - Alpaca trading clients and streams are hard-coded to `paper=True`.
 - There is no live broker adapter, live trading base URL, or `paper=False` setting.
 - Observer mode is the default and never submits orders.
-- Paper submission requires all independent gates: the paper command, `execution.paper_order_submission_enabled: true`, the exact environment token `I_ACKNOWLEDGE_PAPER_ONLY`, verified paper-account credentials, an open regular-hours session, fresh required data, passing risk and reconciliation checks, and no halt or hard-stop latch.
+- Paper submission requires independent gates including the paper command, `execution.paper_order_submission_enabled: true`, the exact environment token `I_ACKNOWLEDGE_PAPER_ONLY`, verified paper-provider authority, successful feed/asset/history startup preflights, an active paper account, an open regular-hours session before the cutoff, fresh required data, passing risk and reconciliation checks, and no halt or hard-stop latch.
 - Only long, unlevered positions in validated US-listed stocks and ETFs are supported. There is no shorting, margin dependence, options, futures, cryptocurrency, extended-hours execution, or high-frequency decision path.
 - Strategies propose weights but cannot change risk limits or broker behavior. No LLM or free-form instruction can create an executable trade.
 
@@ -67,7 +67,7 @@ flowchart LR
     RP --> DB
 ```
 
-The market-data, broker, clock, and persistence interfaces are dependency-injected. Historical and replay modes use no live network. The live scheduler evaluates at most once per eligible session, using completed prior-session features. Deterministic client order IDs and durable intent records make a restart reconcile before it can retry. See [architecture](docs/architecture.md) and [methodology](docs/methodology.md).
+The market-data, broker, clock, and persistence interfaces are dependency-injected. The supplied synthetic historical configuration and deterministic replay use no live network; a separately configured Alpaca historical run is intentionally networked and read-only. The live scheduler evaluates at most once per eligible session, using completed prior-session features. Deterministic client order IDs and durable intent records make a restart reconcile before it can retry. See [architecture](docs/architecture.md) and [methodology](docs/methodology.md).
 
 ## Requirements and installation
 
@@ -75,7 +75,7 @@ Python 3.11 or newer is required.
 
 ```bash
 git clone <repository-url>
-cd adaptive-portfolio-agent
+cd autonomous-quant-agent
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
@@ -126,15 +126,17 @@ screenshots, or dashboard fields.
 
 ## Configuration
 
-- `configs/observer.yaml` is the dedicated Phase 2 real-market observer configuration. It has its
-  own database/output paths and permanently leaves `execution.paper_order_submission_enabled`
-  false.
+- `configs/observer.yaml` is the dedicated real-market observer configuration. It has its own
+  database/output paths, and the tracked file sets
+  `execution.paper_order_submission_enabled: false`. Observer mode also uses a zero-mutation
+  broker boundary.
 - `configs/paper.yaml` is reserved for a separately approved future simulated-paper phase; it also
   remains disabled in this repository state.
 - `configs/backtest.yaml` controls causal historical research and exact static output generation.
-- `configs/replay.yaml` controls deterministic minute events, fake broker behavior, disconnects, fills, and restart scenarios.
+- `configs/replay.yaml` selects the deterministic seed and optional fixture. Replay fixtures and
+  programmatic scenarios exercise fake-broker fills, disconnects, and restart behavior.
 
-The default universe is `SPY`, `QQQ`, `IWM`, `EFA`, `EEM`, `TLT`, `GLD`, and `SHY`, benchmarked to `SPY`. Configuration validation normalizes symbols to uppercase, rejects duplicates and unsupported assets or feeds, checks coherent limits and regime allocations, and rejects any attempt to disable paper-only operation or introduce a live trading endpoint. Every run stores its final normalized configuration and hash.
+The default universe is `SPY`, `QQQ`, `IWM`, `EFA`, `EEM`, `TLT`, `GLD`, and `SHY`, benchmarked to `SPY`. Configuration validation normalizes symbols to uppercase, rejects duplicate symbols, unsupported asset classes and feeds, checks coherent limits and regime allocations, and rejects any attempt to disable paper-only operation or introduce a live trading endpoint. Live startup separately verifies each configured symbol's eligibility with the broker. Every run stores its final normalized configuration and hash.
 
 For `market_data.provider: alpaca`, historical refreshes use Alpaca's official `StockHistoricalDataClient` with the configured IEX or entitled SIP feed and corporate-action adjustment, then cache normalized daily opens, closes, volumes, feed, and adjustment locally. The application never falls back to another provider or feed. The supplied backtest configuration deliberately uses deterministic synthetic data so the repository can be verified offline; those results are engineering evidence, not market evidence.
 
@@ -170,14 +172,17 @@ make paper-dry-run
 
 Dry-run follows reconciliation, scheduling, signal, risk, and planning paths but never invokes broker mutation.
 
-## Simulated paper orders are not enabled in Phase 2
+## Simulated paper orders are not enabled
 
-This repository currently stops at **REAL-MARKET OBSERVER AND DRY-RUN VALIDATED**. Do not enable
-submission or run `paper-run`. A later transition requires a genuine `observer-readiness` PASS,
-five completed observer sessions, three real-data dry runs, leadership approval, manual evidence
-review, and a new explicit user decision. Until every condition is independently satisfied, the
-paper command and optional Compose profile remain prohibited; the retained operational procedure
-is documented in the [live paper runbook](docs/live_paper_runbook.md).
+This clean repository is **offline-verified only**. It contains the observer and dry-run
+implementation, but it contains no credential-based connectivity record, completed real-market
+observer sessions, or real-data dry-run evidence. Do not describe those activities as completed.
+Do not enable submission or run `paper-run`. A later transition requires a genuine
+`observer-readiness` PASS, five completed observer sessions, three real-data dry runs, independent
+operator and risk approval, manual evidence review, and a new explicit user decision. Until every condition is
+independently satisfied, the paper command and optional Compose profile remain prohibited; the
+retained operational procedure is documented in the
+[live paper runbook](docs/live_paper_runbook.md).
 
 ## Operational CLI
 
@@ -189,7 +194,7 @@ python -m adaptive_trader.cli observer-smoke --config configs/observer.yaml --du
 python -m adaptive_trader.cli observer-readiness --config configs/observer.yaml
 ```
 
-For a safe Phase 2 shutdown, send `SIGINT` or `SIGTERM` once and wait. The
+For a safe observer shutdown, send `SIGINT` or `SIGTERM` once and wait. The
 service stops new cycles, records shutdown, stops streams, performs only final
 read-only broker checks and reconciliation, and closes the database. Stopping an
 observer must cause **zero** broker submissions, cancellations, replacements,
@@ -208,7 +213,13 @@ make backtest
 
 Signals for session `t` use completed data through `t-1`. The suite compares adaptive allocation, a static 50/50 blend, momentum only, mean reversion only, equal-weight buy-and-hold, and SPY buy-and-hold. Transaction costs and slippage reduce simulated wealth; profitability is never a test condition.
 
-Historical outputs include the exact configuration and data summary; full/post-2020 and regime metrics; daily equity, return, drawdown, weights, allocations, regimes, risk actions, and decisions; immutable receipts; a Markdown report; and separately labeled `historical_*.png` charts. The CLI allocates the application run before simulation, so receipt `run_id` and `decision_id` are identical across SQLite, JSONL, and Markdown. Each completed file bundle is also preserved under the output directory's content-addressed `runs/` archive.
+Historical outputs include the exact configuration and data summary; full, out-of-sample,
+development, validation, holdout, annual, and regime metrics; daily equity, return, drawdown,
+weights, allocations, regimes, risk actions, and decisions; immutable receipts; a Markdown report;
+and separately labeled `historical_*.png` charts. The CLI allocates the application run before
+simulation, so receipt `run_id` and `decision_id` are identical across SQLite, JSONL, and
+Markdown. Each completed file bundle is also preserved under the output directory's
+content-addressed `runs/` archive.
 
 ## Deterministic replay
 
@@ -232,7 +243,7 @@ Open [http://127.0.0.1:8501](http://127.0.0.1:8501). The dashboard reads persist
 
 ## Database backup
 
-The default SQLite database for this Phase 2 wrapper is
+The default SQLite database for the observer wrapper is
 `runtime/primary_real_market_observer.db`. The backup utility uses SQLite's
 online backup API and verifies source and destination integrity:
 
@@ -263,10 +274,10 @@ make docker-observe
 The image runs as a non-root user, does not contain `.env`, uses Docker-managed persistent volumes for runtime state, outputs, and the data cache, and mounts configuration read-only. The trader command is observer mode. The dashboard receives no credentials and mounts state read-only. Health checks use the persisted service heartbeat/status.
 
 Do not start the optional paper Compose profile or the `docker-paper` target
-during Phase 2. This README provides no paper-submission command. Any future
+while submission remains unapproved. This README provides no paper-submission command. Any future
 simulated-paper pilot must follow the [live paper runbook](docs/live_paper_runbook.md)
-only after genuine readiness, leadership approval, manual review, and a new
-explicit user decision.
+only after genuine readiness, independent approval, manual review, and a new explicit user
+decision.
 
 Docker state lives in named volumes `apa-runtime`, `apa-outputs`, and `apa-data-cache`. Back up the database inside the service and copy the verified backup out when needed:
 
@@ -279,12 +290,14 @@ docker compose cp trader:/app/runtime/backups ./runtime/docker-backups
 
 Historical runs generate:
 
-- `metrics_full_period.csv`, `metrics_post_2020.csv`, `annual_returns.csv`, and `regime_metrics.csv`;
+- `metrics_full_period.csv`, `metrics_out_of_sample.csv`, `metrics_development.csv`,
+  `metrics_validation.csv`, `metrics_holdout.csv`, `annual_returns.csv`, and
+  `regime_metrics.csv`;
 - daily values, returns, drawdowns, asset weights, strategy allocations, regimes, risk actions, and rebalance decisions;
 - `decision_receipts.jsonl`, `decision_receipts.md`, `run_configuration.yaml`, `data_summary.json`, and `report.md`; and
 - `historical_equity_curves.png`, `historical_drawdowns.png`, `historical_regime_timeline.png`, `historical_strategy_allocations.png`, `historical_asset_weights.png`, `historical_rolling_sharpe.png`, and `historical_risk_interventions.png`.
 
-Forward operation generates `forward_paper_summary.csv`, daily performance, positions, orders, fills, risk actions, decision receipts, `forward_report.md`, and clearly labeled forward-paper equity, drawdown, SPY comparison, exposure, strategy allocation, and risk-intervention charts. Its summary reports turnover, decisions, orders, fill/partial-fill/rejection rates, reference-price paper slippage when defined, risk interventions, hard stops, outage episodes, reconciliation discrepancies, and time in each regime. Undefined ratios remain null with an explanation. Paper reports always identify simulated fills and the actual feed.
+Forward operation generates `forward_paper_summary.csv`, daily performance, positions, orders, fills, risk actions, decision receipts, `forward_report.md`, and clearly labeled forward-paper equity, drawdown, SPY comparison, exposure, strategy allocation, and risk-intervention charts. Its summary reports turnover, decisions, orders, fill/partial-fill/rejection rates, reference-price paper slippage when defined, risk interventions, hard stops, outage episodes, reconciliation discrepancies, and time in each regime. Undefined ratios remain null with an explanation. Paper reports always identify simulated fills and the configured feed; SIP wording additionally requires current-run entitlement evidence.
 
 ## Testing and code quality
 

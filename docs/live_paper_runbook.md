@@ -2,10 +2,10 @@
 
 > **PAPER TRADING — SIMULATED CAPITAL AND SIMULATED FILLS**
 
-This runbook operates an Alpaca paper account only. It never authorizes real-money trading. Phase 2
-commands assume the repository root, an installed environment, and `configs/observer.yaml`.
-`configs/paper.yaml` and all submission operations are reserved for the separately approved future
-procedure in `PHASE3_PAPER_ENABLEMENT_PROMPT.md`.
+This runbook operates an Alpaca paper account only. It never authorizes real-money trading. Observer
+validation commands assume the repository root, an installed environment, and
+`configs/observer.yaml`. `configs/paper.yaml` and all submission operations are reserved for a
+separately reviewed future procedure and a new explicit user decision.
 
 ## 1. Establish the paper account
 
@@ -56,7 +56,7 @@ and repeats this environment check before connectivity.
 For standalone commands, inject the three approved names through a trusted
 local credential manager or private process environment. Keep
 `execution.paper_order_submission_enabled: false` in `configs/observer.yaml`
-throughout Phase 2.
+throughout observer validation.
 
 Review at least:
 
@@ -155,14 +155,14 @@ Inspect the resulting receipt for the history cutoff, schedule and actual timest
 python -m adaptive_trader.cli reconcile --config configs/observer.yaml
 ```
 
-## 8. Phase 2 stopping point
+## 8. Observer-validation stopping point
 
-Do **not** enable simulated paper orders in Phase 2. Continue collecting evidence until
+Do **not** enable simulated paper orders during observer validation. Continue collecting evidence until
 `observer-readiness --config configs/observer.yaml` returns `PASS` from at least five genuine
 observer sessions, three genuine real-data dry runs, a controlled restart, complete governance,
-and zero broker mutations. Leadership approval, user evidence review, and a new explicit decision
+and zero broker mutations. Independent operator and risk approval, user evidence review, and a new explicit decision
 are also required. Only then may a separately reviewed, explicitly authorized paper-order
-enablement procedure be considered. Phase 2 itself never enables submission.
+enablement procedure be considered. Observer validation itself never enables submission.
 
 ## 9. Start the persistent observer and dashboard
 
@@ -184,7 +184,7 @@ The default Docker deployment also uses only the dedicated observer configuratio
 docker compose up trader dashboard
 ```
 
-Do not start the optional `paper` Compose profile during Phase 2.
+Do not start the optional `paper` Compose profile during observer validation.
 
 ## 10. Daily operator checklist
 
@@ -244,7 +244,7 @@ SQLite's online backup API is safe while the service is running:
 The utility defaults to `runtime/primary_real_market_observer.db`, verifies
 source and backup integrity, and creates an owner-only file under
 `runtime/backups`. Copy verified backups to controlled storage and test
-restoration on a copy at least once during the semester. The later readiness
+restoration on a copy at least once during the operating cycle. The later readiness
 gate also requires a hash-bound manifest proving that the separate backup
 contains every accepted observer-session run. Never prune the only forward
 record.
@@ -257,7 +257,7 @@ record.
 4. Run `reconcile`; compare broker orders by deterministic client ID and cumulative fills.
 5. Confirm the session's decision already exists and cannot run twice.
 6. Resume observer only after the state is unambiguous and every observer gate passes. Do not run
-   `paper-run` during Phase 2.
+   `paper-run` while submission remains disabled.
 
 The service must never retry an ambiguous submission merely because the process restarted.
 
@@ -280,7 +280,7 @@ For an unknown broker order, duplicate-order concern, unexpected symbol, positio
 5. determine whether another process or a manual paper-account action occurred; and
 6. follow [incident response](incident_response.md) before resume.
 
-## 18. End a semester run
+## 18. End an observer campaign
 
 1. Halt and stop persistent services gracefully after the desired final session.
 2. Reconcile until local and paper state are explained.

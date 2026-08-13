@@ -1931,7 +1931,7 @@ def evaluate_observer_readiness(
     evidence_directory: str | Path = "outputs/observer_evidence",
     project_root: str | Path = ".",
 ) -> dict[str, Any]:
-    """Compatibility wrapper around the formal, read-only Phase 2 gate.
+    """Compatibility wrapper around the formal, read-only observer gate.
 
     The implementation lives in :mod:`adaptive_trader.observer_evidence` so
     session-audit scripts and the CLI use exactly the same evidence contract.

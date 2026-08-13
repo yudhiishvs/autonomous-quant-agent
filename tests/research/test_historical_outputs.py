@@ -16,7 +16,7 @@ from adaptive_trader.reporting import _historical_feed_disclosure, generate_outp
 def test_canonical_historical_artifacts_and_receipt_identity(fast_suite, tmp_path: Path) -> None:
     artifacts = generate_outputs(fast_suite, output_directory=tmp_path / "historical")
     required = {
-        "metrics_post_2020.csv",
+        "metrics_out_of_sample.csv",
         "annual_returns.csv",
         "regime_metrics.csv",
         "rebalance_decisions.csv",

@@ -7,6 +7,7 @@ import os
 import sqlite3
 import tempfile
 from collections.abc import Iterable
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -163,7 +164,7 @@ def _read_tables(database_path: Path, tables: Iterable[str]) -> dict[str, pd.Dat
         return frames
     uri = f"file:{database_path.resolve()}?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=3.0) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=3.0)) as connection:
             existing = {
                 str(row[0])
                 for row in connection.execute(

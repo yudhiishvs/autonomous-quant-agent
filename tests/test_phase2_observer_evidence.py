@@ -874,7 +874,7 @@ def test_attestation_rejects_raw_account_identifier(tmp_path: Path) -> None:
         "configuration_hash": "observer-config",
         "account_id_hash": account_hash,
         "reviewed_at": datetime(2026, 8, 7, tzinfo=UTC).isoformat(),
-        "reviewed_by": "Quant Club risk lead",
+        "reviewed_by": "independent risk reviewer",
     }
     _write_signed(path, record)
     assert _dedicated_account_attestation(

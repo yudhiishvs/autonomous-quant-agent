@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +60,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return dict(raw) if isinstance(raw, dict) else {}
 
 
+def _dashboard_config_path() -> Path:
+    """Resolve the display-only configuration selected by the launcher."""
+
+    raw = os.environ.get("APA_DASHBOARD_CONFIG")
+    return _resolve_path(raw, "configs/observer.yaml")
+
+
 def _resolve_path(raw: str | None, default: str) -> Path:
     value = Path(raw or default)
     return value if value.is_absolute() else PROJECT_ROOT / value
@@ -93,7 +102,7 @@ def _read_table(database: str, table: str, limit: int = 500) -> pd.DataFrame:
         return pd.DataFrame()
     uri = f"file:{database_path.resolve()}?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=2.0) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=2.0)) as connection:
             names = {
                 row[0]
                 for row in connection.execute(
@@ -120,7 +129,7 @@ def _read_unresolved_incidents(database: str, limit: int = 500) -> pd.DataFrame:
         return pd.DataFrame()
     uri = f"file:{database_path.resolve()}?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=2.0) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=2.0)) as connection:
             exists = connection.execute(
                 "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'system_incidents'"
             ).fetchone()
@@ -145,7 +154,7 @@ def _read_current_run_entitlement(database: str) -> pd.DataFrame:
         return pd.DataFrame()
     uri = f"file:{database_path.resolve()}?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=2.0) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=2.0)) as connection:
             names = {
                 row[0]
                 for row in connection.execute(
@@ -778,7 +787,7 @@ def main() -> None:
     """Render the dashboard without any brokerage mutation capability."""
 
     st.set_page_config(page_title="Adaptive Portfolio Agent", layout="wide")
-    config_path = DEFAULT_CONFIG
+    config_path = _dashboard_config_path()
     config = _load_yaml(config_path)
     database = _database_path(config)
     output = _output_path(config)

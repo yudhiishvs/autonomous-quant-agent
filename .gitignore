@@ -9,6 +9,15 @@ coverage.xml
 htmlcov/
 .venv/
 .DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.tmp
+*.partial
+*.orig
+*~
 
 # Credentials and local environment overrides must never be committed.
 .env
@@ -26,8 +35,11 @@ local_credentials.json
 generated_secrets.json
 *.log
 *.pid
-observer*.tmp
-observer*.partial
+*.db
+*.sqlite
+*.sqlite3
+*.bak
+*.backup
 
 # Downloaded data, generated evidence, and mutable operational state are local artifacts.
 audit/

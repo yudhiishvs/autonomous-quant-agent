@@ -193,7 +193,15 @@ The adaptive-versus-static comparison best isolates the allocation rule. Passive
 
 Metrics include total return, CAGR, annualized volatility, Sharpe, Sortino, maximum drawdown, Calmar, historical 95% value at risk, historical 95% conditional value at risk, positive-day percentage, average gross exposure, average cash allocation, total turnover, estimated transaction costs, rebalances, risk interventions, and hard-stop events. Definitions use 252 annual sessions unless configured otherwise. A zero denominator or insufficient sample returns a null/NaN value plus a metric-specific reason, never infinity or a fabricated `0.0`. Mathematically defined zeros remain zero: a flat observed return path has zero total return and volatility, while its Sharpe and Calmar ratios are undefined because their denominators are zero. Historical CSV files store undefined numeric cells as null with adjacent `<metric>_reason` columns, and Markdown renders them as `n/a` with the same explanations.
 
-Historical metrics are reported for the full period, post-2020 comparison period, calendar years, and regimes. Forward paper metrics are computed from immutable daily account snapshots only after removing identified external cash flows. Operational paper metrics include account turnover, decisions, submitted orders, fully and partially filled orders, rejections, fill/partial-fill/rejection rates, adverse paper slippage against an order-intent reference price when available, risk interventions, hard stops, contiguous data-outage episodes, reconciliation discrepancies, and time in each regime. A rate with no submitted-order denominator and slippage without a linked reference price remain null with a reason.
+Historical metrics are reported for the full period, configured out-of-sample period, frozen
+development/validation/holdout windows when present, calendar years, and regimes. Forward paper
+metrics are computed from immutable daily account snapshots only after removing identified
+external cash flows. Operational paper metrics include account turnover, decisions, submitted
+orders, fully and partially filled orders, rejections, fill/partial-fill/rejection rates, adverse
+paper slippage against an order-intent reference price when available, risk interventions, hard
+stops, contiguous data-outage episodes, reconciliation discrepancies, and time in each regime. A
+rate with no submitted-order denominator and slippage without a linked reference price remain null
+with a reason.
 
 For consecutive daily snapshots with net external flow `CF_t` during the interval:
 
