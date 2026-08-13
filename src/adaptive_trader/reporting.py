@@ -204,7 +204,6 @@ def generate_outputs(
     tables = {
         "metrics_full_period.csv": full_metrics,
         "metrics_out_of_sample.csv": oos_metrics,
-        "metrics_post_2020.csv": oos_metrics,
         "annual_returns.csv": _annual_returns_table(runs),
         "regime_metrics.csv": _regime_metrics_table(
             runs,
@@ -996,7 +995,7 @@ def _render_report(
             "- Open-boundary historical execution approximates the 10:05 ET forward-paper "
             "decision time; it is not a 10:05 fill simulation.",
             "",
-            f"## {15 if has_frozen_windows else 14}. Proposed semester-long extensions",
+            f"## {15 if has_frozen_windows else 14}. Proposed research extensions",
             "",
             "Priorities include walk-forward parameter selection, point-in-time universes, "
             "bootstrap uncertainty estimates, robust covariance estimators, cost and capacity "

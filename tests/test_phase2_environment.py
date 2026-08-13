@@ -1,4 +1,4 @@
-"""Phase 2 local-environment checks must fail closed without exposing credentials."""
+"""Observer local-environment checks must fail closed without exposing credentials."""
 
 from __future__ import annotations
 
@@ -87,6 +87,11 @@ def test_sensitive_local_artifact_patterns_are_gitignored(project_root: Path) ->
         ".env",
         "runtime/observer.db",
         "runtime/observer.log",
+        "local-observer.db",
+        "local-observer.sqlite",
+        "local-observer.sqlite3",
+        "local-observer.bak",
+        "local-observer.backup",
         "credentials.json",
         "local_credentials.json",
         "generated_secrets.json",
@@ -94,7 +99,13 @@ def test_sensitive_local_artifact_patterns_are_gitignored(project_root: Path) ->
         ".credentials/paper.secret",
         "local_credentials/paper.txt",
         "tmp/observer.tmp",
+        "tmp/arbitrary.partial",
+        "merge-conflict.orig",
+        "Thumbs.db",
+        "Desktop.ini",
         "observer-session.partial",
+        ".idea/workspace.xml",
+        ".vscode/settings.json",
         "__pycache__/module.pyc",
     )
     for candidate in candidates:
@@ -104,6 +115,37 @@ def test_sensitive_local_artifact_patterns_are_gitignored(project_root: Path) ->
             check=False,
         )
         assert result.returncode == 0, f"sensitive local artifact is not ignored: {candidate}"
+
+
+def test_docker_context_excludes_credentials_and_mutable_state(project_root: Path) -> None:
+    rules = {
+        line.strip()
+        for line in (project_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+
+    required_rules = {
+        ".git",
+        ".env*",
+        ".venv",
+        "*.pem",
+        "*.key",
+        "*.secret",
+        "*.token",
+        "credentials",
+        ".credentials",
+        "local_credentials",
+        "runtime",
+        "outputs",
+        "data",
+        "*.db",
+        "*.sqlite",
+        "*.sqlite3",
+        "*.log",
+        "*.bak",
+        "*.backup",
+    }
+    assert required_rules <= rules
 
 
 def test_quality_generator_uses_active_virtual_environment_tools(project_root: Path) -> None:

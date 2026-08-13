@@ -59,7 +59,7 @@ REPORT_SECTIONS = (
     "## 11. Did adaptive allocation help?",
     "## 12. Risk-intervention summary",
     "## 13. Limitations",
-    "## 14. Proposed semester-long extensions",
+    "## 14. Proposed research extensions",
     "## 15. Educational-use statement",
 )
 

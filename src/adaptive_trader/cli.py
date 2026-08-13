@@ -20,7 +20,7 @@ import sys
 import threading
 import time as time_module
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -756,7 +756,7 @@ def _run_doctor(config_path: Path) -> int:
     try:
         if context.database_path.is_file():
             uri = f"file:{context.database_path.resolve()}?mode=ro"
-            with sqlite3.connect(uri, uri=True, timeout=2.0) as connection:
+            with closing(sqlite3.connect(uri, uri=True, timeout=2.0)) as connection:
                 connection.row_factory = sqlite3.Row
                 connection.execute("SELECT 1").fetchone()
                 tables = _sqlite_tables(connection)
@@ -1283,7 +1283,7 @@ def _observer_smoke_database_summary(
 
     try:
         uri = f"{context.database_path.resolve().as_uri()}?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as connection:
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA query_only=ON")
             integrity = connection.execute("PRAGMA integrity_check").fetchone()
@@ -1703,7 +1703,7 @@ def _run_observer_readiness(config_path: Path) -> int:
     markdown_path = context.project_root / "outputs" / "observer_readiness_report.md"
     write_evidence_json(report, json_path)
     markdown_path.write_text(
-        evidence_markdown(report, title="Phase 2 Observer Readiness Report"),
+        evidence_markdown(report, title="Observer Readiness Report"),
         encoding="utf-8",
     )
     typer.echo(
@@ -2132,7 +2132,7 @@ def _read_status(context: CommandContext) -> tuple[dict[str, Any], bool]:
             "Heartbeat": "unavailable",
         }, False
     uri = f"{context.database_path.resolve().as_uri()}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as connection:
+    with closing(sqlite3.connect(uri, uri=True)) as connection:
         connection.row_factory = sqlite3.Row
         tables = _sqlite_tables(connection)
         configured_feed = str(context.config.market_data.feed).upper()
@@ -2713,7 +2713,7 @@ def observer_smoke(
 
 @app.command(
     "observer-readiness",
-    help="Evaluate the formal read-only Phase 2 evidence gate.",
+    help="Evaluate the formal read-only observer evidence gate.",
 )
 def observer_readiness(
     config: Annotated[Path, typer.Option("--config", help="Observer YAML path.")],

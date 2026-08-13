@@ -128,7 +128,7 @@ All CSV files are UTF-8 with headers and deterministic row ordering.
 
 | File | Columns/content |
 | --- | --- |
-| `metrics_full_period.csv`, `metrics_post_2020.csv` | `portfolio`; `total_return`, `cagr`, `annualized_volatility`, `sharpe_ratio`, `sortino_ratio`, `maximum_drawdown`, `calmar_ratio`, `var_95`, `cvar_95`, `positive_day_percentage`, `average_gross_exposure`, `average_cash_allocation`, `total_turnover`, `estimated_transaction_costs`, `number_of_rebalances`, `number_of_risk_interventions`, `number_of_hard_stop_events`; and one `<metric>_reason` column per metric. |
+| `metrics_full_period.csv`, `metrics_out_of_sample.csv`, `metrics_development.csv`, `metrics_validation.csv`, `metrics_holdout.csv` | `portfolio`; `total_return`, `cagr`, `annualized_volatility`, `sharpe_ratio`, `sortino_ratio`, `maximum_drawdown`, `calmar_ratio`, `var_95`, `cvar_95`, `positive_day_percentage`, `average_gross_exposure`, `average_cash_allocation`, `total_turnover`, `estimated_transaction_costs`, `number_of_rebalances`, `number_of_risk_interventions`, `number_of_hard_stop_events`; and one `<metric>_reason` column per metric. The development/validation/holdout files are emitted when all frozen-window fields are configured. |
 | `annual_returns.csv` | `year`, `portfolio`, `annual_return`, `observations`. |
 | `regime_metrics.csv` | `portfolio`, `regime`, `observations`, the same metric and reason columns as above. |
 | `daily_portfolio_values.csv` | `date`, `portfolio`, `equity` (USD normalized to configured starting capital). |

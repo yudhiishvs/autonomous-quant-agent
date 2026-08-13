@@ -65,7 +65,7 @@ Compare symbol, signed quantity, average price where available, and market value
 
 ## Negative position
 
-A negative paper position violates the long-only invariant and is critical. Halt immediately, block all new orders, inspect partial fills and concurrent/manual orders, verify broker truth, and escalate to project leadership. Do not create an automatic buy merely to hide the state. Any approved simulated correction must be explicit, linked, and reconciled.
+A negative paper position violates the long-only invariant and is critical. Halt immediately, block all new orders, inspect partial fills and concurrent/manual orders, verify broker truth, and escalate to the designated operator and independent risk reviewer. Do not create an automatic buy merely to hide the state. Any approved simulated correction must be explicit, linked, and reconciled.
 
 ## Excessive paper loss
 

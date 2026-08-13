@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run local quality gates and write current-source-bound Phase 2 evidence."""
+"""Run local quality gates and write current-source-bound observer evidence."""
 
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def main() -> int:
     }
     output = (root / args.output).resolve()
     write_evidence_json(report, output)
-    print(f"Phase 2 final quality status: {report['status']}")
+    print(f"Observer validation quality status: {report['status']}")
     print(f"Quality evidence: {output}")
     return 0 if passed else 1
 

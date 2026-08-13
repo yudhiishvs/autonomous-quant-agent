@@ -76,6 +76,12 @@ def test_backtest_config_freezes_ordered_research_windows(project_root: Path) ->
     assert config.backtest.validation_period_end == "2024-12-31"
     assert config.backtest.holdout_period_start == "2025-01-01"
     assert config.backtest.out_of_sample_start == config.backtest.holdout_period_start
+    assert config.backtest.comparison_period_start == "2020-01-01"
+    assert config.to_canonical_dict()["backtest"]["out_of_sample_start"] == "2025-01-01"
+    assert (
+        AppConfig.from_dict(config.to_canonical_dict()).backtest.comparison_period_start
+        == "2020-01-01"
+    )
 
 
 def test_partial_or_overlapping_research_windows_are_rejected() -> None:

@@ -365,7 +365,6 @@ class BacktestConfig:
             self.out_of_sample_start = self.comparison_period_start
         else:
             _iso_date("backtest.out_of_sample_start", self.out_of_sample_start)
-            self.comparison_period_start = self.out_of_sample_start
         window_names = (
             "development_period_start",
             "development_period_end",
@@ -899,7 +898,6 @@ class AppConfig:
         backtest = asdict(self.backtest)
         backtest["start_date"] = self.data.start_date
         backtest["end_date"] = self.data.end_date
-        backtest.pop("out_of_sample_start", None)
         momentum = _rename_keys(
             asdict(self.momentum),
             {

@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 from collections.abc import Mapping, Sequence
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -146,7 +147,7 @@ def _existing_run_ids(path: Path, configuration_hash: str) -> set[str]:
         return set()
     uri = f"{path.resolve().as_uri()}?mode=ro"
     try:
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+        with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as connection:
             return {
                 str(row[0])
                 for row in connection.execute(
@@ -195,7 +196,7 @@ def _database_evidence(
     if not path.is_file():
         return result
     uri = f"{path.resolve().as_uri()}?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=5.0) as connection:
+    with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as connection:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only=ON")
         integrity = connection.execute("PRAGMA integrity_check").fetchone()
