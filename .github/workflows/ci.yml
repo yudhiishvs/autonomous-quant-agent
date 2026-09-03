@@ -16,11 +16,34 @@ jobs:
   offline-quality:
     name: Offline quality gates
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:15@sha256:f30e3de0ac9cc938dac627ef2231099867c694b5f949fadb924c8c977428c399
+        env:
+          POSTGRES_USER: collector_test
+          POSTGRES_PASSWORD: collector_test
+          POSTGRES_DB: collector_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U collector_test -d collector_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       APA_ALPACA_PAPER_API_KEY: ""
       APA_ALPACA_PAPER_SECRET_KEY: ""
+      APA_ALPACA_DATA_API_KEY: ""
+      APA_ALPACA_DATA_SECRET_KEY: ""
       APA_ENABLE_PAPER_ORDERS: "NO"
+      APA_MARKET_DATA_DATABASE_URL: >-
+        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
+      APA_MARKET_DATA_MIGRATION_DATABASE_URL: >-
+        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
+      APA_TEST_POSTGRES_URL: >-
+        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
+      APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE: "YES"
 
     steps:
       - name: Check out repository
@@ -45,6 +68,8 @@ jobs:
         run: |
           test -z "${APA_ALPACA_PAPER_API_KEY}"
           test -z "${APA_ALPACA_PAPER_SECRET_KEY}"
+          test -z "${APA_ALPACA_DATA_API_KEY}"
+          test -z "${APA_ALPACA_DATA_SECRET_KEY}"
           test "${APA_ENABLE_PAPER_ORDERS}" = "NO"
 
       - name: Install locked dependencies
@@ -58,6 +83,9 @@ jobs:
 
       - name: Run type checking
         run: uv run --no-sync mypy src
+
+      - name: Validate PostgreSQL migrations
+        run: uv run --no-sync alembic upgrade head
 
       - name: Run offline test suite
         run: uv run --no-sync pytest -q
@@ -74,3 +102,23 @@ jobs:
 
       - name: Validate Docker Compose configuration
         run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
+
+      - name: Build locked application image
+        run: docker build --target application --tag adaptive-portfolio-agent:ci .
+
+      - name: Build locked market-data image
+        run: docker build --target market-data --tag adaptive-market-data:ci .
+
+      - name: Verify collector image entry point
+        run: >-
+          docker run --rm --network none
+          adaptive-market-data:ci python -m adaptive_trader.collection --help
+
+      - name: Verify collector import boundary
+        run: >-
+          docker run --rm --network none --entrypoint python
+          adaptive-market-data:ci -c
+          'import importlib.util, sys; import adaptive_trader.collection.cli;
+          assert importlib.util.find_spec("alpaca") is None;
+          assert importlib.util.find_spec("adaptive_trader.cli") is None;
+          assert not any(name == "alpaca" or name.startswith("alpaca.") for name in sys.modules)'
