@@ -9,9 +9,42 @@ x-trader-volumes: &trader-volumes
   - apa-data-cache:/app/data/cache
   - ./configs:/app/configs:ro
 
+x-market-data-environment: &market-data-environment
+  APA_ALPACA_DATA_API_KEY: ${APA_ALPACA_DATA_API_KEY:-}
+  APA_ALPACA_DATA_SECRET_KEY: ${APA_ALPACA_DATA_SECRET_KEY:-}
+  APA_MARKET_DATA_DATABASE_URL: ${APA_MARKET_DATA_DATABASE_URL:-}
+  APA_MARKET_DATA_HISTORY_START: ${APA_MARKET_DATA_HISTORY_START:-}
+
 services:
+  market-data-collector:
+    profiles: ["market-data"]
+    build:
+      context: .
+      target: market-data
+    image: adaptive-market-data:local
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    stop_grace_period: 60s
+    restart: unless-stopped
+    command: ["python", "-m", "adaptive_trader.collection", "run"]
+    environment: *market-data-environment
+    healthcheck:
+      test: ["CMD", "python", "-m", "adaptive_trader.collection", "ready"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
   trader:
-    build: .
+    build:
+      context: .
+      target: application
     image: adaptive-portfolio-agent:local
     init: true
     read_only: true

@@ -16,12 +16,38 @@ from adaptive_trader.persistence import Database
 
 
 @pytest.fixture(autouse=True)
-def deny_external_network(monkeypatch: pytest.MonkeyPatch) -> None:
+def deny_external_network(
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> None:
     """Make every test fail immediately if production code attempts a network call."""
+
+    original_create_connection = socket.create_connection
+    original_socket_connect = socket.socket.connect
 
     def blocked(*args: object, **kwargs: object) -> None:
         del args, kwargs
         raise AssertionError("External network access is prohibited in the offline test suite")
+
+    if request.node.get_closest_marker("postgres") is not None:
+
+        def local_create_connection(address: tuple[str, int], *args: Any, **kwargs: Any):
+            if address[0] not in {"127.0.0.1", "::1", "localhost"}:
+                blocked(address, *args, **kwargs)
+            return original_create_connection(address, *args, **kwargs)
+
+        def local_socket_connect(instance: socket.socket, address: Any) -> None:
+            if not (
+                isinstance(address, tuple)
+                and address
+                and address[0] in {"127.0.0.1", "::1", "localhost"}
+            ):
+                blocked(instance, address)
+            original_socket_connect(instance, address)
+
+        monkeypatch.setattr(socket, "create_connection", local_create_connection)
+        monkeypatch.setattr(socket.socket, "connect", local_socket_connect)
+        return
 
     monkeypatch.setattr(socket, "create_connection", blocked)
     monkeypatch.setattr(socket.socket, "connect", blocked)
