@@ -14,7 +14,7 @@ either current system.
 | Legacy observer and guarded Alpaca paper adapter | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` | Code and safety tests exist; tracked submission is disabled and no credential-based run is recorded |
 | Data-only collector contracts, orchestration, and PostgreSQL schema | `IMPLEMENTED_AND_VERIFIED` | Fake-source tests, PostgreSQL integration tests, and migration checks |
 | Collector operation against Alpaca and a hosted database | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` | Transport exists; no credential-based or hosted-runtime evidence is recorded |
-| Generic signed platform path | `NOT_IMPLEMENTED` | Requirements and execution plan only |
+| Generic signed platform path | `PARTIALLY_IMPLEMENTED` | Canonical serialization and hashing primitives plus known-answer tests |
 | New model training and replacement backtester | `INTENTIONALLY_DEFERRED` | Excluded from the current platform-backbone work |
 
 ## Current system context
@@ -90,6 +90,13 @@ The collector owns eight PostgreSQL tables: `collection_universes`,
 `ingestion_runs`, `collector_events`, and `data_gaps`. Explicit gap production is
 `NOT_IMPLEMENTED`; the existing table reserves the lifecycle while checkpoints and overlap
 reconciliation are the active recovery mechanism.
+
+### Generic platform foundation
+
+| Module | Responsibility and owned state | Public interface | Allowed dependencies | Forbidden direction / failure behavior |
+| --- | --- | --- | --- | --- |
+| `platform.canonical` | Converts a closed and explicitly bounded set of scalar/container values into deterministic UTF-8 JSON bytes; owns no mutable state | `CanonicalizationError` and `canonical_json_bytes()` | Standard-library JSON, UTC datetime, Decimal, and Enum types | No provider, persistence, environment, filesystem, or secret dependency; unsupported, nonfinite, naive-time, unordered, cyclic, subclassed-wrapper, oversized, or invalid-UTF-8 input fails with structural context and without rendering values |
+| `platform.hashing` | Derives content hashes from canonical bytes; owns no mutable state | `sha256_hex()` | `platform.canonical` and standard-library SHA-256 | No alternate serializer or implicit coercion; canonicalization failure prevents a hash result |
 
 ## Current data flows
 
@@ -221,9 +228,10 @@ receive credentials, broker objects, DDL authority, or dynamic code-loading inpu
 execution worker is the only target process allowed paper credentials; tracked submission
 remains disabled and authorization defaults deny.
 
-The target package, services, tables, signed contracts, scheduler, jobs, API, artifact store,
-and deterministic vertical slice are currently `NOT_IMPLEMENTED`. Their ordered work and
-acceptance evidence live in `docs/execution-plans/platform-core.md`.
+Canonical serialization and hashing are the first implemented target-package boundary. The
+remaining platform tree, services, tables, signed contracts, scheduler, jobs, API, artifact store,
+and deterministic vertical slice are `NOT_IMPLEMENTED`. Their ordered work and acceptance evidence
+live in `docs/execution-plans/platform-core.md`.
 
 ## Critical invariants
 
