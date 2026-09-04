@@ -6,8 +6,18 @@ import ast
 from pathlib import Path
 
 CONFIG_MODULE = Path("src/adaptive_trader/platform/config.py")
+CLI_MODULE = Path("src/adaptive_trader/platform/cli.py")
 UNIVERSE_MODULE = Path("src/adaptive_trader/platform/universe.py")
 ALLOWED_IMPORTS = {
+    CLI_MODULE: {
+        "__future__",
+        "adaptive_trader.platform.config",
+        "json",
+        "os",
+        "pathlib",
+        "typer",
+        "typing",
+    },
     CONFIG_MODULE: {
         "__future__",
         "adaptive_trader.platform.canonical",
@@ -15,6 +25,7 @@ ALLOWED_IMPORTS = {
         "adaptive_trader.platform.universe",
         "collections.abc",
         "decimal",
+        "enum",
         "hmac",
         "os",
         "pathlib",

@@ -8,7 +8,8 @@ import re
 import stat
 from collections.abc import Iterator
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
+from enum import StrEnum
+from pathlib import Path, PurePosixPath
 from typing import Literal, Self, cast
 
 import yaml
@@ -45,6 +46,10 @@ _TIME_PATTERN = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$", flag
 _DECIMAL_PATTERN = re.compile(r"^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$", flags=re.ASCII)
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$", flags=re.ASCII)
 _YAML_INTEGER_PATTERN = re.compile(r"^(?:0|[1-9][0-9]*)$", flags=re.ASCII)
+_RELATIVE_CONFIG_PATH_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$",
+    flags=re.ASCII,
+)
 
 
 class ExperimentConfigError(ValueError):
@@ -428,6 +433,333 @@ class ExperimentDefinition(UniverseSpec):
         return sha256_hex(self.hash_payload())
 
 
+class ExecutionMode(StrEnum):
+    """Closed runtime modes supported by the platform configuration boundary."""
+
+    OFFLINE = "offline"
+    SHADOW = "shadow"
+    PAPER = "paper"
+
+
+class MarketDataAdapter(StrEnum):
+    """Runtime source of canonical market-data observations."""
+
+    FIXTURE = "fixture"
+    ALPACA = "alpaca"
+
+
+class BrokerAdapter(StrEnum):
+    """Runtime execution adapter selected by a platform profile."""
+
+    FAKE = "fake"
+    NONE = "none"
+    ALPACA_PAPER = "alpaca_paper"
+
+
+def _validate_enum_member(value: object, *, enum_type: type[StrEnum], field_name: str) -> StrEnum:
+    if type(value) is enum_type:
+        return value
+    if type(value) is not str:
+        raise ValueError(f"{field_name} must be an exact string")
+    try:
+        return enum_type(value)
+    except ValueError as error:
+        raise ValueError(f"{field_name} is not supported") from error
+
+
+def _validate_relative_config_path(value: object, *, field_name: str) -> str:
+    if type(value) is not str or _RELATIVE_CONFIG_PATH_PATTERN.fullmatch(value) is None:
+        raise ValueError(f"{field_name} must be a bounded relative POSIX path")
+    path = PurePosixPath(value)
+    if (
+        path.is_absolute()
+        or path.as_posix() != value
+        or any(part in {"", ".", ".."} for part in path.parts)
+    ):
+        raise ValueError(f"{field_name} contains a prohibited component")
+    return value
+
+
+class SignalProviderSpec(_StrictFrozenModel):
+    """Declarative signal-provider identity without import or execution authority."""
+
+    id: str
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def validate_id(cls, value: object) -> str:
+        return _validate_identifier(value, field_name="signal provider id")
+
+
+class ExecutionSpec(_StrictFrozenModel):
+    """Static broker selection and submission policy from one profile."""
+
+    broker: BrokerAdapter
+    submission_enabled: bool
+    paper_only: Literal[True]
+
+    @field_validator("broker", mode="before")
+    @classmethod
+    def validate_broker(cls, value: object) -> BrokerAdapter:
+        return cast(
+            BrokerAdapter,
+            _validate_enum_member(value, enum_type=BrokerAdapter, field_name="broker"),
+        )
+
+    @field_validator("paper_only", mode="before")
+    @classmethod
+    def validate_paper_only(cls, value: object) -> bool:
+        if type(value) is not bool or value is not True:
+            raise ValueError("paper_only must be boolean true")
+        return value
+
+    @model_validator(mode="after")
+    def validate_submission_authority(self) -> Self:
+        if self.submission_enabled and self.broker is not BrokerAdapter.ALPACA_PAPER:
+            raise ValueError("submission can be enabled only for the Alpaca paper adapter")
+        return self
+
+
+class StoragePolicySpec(_StrictFrozenModel):
+    """Declarative storage sources; this model never reads a setting or secret."""
+
+    database_url_source: Literal["AQA_DATABASE_URL_FILE"]
+    database_required: bool
+    offline_fallback: Literal["sqlite", "none"]
+    artifact_root_source: Literal["AQA_ARTIFACT_ROOT"]
+
+
+class PlatformProfile(_StrictFrozenModel):
+    """Strict, content-addressed platform profile loaded before runtime settings."""
+
+    schema_version: Literal[1]
+    profile_id: str
+    mode: ExecutionMode
+    experiment_path: str
+    expected_experiment_hash: str
+    market_data_adapter: MarketDataAdapter
+    signal_provider: SignalProviderSpec
+    execution: ExecutionSpec
+    storage: StoragePolicySpec
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def validate_schema_version(cls, value: object) -> int:
+        if type(value) is not int or value != 1:
+            raise ValueError("schema_version must be integer 1")
+        return value
+
+    @field_validator("profile_id", mode="before")
+    @classmethod
+    def validate_profile_id(cls, value: object) -> str:
+        return _validate_identifier(value, field_name="profile_id")
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def validate_mode(cls, value: object) -> ExecutionMode:
+        return cast(
+            ExecutionMode,
+            _validate_enum_member(value, enum_type=ExecutionMode, field_name="mode"),
+        )
+
+    @field_validator("experiment_path", mode="before")
+    @classmethod
+    def validate_experiment_path(cls, value: object) -> str:
+        return _validate_relative_config_path(value, field_name="experiment_path")
+
+    @field_validator("expected_experiment_hash", mode="before")
+    @classmethod
+    def validate_expected_experiment_hash(cls, value: object) -> str:
+        return _validate_expected_hash(value)
+
+    @field_validator("market_data_adapter", mode="before")
+    @classmethod
+    def validate_market_data_adapter(cls, value: object) -> MarketDataAdapter:
+        return cast(
+            MarketDataAdapter,
+            _validate_enum_member(
+                value,
+                enum_type=MarketDataAdapter,
+                field_name="market_data_adapter",
+            ),
+        )
+
+    @model_validator(mode="after")
+    def validate_mode_contract(self) -> Self:
+        reserved_profile_ids = {mode.value for mode in ExecutionMode}
+        if self.profile_id in reserved_profile_ids and self.profile_id != self.mode.value:
+            raise ValueError("reserved profile_id does not match the selected mode")
+
+        expected = {
+            ExecutionMode.OFFLINE: (
+                MarketDataAdapter.FIXTURE,
+                BrokerAdapter.FAKE,
+                False,
+                "sqlite",
+            ),
+            ExecutionMode.SHADOW: (
+                MarketDataAdapter.ALPACA,
+                BrokerAdapter.NONE,
+                True,
+                "none",
+            ),
+            ExecutionMode.PAPER: (
+                MarketDataAdapter.ALPACA,
+                BrokerAdapter.ALPACA_PAPER,
+                True,
+                "none",
+            ),
+        }
+        data_adapter, broker, database_required, fallback = expected[self.mode]
+        if self.market_data_adapter is not data_adapter:
+            raise ValueError("market-data adapter does not match the selected mode")
+        if (
+            self.mode is not ExecutionMode.OFFLINE
+            and self.signal_provider.id == "deterministic_fixture"
+        ):
+            raise ValueError("the deterministic fixture signal provider is offline-only")
+        if self.execution.broker is not broker:
+            raise ValueError("broker adapter does not match the selected mode")
+        if self.mode is not ExecutionMode.PAPER and self.execution.submission_enabled:
+            raise ValueError("submission must be disabled outside paper mode")
+        if (
+            self.storage.database_required is not database_required
+            or self.storage.offline_fallback != fallback
+        ):
+            raise ValueError("storage policy does not match the selected mode")
+        return self
+
+    def hash_payload(self) -> dict[str, object]:
+        """Return every semantic profile field in a stable canonical preimage."""
+
+        return {
+            "execution": {
+                "broker": self.execution.broker,
+                "paper_only": self.execution.paper_only,
+                "submission_enabled": self.execution.submission_enabled,
+            },
+            "expected_experiment_hash": self.expected_experiment_hash,
+            "experiment_path": self.experiment_path,
+            "market_data_adapter": self.market_data_adapter,
+            "mode": self.mode,
+            "profile_id": self.profile_id,
+            "schema_version": self.schema_version,
+            "signal_provider": {"id": self.signal_provider.id},
+            "storage": {
+                "artifact_root_source": self.storage.artifact_root_source,
+                "database_required": self.storage.database_required,
+                "database_url_source": self.storage.database_url_source,
+                "offline_fallback": self.storage.offline_fallback,
+            },
+        }
+
+    @property
+    def content_hash(self) -> str:
+        """Lowercase SHA-256 of the complete normalized profile."""
+
+        return sha256_hex(self.hash_payload())
+
+
+class ExperimentSpec(_StrictFrozenModel):
+    """Verified experiment definition composed with runtime decision identity."""
+
+    schema_version: Literal[1]
+    definition: ExperimentDefinition
+    definition_hash: str
+    signal_provider: SignalProviderSpec
+    execution_mode: ExecutionMode
+
+    @field_validator("schema_version", mode="before")
+    @classmethod
+    def validate_schema_version(cls, value: object) -> int:
+        if type(value) is not int or value != 1:
+            raise ValueError("schema_version must be integer 1")
+        return value
+
+    @field_validator("definition_hash", mode="before")
+    @classmethod
+    def validate_definition_hash(cls, value: object) -> str:
+        return _validate_expected_hash(value)
+
+    @model_validator(mode="after")
+    def validate_composition(self) -> Self:
+        if not hmac.compare_digest(self.definition.content_hash, self.definition_hash):
+            raise ValueError("definition hash does not match the composed definition")
+        if (
+            self.execution_mode is not ExecutionMode.OFFLINE
+            and self.signal_provider.id == "deterministic_fixture"
+        ):
+            raise ValueError("the deterministic fixture signal provider is offline-only")
+        if self.execution_mode is not ExecutionMode.OFFLINE and (
+            self.definition.market_data.provider != "alpaca"
+            or self.definition.market_data.feed != "iex"
+            or self.definition.market_data.adjustment != "raw"
+        ):
+            raise ValueError("external execution mode conflicts with the experiment definition")
+        return self
+
+    @property
+    def experiment_id(self) -> str:
+        return self.definition.experiment_id
+
+    @property
+    def experiment_version(self) -> int:
+        return self.definition.experiment_version
+
+    def hash_payload(self) -> dict[str, object]:
+        """Return the identity required to reproduce one decision experiment."""
+
+        return {
+            "definition_hash": self.definition_hash,
+            "execution_mode": self.execution_mode,
+            "schema_version": self.schema_version,
+            "signal_provider": {"id": self.signal_provider.id},
+        }
+
+    @property
+    def content_hash(self) -> str:
+        return sha256_hex(self.hash_payload())
+
+
+class PlatformConfig(_StrictFrozenModel):
+    """Fully composed static configuration with no loaded runtime secrets."""
+
+    profile: PlatformProfile
+    experiment: ExperimentSpec
+
+    @model_validator(mode="after")
+    def validate_alignment(self) -> Self:
+        if not hmac.compare_digest(
+            self.profile.expected_experiment_hash,
+            self.experiment.definition_hash,
+        ):
+            raise ValueError("profile and experiment hashes do not match")
+        if (
+            self.profile.mode is not self.experiment.execution_mode
+            or self.profile.signal_provider != self.experiment.signal_provider
+        ):
+            raise ValueError("profile and composed experiment identities do not match")
+        if self.profile.market_data_adapter is MarketDataAdapter.ALPACA and (
+            self.experiment.definition.market_data.provider != "alpaca"
+            or self.experiment.definition.market_data.feed != "iex"
+            or self.experiment.definition.market_data.adjustment != "raw"
+        ):
+            raise ValueError("external adapter identity conflicts with the experiment definition")
+        return self
+
+    def hash_payload(self) -> dict[str, object]:
+        """Bind the selected profile and the complete composed experiment identity."""
+
+        return {
+            "experiment_hash": self.experiment.content_hash,
+            "profile_hash": self.profile.content_hash,
+        }
+
+    @property
+    def content_hash(self) -> str:
+        return sha256_hex(self.hash_payload())
+
+
 class _UniqueKeySafeLoader(yaml.SafeLoader):
     pass
 
@@ -500,6 +832,38 @@ def _safe_relative_parts(path: Path) -> tuple[str, ...]:
     return parts
 
 
+def _open_nonsymlink_directory(path: Path) -> int:
+    if path.anchor != os.sep or path.as_posix() != os.fspath(path):
+        raise OSError("directory root is not a canonical POSIX path")
+    if any(component in {"", ".", ".."} for component in path.parts[1:]):
+        raise OSError("directory root contains a prohibited component")
+
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        resolved_before = path.resolve(strict=True)
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        raise OSError("directory root could not be resolved") from error
+    if resolved_before != path:
+        raise OSError("directory root contains a symbolic link")
+
+    directory_fd = os.open(path, flags)
+    try:
+        directory_stat = os.fstat(directory_fd)
+        path_stat = os.stat(path, follow_symlinks=False)
+        resolved_after = path.resolve(strict=True)
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or resolved_after != path
+            or (directory_stat.st_dev, directory_stat.st_ino)
+            != (path_stat.st_dev, path_stat.st_ino)
+        ):
+            raise OSError("directory root changed during validation")
+        return directory_fd
+    except (OSError, RuntimeError, TypeError, ValueError):
+        os.close(directory_fd)
+        raise
+
+
 def _read_config_file(path: Path, *, config_root: Path) -> bytes:
     parts = _safe_relative_parts(path)
     if not isinstance(config_root, Path):
@@ -515,10 +879,7 @@ def _read_config_file(path: Path, *, config_root: Path) -> bytes:
     read_failed = False
     payload = b""
     try:
-        root_fd = os.open(
-            safe_root,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
-        )
+        root_fd = _open_nonsymlink_directory(safe_root)
         current_fd = root_fd
         for component in parts[:-1]:
             next_fd = os.open(
@@ -663,3 +1024,57 @@ def load_experiment(
     if validated_expected is not None and not hmac.compare_digest(actual_hash, validated_expected):
         raise ExperimentHashMismatchError("experiment content hash does not match expected_hash")
     return experiment
+
+
+def load_platform_config(
+    path: Path,
+    *,
+    config_root: Path,
+) -> PlatformConfig:
+    """Load and compose one strict profile without resolving runtime settings or clients.
+
+    Both the profile and its experiment are read beneath ``config_root`` through the same
+    descriptor-relative, no-symlink boundary. The profile's experiment hash is mandatory and is
+    verified before composition. No environment variable, secret, database, provider, plugin, or
+    broker is read or constructed.
+    """
+
+    payload = _read_config_file(path, config_root=config_root)
+    raw = _decode_and_load_yaml(payload)
+
+    profile_failed = False
+    profile: PlatformProfile | None = None
+    try:
+        profile = PlatformProfile.model_validate(raw)
+    except ValidationError:
+        profile_failed = True
+    if profile_failed or profile is None:
+        raise ExperimentConfigError("platform profile failed strict validation")
+
+    definition = load_experiment(
+        Path(profile.experiment_path),
+        config_root=config_root,
+        expected_hash=profile.expected_experiment_hash,
+    )
+
+    composition_failed = False
+    platform_config: PlatformConfig | None = None
+    try:
+        experiment = ExperimentSpec(
+            schema_version=1,
+            definition=definition,
+            definition_hash=profile.expected_experiment_hash,
+            signal_provider=profile.signal_provider,
+            execution_mode=profile.mode,
+        )
+        platform_config = PlatformConfig(profile=profile, experiment=experiment)
+        _ = (
+            profile.content_hash,
+            experiment.content_hash,
+            platform_config.content_hash,
+        )
+    except (CanonicalizationError, ValidationError):
+        composition_failed = True
+    if composition_failed or platform_config is None:
+        raise ExperimentConfigError("platform configuration could not be safely composed")
+    return platform_config

@@ -1,0 +1,17 @@
+schema_version: 1
+profile_id: paper
+mode: paper
+experiment_path: experiments/semiconductor_network_intraday_v1.yaml
+expected_experiment_hash: c4e66f5a4886215306f3d25c98676ecf48479fac41db9b67848e445c1a46e431
+market_data_adapter: alpaca
+signal_provider:
+  id: always_flat
+execution:
+  broker: alpaca_paper
+  submission_enabled: false
+  paper_only: true
+storage:
+  database_url_source: AQA_DATABASE_URL_FILE
+  database_required: true
+  offline_fallback: none
+  artifact_root_source: AQA_ARTIFACT_ROOT

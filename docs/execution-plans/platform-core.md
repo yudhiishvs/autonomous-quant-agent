@@ -53,8 +53,8 @@ The Phase 0 current/target matrix is:
 
 | Subsystem | Current evidence | Current limitations | Reuse plan | New work | Security implications |
 | --- | --- | --- | --- | --- | --- |
-| Package and commands | Typed `adaptive_trader` package and two console scripts | No generic platform namespace or new aliases | Preserve every legacy import and command | Add the exact nonempty platform tree and composed aliases | New modules must not collapse service authority or expose broker objects |
-| Configuration and secrets | Strict legacy YAML plus validated collector settings | Direct `APA_*` secret values; no immutable experiment or profiles | Reuse validation patterns only | Add exact experiment/profile contracts, canonical hashes, file-backed secrets, and doctor | Reject unknown fields, unsafe files, generic SDK variables, and secret serialization |
+| Package and commands | Typed `adaptive_trader` package, generic canonical/configuration boundary, two legacy scripts, and both new aliases | Remaining platform modules and the composed operational commands are absent | Preserve every legacy import and command | Add each nonempty platform boundary and remaining CLI command with its owning service | New modules must not collapse service authority or expose broker objects |
+| Configuration and secrets | Strict legacy/collector settings plus immutable experiment/profile composition and broker-free static validation | Current collector secrets remain direct `APA_*` values; platform `RuntimeSettings`, file-backed secrets, and bootstrap are absent | Reuse validation patterns only | Add file-backed runtime settings and secret bootstrap without expanding static-profile authority | Reject unknown fields, unsafe files, generic SDK variables, and secret serialization |
 | Market data | Tested REST/WebSocket collector, normalization, overlap reconciliation, leases, and shutdown | Fixed 29-symbol universe, predecessor schema, checkpoint is not contiguous readiness | Adapt proven transport and lifecycle behavior behind generic contracts | Add canonical revisions, calendars, gaps, aggregation, basket watermarks, and datasets | Collector remains data-only, fixed-host, bounded, and unable to import trading code |
 | Persistence | SQLite legacy evidence plus PostgreSQL collector migration and transactions | No 25-table `aqa_*` schema, service roles, unified repositories, or audit chain | Preserve legacy/collector state and additive migration history | Add PostgreSQL 16 operational schema, grants, repositories, and SQLite test compatibility | Least-privilege roles, transactional invariants, append-only history, and tamper detection |
 | Scheduling and signals | Legacy cycle orchestration and strategy decisions | No durable slots, leases, registered proposal contract, or signed envelope | Characterize only compatibility-facing behavior | Add deterministic slots, recovery, entry points, built-ins, envelopes, and default-deny approval | Strategy code receives no broker credential or execution authority |
@@ -64,9 +64,10 @@ The Phase 0 current/target matrix is:
 | Verification and engineering memory | 375-test offline baseline, a prior PG15 observation, backtest/replay hashes, CI, and design README | The earlier PG15 invocation was not retained; PG16 runtime is unavailable locally; target vertical slice and exact public docs are absent | Preserve reproducible baselines as regression gates; keep the PG15 observation as context only | Add risk-specific suites, socket denial, deterministic demo, benchmark, runbooks, and traceability | Evidence must be credential-free, side-effect-free, reproducible, and explicit about gaps |
 
 The generic `adaptive_trader.platform` package now contains canonical serialization, hashing,
-universe roles, and strict experiment-definition loading, and the exact experiment YAML is
-present. Platform profiles, the composed runtime `ExperimentSpec`, secret-file interfaces, signed
-domain contracts, complete `aqa_*` schema and roles, aggregation, basket watermarks, scheduler,
+universe roles, strict experiment/profile loading, immutable `ExperimentSpec`/`PlatformConfig`
+composition, and broker-free static CLI validation through both new aliases. The exact experiment
+and all three profiles are present. Secret-file interfaces and `RuntimeSettings`, signed domain
+contracts, complete `aqa_*` schema and roles, aggregation, basket watermarks, scheduler,
 jobs/outbox, private API, API-backed dashboard, unified audit chain, offline vertical slice, PG16
 restore proof, and the complete delivery/security harness remain absent.
 
@@ -457,8 +458,12 @@ commit count is planned.
 - [x] `IMPLEMENTED_AND_VERIFIED` — the generic universe and shipped experiment definition have
   strict frozen roles, deterministic allowlists and hashing, root-confined hostile-YAML loading,
   exact known-answer values, and an accepted architecture decision.
-- [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene is in place; the project boundary,
-  configuration, file-backed secrets, doctor, aliases, and repository-wide typing remain.
+- [x] `IMPLEMENTED_AND_VERIFIED` — exact offline, shadow, and paper profiles compose mandatory
+  pinned experiment identity with closed adapter/storage/execution policy; static doctor/config
+  validation runs through both new aliases with no credential, client, network, or write authority.
+- [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene, canonical/configuration boundaries,
+  profiles, static doctor, aliases, and Python 3.11 typing are in place; file-backed secrets,
+  `RuntimeSettings`, bootstrap, and the remaining command composition remain.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -476,8 +481,8 @@ commit count is planned.
 | Continue on `feature/market-data-platform` from `5690205`. | Explicit maintainer direction preserves the committed collector work. | IMPLEMENTED_AND_VERIFIED |
 | Build a separate signed platform path under `adaptive_trader.platform`. | Protects legacy long-only contracts and follows the required public namespace. | PARTIALLY_IMPLEMENTED |
 | Treat the flagship basket as versioned configuration. | Keeps algorithms reusable and makes symbol authority hashable/testable. | IMPLEMENTED_AND_VERIFIED |
-| Keep the strict experiment file as a reusable definition and compose signal-provider and execution-mode identity through the selected profile. | Reconciles one exact experiment document across offline, shadow, and paper modes while ensuring the eventual `ExperimentSpec` includes all required identity. | PARTIALLY_IMPLEMENTED |
-| Treat experiment market-data provider as the intended external series and runtime source as separate provenance. | Offline fixture bars must remain labeled `fixture` and non-promotable; composed config/data identities bind definition, adapter/source mode, and dataset, while external modes must match Alpaca/IEX/raw. | PARTIALLY_IMPLEMENTED |
+| Keep the strict experiment file as a reusable definition and compose signal-provider and execution-mode identity through the selected profile. | Reconciles one exact experiment document across offline, shadow, and paper modes while ensuring `ExperimentSpec` includes the remaining required identity. | IMPLEMENTED_AND_VERIFIED |
+| Treat experiment market-data provider as the intended external series and runtime source as separate provenance. | Offline fixture bars must remain labeled `fixture` and non-promotable; composed configuration now binds definition and adapter identity and requires Alpaca/IEX/raw for external modes, while bar/dataset provenance remains Phase 3 work. | PARTIALLY_IMPLEMENTED |
 | Retain Python, `uv`, PostgreSQL/SQLite, Typer, and Streamlit; add the required FastAPI boundary. | Preserves the implemented stack while adding the specified private API; FastAPI is not currently installed. | PARTIALLY_IMPLEMENTED |
 | Use PostgreSQL jobs/outbox, not a message broker. | Current workload needs transactional durability more than another distributed dependency. | NOT_IMPLEMENTED |
 | Move dashboard reads behind the API. | Removes database authority from presentation code. | NOT_IMPLEMENTED |
@@ -527,14 +532,18 @@ commit count is planned.
   dialect including Markdown fragments outside fenced code.
 - The product description requires signal-provider and execution-mode identity in the final
   `ExperimentSpec`, while the exact reusable experiment YAML omits both. ADR 0001 makes the YAML a
-  hashed `ExperimentDefinition`; profile implementation must pin it and compose those remaining
-  identities rather than silently omitting them.
-- Strong descriptor-relative experiment confinement uses POSIX `O_NOFOLLOW`; equivalent Windows
-  support remains unavailable until a separately tested path implementation exists.
+  hashed `ExperimentDefinition`; the profile loader now requires its pin and composes those
+  remaining identities rather than silently omitting them.
+- Config-root traversal from `/` with descriptor-relative opens is incompatible with path-scoped
+  macOS privacy grants. The loader instead requires an unchanged canonical non-symlink root before
+  and after opening it with `O_NOFOLLOW`, verifies the opened inode, then uses descriptor-relative
+  no-follow traversal beneath it. Equivalent Windows support remains unavailable until a
+  separately tested path implementation exists.
 - The exact experiment declares Alpaca as its intended external series while the offline profile
   requires fixture data. Offline canonical bars must retain `fixture` provenance and
-  non-promotable source mode; profile composition and data contracts still need to enforce that
-  separation and prevent fixture evidence from being represented as Alpaca validation.
+  non-promotable source mode; profile composition now enforces adapter/provider separation, while
+  Phase 3 data contracts must still bind actual bar/dataset provenance and prevent fixture evidence
+  from being represented as Alpaca validation.
 
 ## 26. Validation evidence
 
@@ -570,6 +579,8 @@ Approved natural-change evidence:
 | Repository workflow skills | `c101879d6327b8961662f22a92fc5c969b003025`; 17 files; 551 insertions and one deletion | Author and committer timestamps are 2026-09-03 21:51:10 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed after adversarial corrections. GitHub Actions run `33827328111` passed at 2026-09-04 02:03:13 UTC with the complete existing CI workflow. |
 | Development and artifact hygiene | `c9082c2183f3bb4c78f532e8d6da4a0a74395e46`; nine files; 404 insertions and 69 deletions | Author and committer timestamps are 2026-09-03 23:36:00 -0400; configured identity was used and no trailer was added. Two independent final reviews found no remaining issue, and the commit was fast-forward pushed. GitHub Actions run `33833840910` passed at 2026-09-04 03:46:50 UTC with the complete existing CI workflow. |
 | Canonical serialization and hashing | `812c74d869eae46c305afcdd244e2da87318e27a`; seven files; 741 insertions and 11 deletions | Author and committer timestamps are 2026-09-04 07:29:21 -0400; configured identity was used and no trailer was added. Two independent final reviews found no remaining issue after hostile-type, resource-bound, error-context, enum-accessor, and timezone corrections. The commit was fast-forward pushed, and GitHub Actions run `33868251605` passed at 2026-09-04 11:41:37 UTC. |
+| Immutable universe and experiment configuration | `4eec0bfff423bf7130d30a75d674b4320dbea013`; 12 files; 1,927 insertions and 34 deletions | Author and committer timestamps are 2026-09-04 08:20:48 -0400; configured identity was used and no trailer was added. Independent design and security re-reviews found no remaining issue after hostile-YAML, numeric, path, session, and provenance corrections. The commit was fast-forward pushed, and GitHub Actions run `33872331527` passed at 2026-09-04 12:31:10 UTC. |
+| Repository workflow-skill validator correction | `0804b6f1e110fc028d0d15ba06c3fecc9b15674b`; three files; 385 insertions and 122 deletions | Author and committer timestamps are 2026-09-04 08:48:04 -0400; configured identity was used and no trailer was added. Adversarial re-review found no remaining high or medium issue after URI, tracked-inventory, multiline HTML, reference-link, path, and symlink corrections. The commit was fast-forward pushed, and GitHub Actions run `33874642483` passed at 2026-09-04 12:58:27 UTC. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -691,6 +702,23 @@ Generic universe and experiment-definition candidate evidence on 2026-09-04:
 | `docker compose --env-file .env.example -f docker-compose.yml config --quiet` and `git diff --check` | PASS. |
 | Independent design and security reviews | PASS after correcting parser exception translation, canonical integer/version bounds, exact Decimal comparisons, path-subclass confinement, derived session deadlines, architecture guards, and provider/source provenance documentation. No remaining finding. |
 
+Platform-profile composition and static-CLI candidate evidence on 2026-09-04:
+
+| Command or evidence | Result |
+| --- | --- |
+| Independently encoded canonical profile payloads checked with `shasum -a 256` | PASS — offline `e4a7df7afa8b92a25ad36cb6912de1265ea18f49a2296d0ece1e1e5c7b5924ef`, shadow `144118f7103a686741990d821963ac0de3ce23a4d713e184f002b89934c1c232`, and paper `9d9f6be07726ce8154a8ea06b7eb111784a33f9c83e56b8b738529cb87427f55`. |
+| `uv sync --locked --extra dev --extra dashboard` and `uv lock --check` | PASS — all 105 locked packages resolved and the lockfile remained unchanged. |
+| `uv run --no-sync ruff format --check .`, `ruff check .`, and `mypy src` | PASS — 139 files formatted, lint clean, and 50 source files type-checked. |
+| `uv run --no-sync mypy --python-version 3.11 src/adaptive_trader/platform` | PASS — all six platform source files type-checked against Python 3.11. |
+| Focused profile and architecture tests | PASS — 63 tests covering tracked profiles, composition, mode/provider/storage/submission matrices, hostile paths/YAML, immutable hashes, safe CLI failures, and aliases. |
+| Focused canonical, experiment, profile, CLI, and architecture branch coverage | PASS — 197 tests and 90.88% branch coverage for `adaptive_trader.platform`, above the 85% target. |
+| Exact documented security-test selection | PASS — 269 tests and one upstream WebSocket deprecation warning. |
+| `uv run --no-sync pytest -q` | PASS — 606 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 68.40 seconds. |
+| Both new installed aliases plus both legacy entry-point help paths | PASS — offline doctor and shadow config validation emitted deterministic JSON with submission disabled; legacy help paths exited successfully. |
+| Synthetic backtest and deterministic replay | PASS — the synthetic backtest completed across all six legacy portfolios; replay processed nine events, one cycle, and three fake-broker submissions. |
+| `docker compose --env-file .env.example -f docker-compose.yml config --quiet` | PASS. |
+| Independent design, security, and final-diff reviews | PASS after correcting profile-extension identity, submission authority, provider provenance, reserved mode labels, canonical paths, root symlink/loop handling, and documentation command ownership; no remaining high or medium finding. |
+
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.
 
@@ -698,16 +726,18 @@ submitted during this baseline.
 
 Current outcome: `PARTIALLY_IMPLEMENTED`.
 
-Phase 0 and the first Phase 1 configuration primitives are implemented with recorded evidence.
-The existing collector and legacy regression suite provide reusable code and characterization, but
-they do not satisfy the complete generic platform contract. Phase 1 profiles, secrets, doctor, and
-aliases plus Phases 2–10 remain as listed in the progress checklist. Fresh PostgreSQL 16, target
-container runtime, image scan, SBOM, clean-package install, twice-run demo, and backup/restore
-evidence remain unavailable until their implementation exists and the required services are
-available. GitHub Actions run `33868251605` passed for pushed commit `812c74d`; that run validates
-the existing PostgreSQL 15 and image boundaries plus canonical primitives, not this unpushed
-experiment candidate, the target PostgreSQL 16 platform, or any external adapter. External adapter
-credential validation is intentionally prohibited in this program.
+Phase 0 and the static Phase 1 canonical, universe, experiment, profile, and validation boundaries
+are implemented with recorded evidence. The existing collector and legacy regression suite provide
+reusable code and characterization, but they do not satisfy the complete generic platform contract.
+Phase 1 file-backed secrets, `RuntimeSettings`, bootstrap, and remaining command composition plus
+Phases 2–10 remain as listed in the progress checklist. Fresh PostgreSQL 16, target container
+runtime, image scan, SBOM, clean-package install, twice-run demo, and backup/restore evidence remain
+unavailable until their implementation exists and the required services are available. GitHub
+Actions run `33874642483` passed for pushed commit `0804b6f`; that run validates the existing
+PostgreSQL 15 and image boundaries plus the immutable experiment and corrected skill validator. The
+current profile/static-CLI candidate has complete local evidence above but no remote run yet. The
+target PostgreSQL 16 platform and every external adapter remain unvalidated; credentialed external
+validation is intentionally prohibited in this program.
 
 This section must be replaced with exact implemented outcomes, remaining requirement statuses,
 final hashes, review findings, and external limitations after Phase 10; it cannot prove completion.
