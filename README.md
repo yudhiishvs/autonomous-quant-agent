@@ -51,10 +51,11 @@ Operationally, the checked-in prototype is **offline-verified only**. Paper subm
 
 **No target eight-stock experiment has been run yet.** Legacy synthetic and ETF checks are not results for this proposal. A passing strategy is not required for the semester project to be scientifically complete: measured outperformance and a fully reproducible `REJECTED` result are both valid conclusions, while only a passing result may advance to shadow or paper operation.
 
-The final project extends that foundation. The following **core research capabilities are planned, not currently complete**:
+The repository now includes a standalone, data-only market-data foundation: a versioned 29-symbol collection contract, Alpaca IEX historical and live adapters, Alembic-managed PostgreSQL persistence, append-only observations, deterministic current-bar projections, coverage checkpoints, singleton leasing, reconciliation, and operational CLI/Compose entry points. It has been verified with offline tests and a disposable PostgreSQL instance, but it has not yet been activated against Alpaca or deployed as an always-on hosted service.
+
+The following **core research capabilities are planned, not currently complete**:
 
 - the fixed eight-stock universe below;
-- a central historical and real-time data service;
 - immutable Parquet research datasets;
 - long, short, and flat ML predictions;
 - autonomous but bounded candidate generation;
@@ -110,7 +111,7 @@ These items demonstrate software-engineering experience. They do not affect whet
 
 - Real-money trading
 - Options, futures, cryptocurrency, or foreign exchanges
-- Any tradable symbol outside the fixed eight-stock MVP universe
+- Any prediction target, position, order intent, or broker order outside the fixed eight-stock research universe; collection-only storage does not grant research or execution authority
 - High-frequency or latency-sensitive trading
 - Unrestricted AI-generated code execution
 - An AI with access to broker credentials or risk settings
@@ -150,23 +151,24 @@ Primary-listing metadata is revalidated when a dataset is frozen and again befor
 
 SOXX is a real tradable ETF outside this project; "benchmark-only" describes its role here. The official [iShares SOXX page](https://www.ishares.com/us/products/239705/ishares-semiconductor-etf) states that it tracks a U.S. semiconductor equity index. Because SOXX is long-only and held overnight while this strategy may be long/short with capped exposure, raw SOXX buy-and-hold return is contextual rather than the primary promotion comparison.
 
-### Future-only watchlist
+### Collected exploratory equities — research inactive
 
-The remaining symbols from the original idea are preserved only as possible future research: `TSLA`, `UBER`, `GOOGL`, `AMZN`, `AAPL`, `META`, `NET`, `OKTA`, `ROKU`, `BOX`, `ZG`, `RBLX`, `SOUN`, `PUBM`, `PAYC`, `WDAY`, `RIVN`, and `LCID`.
+The collector also stores one-minute market data for `TSLA`, `UBER`, `GOOGL`, `AMZN`, `AAPL`, `META`, `NET`, `OKTA`, `ROKU`, `BOX`, `ZG`, `RBLX`, `SOUN`, `PUBM`, `PAYC`, `WDAY`, `RIVN`, and `LCID`. These 18 symbols are collection-only inputs: they remain excluded from the fixed eight-stock feature matrices, labels, ranks, training, backtests, predictions, positions, shadow decisions, and paper orders.
 
-They may appear only as exclusion metadata in a dataset manifest. They are excluded from collected bar rows, feature matrices, labels, ranks, training, backtests, predictions, positions, shadow decisions, and paper orders. Moving any future symbol into the active universe requires a new versioned universe, new frozen datasets, a fresh search budget, and the complete evaluation/promotion cycle.
+Collection membership grants no research or execution authority. Moving one of these symbols into the active research universe requires a new versioned research contract, new frozen datasets, a fresh search budget, and the complete evaluation and promotion cycle.
 
-At startup, the system verifies exactly the eight active symbols as Nasdaq-listed, active, and tradable. A short paper decision additionally requires current shortable/easy-to-borrow eligibility. Context symbols are read-only, and future-watchlist symbols cannot enter model or execution contracts.
+The collector registers its static 29-symbol collection contract at startup. Listing and tradability validation for the eight active research symbols remains a separate dataset-freeze and execution-boundary requirement.
 
 ## Market, data, and execution boundary
 
 | Concept | This project |
 | --- | --- |
-| Asset class | Nasdaq-listed U.S. common equities in the fixed eight-stock theme |
-| Primary listing venue | Nasdaq, revalidated as versioned security metadata |
+| Research asset class | Eight Nasdaq-listed U.S. common equities in the fixed research theme |
+| Collection universe | 26 named U.S. equities plus SPY, QQQ, and SOXX; collection membership grants no execution authority |
+| Research primary listing venue | Nasdaq, revalidated as versioned security metadata |
 | Market-data provider | Alpaca Market Data API |
 | MVP equity data feed | IEX for both historical and real-time bars |
-| MVP adjustment mode | Raw bars in both historical research and live inference; corporate-action boundaries are flagged and excluded from rolling windows |
+| MVP adjustment mode | Raw bars in both historical research and live inference; corporate-action detection and rolling-window exclusion remain required dataset work |
 | Broker and simulator | Alpaca Paper Trading API |
 | Supported session | Regular U.S. market hours only, 9:30 a.m.–4:00 p.m. Eastern Time |
 | Direct exchange connectivity | None |
@@ -175,7 +177,7 @@ Alpaca is the API broker and market-data provider; it is not an exchange. IEX is
 
 ## Core design decisions
 
-1. **The data collector is centralized and private.** Its Alpaca credential pair belongs to a separate operational account from the approved paper-execution account. It collects the eight active symbols plus the explicitly configured benchmark/context symbols and does not collect the future watchlist for MVP research. Its effective data-only role is enforced primarily by account/secret separation and collector code that has no trading client and rejects trading hostnames. An allowlisting egress proxy or FQDN-aware Cilium policy is an optional cloud hardening layer; ordinary Kubernetes NetworkPolicy alone is not claimed to enforce hostname separation.
+1. **The data collector is centralized and private.** It collects all 26 configured equities plus SPY, QQQ, and SOXX—29 symbols total—using raw one-minute Alpaca IEX data. Every collection member has `execution_authorized=false`. The collector loads only the dedicated market-data credential variables, imports no trading client, accepts no configurable broker endpoint, and uses direct transports fixed to the approved data REST and IEX WebSocket endpoints. A separate paper account remains an operational requirement if paper execution is enabled later.
 2. **MVP trading authority is singular and explicit.** Orders go only to the one approved Alpaca paper account. Per-user OAuth connections are a later product extension.
 3. **The database is not the AI.** It is the reliable handoff point between collection, training, testing, and execution.
 4. **The AI proposes; deterministic systems decide.** Candidate specifications are schema-validated, the backtester evaluates them, and hard promotion rules control deployment.
@@ -246,7 +248,7 @@ This separation prevents research-generated code and model logic from receiving 
 
 ### Do not scrape web pages
 
-The "scraper" should be implemented as a **market-data collector** using Alpaca's official APIs:
+The market-data collector is implemented using Alpaca's official data APIs:
 
 - **Historical data:** REST requests for backfills and gap repair
 - **Real-time data:** WebSocket subscriptions for one-minute bars in the MVP; trade/quote retention is a later optional enhancement
@@ -256,13 +258,15 @@ This is faster and more reliable than HTML scraping and provides timestamps, sch
 
 ### Why one central collector
 
-A central collector prevents every model and backtest from repeatedly requesting the same market data. It also avoids interrupting collection while research is running. Alpaca notes that many data subscriptions allow only one active connection to a WebSocket endpoint, so the collector should normally run as a singleton and subscribe to the eight active tradable symbols plus SOXX, QQQ, and SPY through one connection. It must not subscribe to the future watchlist during the MVP. See Alpaca's [WebSocket market-data documentation](https://docs.alpaca.markets/us/docs/streaming-market-data).
+A central collector prevents every model and backtest from repeatedly requesting the same market data. It also avoids interrupting collection while research is running. The PostgreSQL-backed lease permits one active collector, which subscribes to all 29 collection symbols through one IEX WebSocket connection. On startup it catches up through historical REST; while streaming it periodically reconciles overlapping completed intervals through REST and consumes both normal and updated-bar events. See Alpaca's [WebSocket market-data documentation](https://docs.alpaca.markets/us/docs/streaming-market-data).
 
 The collector writes data; downstream systems read stored versions. Training and backtesting never depend on keeping an API request open.
 
 ### Hybrid storage: PostgreSQL plus Parquet
 
 It is faster and cleaner to give the AI and backtester a dataset, but one storage format should not do every job.
+
+The implemented collector currently persists the complete append-only observation history, deterministic current-bar projection, universe metadata, runs, checkpoints, leases, and events in PostgreSQL. Retention policies, partitioning, immutable Parquet snapshots, and private object-storage archival remain future work.
 
 **PostgreSQL is for:**
 
@@ -308,16 +312,17 @@ A useful unique identity is:
 
 VWAP is required on the one-minute bars selected as execution references; a missing VWAP produces no simulated transition. It remains optional on other stored bar timeframes.
 
-The collector must validate impossible OHLC values and negative volume, detect out-of-order messages, record reconnects, track a processing watermark, identify missing market-calendar intervals, and repair gaps with historical REST requests. An exact repeated payload is an ignorable duplicate; the same identity with changed values is a correction. Preserve the original raw event and correction history, then update the curated latest-value view deterministically.
+The implemented collector validates impossible OHLC values and negative volume, records retry/reconnect events, advances durable half-open REST coverage checkpoints, and repairs regular-session coverage through overlapping historical requests. An exact repeated payload from the same source is an ignorable duplicate; the same identity with changed values is preserved as another observation, and deterministic precedence controls the curated latest-value view. Explicit stale/out-of-order classification, populated `data_gaps` workflows, and corporate-action boundary detection remain planned data-quality work.
 
 ### Dataset versioning
 
 Every experiment must reference an immutable dataset manifest containing:
 
 - dataset ID and SHA-256 content hash;
-- universe version and the exact eight active tradable symbols;
-- benchmark/context symbols and their non-tradable roles;
-- inactive future-watchlist symbols and their exclusion role;
+- collection-universe version, hash, and exact 29-symbol membership;
+- research-universe version and the exact eight active prediction targets;
+- SPY/QQQ context and SOXX benchmark roles;
+- the 18 collected-but-research-inactive equities and their feature/model/execution exclusion;
 - time range and timeframe;
 - provider, feed, and adjustment mode;
 - schema and feature versions;
@@ -440,7 +445,7 @@ The v1 feature catalog and every permitted window are the frozen `G0`–`G4` tab
 
 Every rolling feature at time t must use only information available at or before t. The exact same feature implementation must be shared by training, backtesting, shadow mode, and paper inference.
 
-Cross-sectional features need an explicit decision watermark because live bars do not arrive simultaneously. For a 15-minute bar closing at boundary `C`, wait until exactly `decision_ready_at = C + 60 seconds`. Compute the basket only when every fold-eligible active symbol is present, or use the same recorded eight-stock availability-mask behavior used in training; otherwise skip the entire decision. The model result and durable order intent must be complete by `C + 120 seconds`, and the causal execution reference is the VWAP of the one-minute bar `[C + 2 minutes, C + 3 minutes)`. A missed deadline means no transition. SOXX, QQQ, SPY, and future-watchlist symbols never enter the basket. Never silently rank a different live basket than the model saw during training.
+Cross-sectional features need an explicit decision watermark because live bars do not arrive simultaneously. For a 15-minute bar closing at boundary `C`, wait until exactly `decision_ready_at = C + 60 seconds`. Compute the basket only when every fold-eligible active symbol is present, or use the same recorded eight-stock availability-mask behavior used in training; otherwise skip the entire decision. The model result and durable order intent must be complete by `C + 120 seconds`, and the causal execution reference is the VWAP of the one-minute bar `[C + 2 minutes, C + 3 minutes)`. A missed deadline means no transition. SOXX, QQQ, SPY, and collected-but-research-inactive symbols never enter the basket. Never silently rank a different live basket than the model saw during training.
 
 ### Labels
 
@@ -772,15 +777,15 @@ This produces effective-once behavior even though networks do not guarantee perf
 
 ## MVP credentials and future account model
 
-The system uses two distinct Alpaca account/credential pairs. Separation is enforced by which process receives each secret, collector code that contains no trading client, and a trading-hostname application denylist. The design does not claim that Alpaca gives an ordinary API key a special read-only market-data scope or that ordinary IP-based Kubernetes NetworkPolicy can reliably distinguish changing provider hostnames.
+The collector loads only `APA_ALPACA_DATA_API_KEY` and `APA_ALPACA_DATA_SECRET_KEY`; paper credentials use a separate namespace and are not passed to the collector container. The collection package uses direct fixed-host HTTPS and WebSocket transports, imports no external Alpaca SDK or trading client, accepts no endpoint override, and validates the official data REST and IEX WebSocket endpoints. Its dedicated container target also omits the application's execution modules and external Alpaca SDK package. Alpaca credentials are not claimed to be provider-scoped as market-data-only. If paper execution is enabled later, a distinct account and credential pair is an operational requirement.
 
 ### Collector credential and operational account
 
 - Used only by the singleton collector
 - Reads historical and real-time data
 - Writes the private central store
-- Belongs to a separate operational Alpaca account from the approved paper-execution account
-- Is never loaded by code containing a trading client; the collector rejects trading hostnames, with an allowlisting egress proxy or FQDN-aware Cilium policy available as cloud hardening
+- Is isolated from all paper-execution credential variables and trading-client code
+- Uses fixed official Alpaca data endpoints rather than operator-configurable broker endpoints
 - May technically possess broader provider capability; its effective data-only role is an application/infrastructure control, not a provider-scope claim
 - Never appears in the browser or research worker
 
@@ -888,7 +893,7 @@ The MVP API is private and single-operator. If Cognito is added later, the API m
 | Primary language | Python 3.11+ |
 | Data and ML | pandas or Polars, NumPy, scikit-learn, XGBoost |
 | API | FastAPI, Pydantic, SQLAlchemy |
-| Historical/real-time provider | Alpaca REST and WebSocket through alpaca-py |
+| Historical/real-time provider | Alpaca data REST and IEX WebSocket through dedicated fixed-host transports |
 | Backtesting | Extend the repository's deterministic engine |
 | Operational database | PostgreSQL |
 | Local lightweight state | SQLite for tests/replay only |
@@ -1051,7 +1056,7 @@ The [AWS Free Tier page](https://aws.amazon.com/free/) is the source of truth fo
 2. **Research validity:** the model is evaluated causally without leakage, hidden model selection, or unrealistic costs.
 3. **Operational safety:** real-time failures produce no trade, never a duplicate or live-money order.
 
-No unit test can prove future profitability. A correct system may reject every candidate, and that is a successful scientific outcome. This section is the target verification contract; the currently checked-in tests cover the legacy prototype and do not yet prove the planned eight-stock MVP.
+No unit test can prove future profitability. A correct system may reject every candidate, and that is a successful scientific outcome. The checked-in suite covers both the legacy prototype and the new collector's contracts, credential isolation, Alpaca adapters with fakes, restart/reconciliation orchestration, and opt-in PostgreSQL integration. It does not prove real Alpaca connectivity, hosted continuous operation, or the planned eight-stock research pipeline.
 
 ### Known-answer unit tests
 
@@ -1098,7 +1103,7 @@ Automated checks must:
 - aggregate a frozen one-minute fixture into the exact expected 15-minute bars;
 - prove historical and real-time aggregation parity from identical raw events;
 - invalidate labels and rolling windows that cross an unhandled corporate-action boundary;
-- verify that context and future-watchlist symbols cannot become prediction targets or orders.
+- verify that context, benchmark, and collected-but-research-inactive symbols cannot become prediction targets or orders.
 
 A manually authorized, read-only integration check compares a small sample of stored bars with the corresponding Alpaca response and records timestamps, feed, request parameters, and hashes. Network checks never run in ordinary CI.
 
@@ -1208,9 +1213,9 @@ Evolve it in phases:
 - preserve the existing prototype with a Git tag;
 - work on a feature branch;
 - keep tests passing during migration;
-- extract repository/storage interfaces first, because current persistence, reporting, observer evidence, and dashboard paths include SQLite-specific queries; then migrate their consumers to PostgreSQL/S3;
-- add timeframe and correction lineage to the bar contract and database identity before introducing intraday storage;
-- split configuration into exactly eight active `tradable_symbols`, read-only `context_symbols`, a primary benchmark, and an inactive `future_watchlist`; enforce that future symbols cannot enter feature, model, signal, or order contracts;
+- preserve the standalone PostgreSQL market-data repository while migrating legacy SQLite consumers incrementally;
+- preserve the implemented timeframe, observation-lineage, correction, and deterministic bar-identity contracts;
+- maintain separate versioned collection and research universes: the collector stores 29 symbols, while only the fixed eight-stock research contract may feed features, labels, signals, positions, or orders;
 - migrate all signed-position assumptions—not only the backtester—including strategy/allocator contracts, weight validation, risk, order planning, asset checks, fake broker, reconciliation, reporting, receipts, and safety tests;
 - replace the current once-per-session/prior-daily-bar schedule with causal minute-to-15-minute aggregation, an intraday scheduler, durable decision watermarks, restart recovery, and duplicate-decision prevention;
 - make Docker builds consume the checked-in lockfile, pin the base image by digest, and record image digests instead of installing open dependency ranges;
@@ -1248,7 +1253,7 @@ This is a target organization, not a requirement to move all files immediately.
 | Weeks | Milestone | Required result |
 | --- | --- | --- |
 | 1 | Baseline and delivery rails | Tag the prototype, freeze safety rules, verify offline tests, make CI run, lock container dependencies, and keep a working Compose path from the start |
-| 2–3 | Eight-stock data foundation | Extract storage interfaces; validate and ingest NVDA, AMD, CSCO, SNDK, AAOI, AXTI, HLIT, and INSG plus read-only context; store the 18 future symbols only as inactive metadata; freeze versioned Parquet snapshots |
+| 2–3 | Market-data foundation | Ingest raw one-minute IEX data for 26 equities plus SPY, QQQ, and SOXX into PostgreSQL; preserve the separate fixed eight-stock research boundary; complete hosted activation and immutable Parquet snapshots |
 | 4 | Real-time intraday pipeline | Add minute-to-15-minute aggregation, bounded basket watermark, reconnect/gap repair, durable scheduling, restart recovery, and duplicate-decision prevention |
 | 5 | Signed-position migration | Update contracts, allocator, backtester, risk, planning, broker fakes, reconciliation, reporting, and tests for long/short/flat behavior |
 | 6 | Feature pipeline and baselines | Build shared features and compare logistic, momentum, mean-reversion, flat, and benchmark baselines |
@@ -1280,7 +1285,7 @@ A complete, reproducible one-user system is a stronger semester project than an 
 ## Required artifacts for every candidate
 
 - Dataset manifest and content hash
-- Universe version, timestamp range, and every symbol's active/context/benchmark/future role
+- Collection-universe hash, research-universe version, timestamp range, and every symbol's collection/context/benchmark/research-inactive role
 - Feature specification
 - Candidate strategy JSON/YAML
 - Fitted preprocessing pipeline
@@ -1297,48 +1302,45 @@ A complete, reproducible one-user system is a stronger semester project than an 
 
 Large immutable artifacts live in object storage; searchable metadata and lifecycle state live in PostgreSQL. Only the broker-free inference worker verifies and loads the safe-format model artifact after its hash matches an approved registry record. The paper executor never deserializes a model; it verifies that each incoming signal cites the currently approved model ID and hash.
 
-## Current prototype: installation and safe commands
+## Installation and safe local commands
 
 Python 3.11 or newer is required.
 
 ~~~bash
 git clone https://github.com/yudhiishvs/autonomous-quant-agent.git
 cd autonomous-quant-agent
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e ".[dev,dashboard]"
+uv sync --locked --extra dev --extra dashboard
 ~~~
 
-The existing offline tests, synthetic backtest, and deterministic replay require no Alpaca credentials or internet access. These checked-in commands still exercise the legacy ETF-based prototype configurations; they do not yet implement or prove the planned eight-stock MVP described above.
+The offline suite covers the legacy prototype and the market-data collector without using Alpaca credentials or contacting Alpaca. The synthetic backtest and deterministic replay still exercise the legacy ETF-based configurations; they do not prove the planned eight-stock research MVP.
 
 ~~~bash
-ruff format --check .
-ruff check .
-mypy src
-pytest -q
-python -m adaptive_trader.cli backtest --config configs/backtest.yaml --synthetic
-python -m adaptive_trader.cli replay --config configs/replay.yaml
+uv run --no-sync ruff format --check .
+uv run --no-sync ruff check .
+uv run --no-sync mypy src
+uv run --no-sync pytest -q
+uv run --no-sync python -m adaptive_trader.cli backtest --config configs/backtest.yaml --synthetic
+uv run --no-sync python -m adaptive_trader.cli replay --config configs/replay.yaml
 ~~~
 
 The current read-only observer and dry-run paths are:
 
 ~~~bash
-python -m adaptive_trader.cli doctor --config configs/observer.yaml
-python -m adaptive_trader.cli observe --config configs/observer.yaml
-python -m adaptive_trader.cli paper-once --config configs/observer.yaml --dry-run
+uv run --no-sync python -m adaptive_trader.cli doctor --config configs/observer.yaml
+uv run --no-sync python -m adaptive_trader.cli observe --config configs/observer.yaml
+uv run --no-sync python -m adaptive_trader.cli paper-once --config configs/observer.yaml --dry-run
 ~~~
 
 Do not enable paper submission merely because the code contains a paper executor. Follow the repository's existing readiness gates and runbook. Development and CI must never submit orders.
 
-See the existing [architecture](docs/architecture.md), [methodology](docs/methodology.md), [data dictionary](docs/data_dictionary.md), [paper runbook](docs/live_paper_runbook.md), and [incident-response guide](docs/incident_response.md).
+See the existing [architecture](docs/architecture.md), [methodology](docs/methodology.md), [data dictionary](docs/data_dictionary.md), [market-data runbook](docs/market_data_runbook.md), [paper runbook](docs/live_paper_runbook.md), and [incident-response guide](docs/incident_response.md).
 
 ## Acceptance tiers
 
 ### Core research MVP — required
 
 - Exactly NVDA, AMD, CSCO, SNDK, AAOI, AXTI, HLIT, and INSG are validated as the active Nasdaq-listed tradable universe.
-- Automated tests prove that future-watchlist and context symbols cannot be prediction targets, portfolio positions, order-intent symbols, or broker orders. Lagged QQQ/SPY values may influence the eight active symbols only through their explicitly approved context features.
+- Automated tests prove that collected-but-research-inactive equities and context/benchmark symbols cannot become prediction targets, portfolio positions, order-intent symbols, or broker orders. Lagged QQQ/SPY values may influence the eight active symbols only through their explicitly approved context features.
 - Historical and real-time bars share one canonical schema.
 - Collection restarts without silently losing or duplicating bars.
 - A frozen Parquet dataset can reproduce a training run.
