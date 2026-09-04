@@ -444,9 +444,10 @@ commit count is planned.
   evidence without unsupported capacity claims.
 - [x] `IMPLEMENTED_AND_VERIFIED` — concise repository operating instructions, contribution policy,
   and a current documentation authority index are established.
-- [ ] `PARTIALLY_IMPLEMENTED` — repository-local workflow skills cover every core workflow and
-  each currently active conditional boundary, but their validator still needs strict containment,
-  inventory, and authority-link/content enforcement after an adversarial follow-up.
+- [x] `IMPLEMENTED_AND_VERIFIED` — repository-local workflow skills cover every core workflow and
+  each currently active conditional boundary; the hardened validator enforces their exact
+  inventory, normalized tracked authorities, critical clauses, path containment, and restricted
+  local-link dialect.
 - [x] `IMPLEMENTED_AND_VERIFIED` — required local-secret, mutable-state, cache, and generated-output
   classes are excluded from Git and Docker contexts while reviewed fixtures remain eligible.
 - [x] `IMPLEMENTED_AND_VERIFIED` — minimal repository editor recommendations, Python/Ruff/Pytest
@@ -519,10 +520,11 @@ commit count is planned.
 - Docker Compose configuration validation passed, but the Docker daemon became unavailable before
   a fresh PG16/image runtime validation. This is unavailable evidence, not a product failure.
 - The README is an extensive target design; code and tests, not that prose, determine statuses.
-- A delayed adversarial follow-up to the workflow-skill boundary found that its validator can
-  follow skill symlinks, accepts links into Git/private ignored state and an arbitrary extra skill,
-  and does not fully prove authoritative content. The skills remain present, but
-  `REQ-HARNESS-002` is reopened until a focused corrective boundary fixes those tests.
+- A delayed adversarial follow-up to the workflow-skill boundary exposed weak containment,
+  inventory, and authority assertions. The corrective validator now rejects symlinked, escaped,
+  untracked/private and external targets, enforces the exact active inventory and normalized
+  authority set, checks critical clauses, and validates a deliberately restricted local-link
+  dialect including Markdown fragments outside fenced code.
 - The product description requires signal-provider and execution-mode identity in the final
   `ExperimentSpec`, while the exact reusable experiment YAML omits both. ADR 0001 makes the YAML a
   hashed `ExperimentDefinition`; profile implementation must pin it and compose those remaining
@@ -639,6 +641,14 @@ Workflow-skill candidate evidence on 2026-09-03:
 | Whole-worktree Ruff format/lint and mypy checks | PASS — 127 files formatted, lint clean, and 44 source files type-checked. |
 | `uv run --no-sync pytest -q` | PASS — 380 passed, one PostgreSQL module skipped, and one upstream WebSocket deprecation warning in 72.79 seconds. |
 | Exact documented security-test selection and `git diff --check` | PASS — 92 security-focused tests, one upstream warning, and no whitespace errors. |
+
+Workflow-skill validator corrective evidence on 2026-09-04:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv run --no-sync pytest -q tests/safety/test_repository_skills.py` | PASS — 30 inventory, contract, normalized-authority, restricted-link, fragment, tracked-path, private-path, escape, and symlink tests. |
+| Focused Ruff format/lint and mypy checks | PASS — the validator is formatted, lint clean, and type clean. |
+| Independent adversarial review of the corrected validator | PASS after closing URI-scheme, Git-index, multiline HTML, and multiline reference-link bypasses; no HIGH or MEDIUM finding remains. |
 
 Development and artifact-hygiene candidate evidence on 2026-09-03:
 
