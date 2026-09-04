@@ -440,6 +440,8 @@ commit count is planned.
 - [x] `IMPLEMENTED_AND_VERIFIED` — observability and performance memory records current evidence,
   target metric/error boundaries, sensitive operations, measurement units, and absent benchmark
   evidence without unsupported capacity claims.
+- [x] `IMPLEMENTED_AND_VERIFIED` — concise repository operating instructions, contribution policy,
+  and a current documentation authority index are established.
 - [ ] `NOT_IMPLEMENTED` — Phase 1 project boundary and secure configuration.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
@@ -529,7 +531,8 @@ Approved natural-change evidence:
 | Published-branch verification | GitHub Actions run `33821556434` for exact head `94ba212608b91e883a120791db6cb6b3f1e294c7` | PASS at 2026-09-04 00:34:41 UTC — locked install, Ruff format/lint, mypy, PostgreSQL migration and full pytest, synthetic backtest, deterministic replay, Compose validation, both image builds, and network-disabled collector image checks all completed successfully. |
 | Engineering standards and offline test isolation | `d2b287effc6f046617e3d979381da10b0bbe556e`; 11 files; 721 insertions and 16 deletions | Author and committer timestamps are 2026-09-03 20:49:14 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed and `origin/feature/market-data-platform` matched `d2b287e`. GitHub Actions run `33823350043` passed at 2026-09-04 00:55:49 UTC, including locked install, static checks, PostgreSQL migration/full tests, backtest/replay, Compose validation, both image builds, and network-disabled collector checks. |
 | Initial architecture and security documentation | `165d4b978e3dc8b7f1759f42bc4825d0147e1678`; five files; 555 insertions and six deletions | Author and committer timestamps are 2026-09-03 21:01:25 -0400; configured identity was used and no trailer was added. A post-commit independent review found an incorrect service-level atomicity claim and incomplete current external-interface/component detail; the following documentation correction addresses those findings rather than treating this commit as final evidence. |
-| Architecture documentation correction | `39d106544b5e2b7f07b2fead44b75b01875dcfd5`; four files; 61 insertions and 34 deletions | Author and committer timestamps are 2026-09-03 21:10:19 -0400; configured identity was used and no trailer was added. Two independent re-reviews found no remaining issue after the correction, and the commit was fast-forward pushed. GitHub Actions run `33824733267` was in progress; run `33824137014` for the superseded head was cancelled by configured concurrency. |
+| Architecture documentation correction | `39d106544b5e2b7f07b2fead44b75b01875dcfd5`; four files; 61 insertions and 34 deletions | Author and committer timestamps are 2026-09-03 21:10:19 -0400; configured identity was used and no trailer was added. Two independent re-reviews found no remaining issue after the correction, and the commit was fast-forward pushed. GitHub Actions run `33824733267` passed at 2026-09-04 01:19:37 UTC; run `33824137014` for the superseded head was cancelled by configured concurrency. |
+| Observability and performance policy | `acd71c69eb59603a8e44feba8923e61528452475`; four files; 268 insertions and one deletion | Author and committer timestamps are 2026-09-03 21:19:54 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed. GitHub Actions run `33825372703` passed at 2026-09-04 01:31:27 UTC, including locked setup, static checks, PostgreSQL migration/full tests, legacy regressions, Compose validation, both image builds, and network-disabled collector checks. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -580,6 +583,16 @@ Observability/performance-memory candidate evidence on 2026-09-03:
 | Whole-worktree offline pytest listed above | PASS — 376 passed and one PostgreSQL module skipped. |
 | `git diff --check` and scoped attribution/private-path/credential scans | PASS. |
 | Independent engineering and skeptical security/simplification reviews | PASS after corrections — current and target status remain distinct; correlation, retention, diagnostic, and cardinality rules are bounded; the versioned offline benchmark contract defines provenance, PostgreSQL isolation, valid sampling, safe artifacts, and maintainability review; no sensitive or attribution material was found. |
+
+Repository-guidance candidate evidence on 2026-09-03:
+
+| Command or evidence | Result |
+| --- | --- |
+| `UV_CACHE_DIR=<temporary> uv run --no-sync pytest -q -m "not integration"` | PASS — 376 passed, one PostgreSQL module skipped during collection, one upstream WebSocket deprecation warning, 71.18 seconds. |
+| Exact documented security-test selection | PASS — 88 tests and one upstream WebSocket deprecation warning, 1.33 seconds. |
+| Whole-worktree Ruff format/lint and mypy checks | PASS — 125 files formatted, lint clean, and 44 source files type-checked. |
+| `AGENTS.md` size, candidate link-target, whitespace, attribution, private-path, and credential-pattern checks | PASS — root guidance is within its 80–180-line target and every current authority resolves. |
+| Independent engineering and skeptical security/simplification reviews | PASS after corrections — command categories and PostgreSQL skip/guard semantics are explicit, current credential authority is accurate, ignored private state is not inspected, and the workflow verifies Definition of Done. |
 
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.
