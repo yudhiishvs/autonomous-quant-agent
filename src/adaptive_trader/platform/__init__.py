@@ -22,6 +22,12 @@ from adaptive_trader.platform.config import (
     load_platform_config,
 )
 from adaptive_trader.platform.hashing import sha256_hex
+from adaptive_trader.platform.security import (
+    RedactedSecret,
+    SecretFileError,
+    SecretFileVariable,
+    load_secret_file,
+)
 from adaptive_trader.platform.universe import SymbolRole, UniverseSpec
 
 __all__ = [
@@ -37,8 +43,11 @@ __all__ = [
     "MarketDataSpec",
     "PlatformConfig",
     "PlatformProfile",
+    "RedactedSecret",
     "RiskGroupSpec",
     "RiskPolicySpec",
+    "SecretFileError",
+    "SecretFileVariable",
     "SessionSpec",
     "SignalProviderSpec",
     "StoragePolicySpec",
@@ -47,5 +56,6 @@ __all__ = [
     "canonical_json_bytes",
     "load_experiment",
     "load_platform_config",
+    "load_secret_file",
     "sha256_hex",
 ]

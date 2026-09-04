@@ -61,7 +61,7 @@ the dependency direction in `../ARCHITECTURE.md` when added.
 
 | Boundary | Untrusted input | Current transport and control |
 | --- | --- | --- |
-| Configuration and environment | YAML values, paths, mode flags, database URLs, and credential presence | Local files/process environment; strict parsing and forbidden-live-term checks apply, while target file-backed secrets are not implemented |
+| Configuration and environment | YAML values, paths, mode flags, database URLs, and credential presence | Strict YAML parsing and the owner-private secret-file primitive are implemented; `RuntimeSettings`, environment selection, and service-specific loading are not |
 | Standalone collector Alpaca data | REST pages, stream frames, timestamps, symbols, numeric values, rate-limit metadata, disconnects, and error categories | Direct HTTPS/WSS to fixed official data hosts using the collector data-key namespace, certificate/hostname verification, explicit timeouts, bounds, and shared canonical validation |
 | Legacy Alpaca market data | Historical/stream SDK responses, account-scoped feed access, timestamps, bars, disconnects, and SDK exceptions | Locked `alpaca-py` clients using the legacy paper credential object/namespace; feed allowlist, bounded reconnects, completed-bar checks, durable bar storage, and redacted errors; it is not process-credential-isolated from legacy paper execution |
 | Legacy Yahoo compatibility | Configured tickers/date bounds and yfinance responses | Optional `legacy-yahoo` dependency; normalization/empty-series validation applies, but fixed-host and explicit transport-timeout controls are not implemented |
@@ -85,6 +85,10 @@ not an egress firewall.
   triggers, monotonic checkpoints, and singleton fencing tokens.
 - Provider URLs are constants. The collector rejects proxy inheritance and endpoint
   overrides; non-loopback PostgreSQL requires `sslmode=verify-full`.
+- The platform secret primitive accepts only the closed seven-source enum and descriptor-walks a
+  bounded canonical POSIX path without following symlinks. It requires a current-owner regular
+  file in mode 0400 or 0600, reads at most 16 KiB of UTF-8 without NUL, and removes exactly one
+  terminal LF; all rejection errors omit the path, value, and operating-system exception.
 - Legacy broker construction fixes `paper=True`; static tests reject live endpoints,
   generic credential names, and alternate live broker classes.
 - Durable intent precedes submission; deterministic client IDs and reconciliation contain
@@ -104,6 +108,11 @@ database rows, or test fixtures. Current collector error paths report exception 
 credential wrappers redact their values. Legacy logging redacts known values and common
 secret-bearing key/header forms.
 
+The reusable platform loader keeps its result only in a closed, immutable in-memory wrapper whose
+ordinary, container, logging, and Pydantic renderings are `<redacted>` and whose pickling is
+rejected. It does not inspect the environment, persist a value, or grant service authority. No
+runtime service consumes it yet.
+
 PostgreSQL should be private and encrypted in transit; backups and encryption at rest are
 operator/provider responsibilities. SQLite, runtime logs, downloaded data, and outputs are
 ignored local files and require host-level access controls.
@@ -115,7 +124,7 @@ ignored local files and require host-level access controls.
 | Malformed or oversized provider payload | Bounded decoding, schema validation, protocol failure classification | Stop or bounded retry; record safe collector event |
 | Duplicate/corrected bar | Stable observation/content identities and append-only rows | Deterministic projection and revision |
 | Stale collector after failover | Lease expiry and fencing checked on every lease-protected ingestion mutation | Takeover marks stale run failed; stale writes reject |
-| Credential disclosure | Ignore rules, redacted wrappers/logs, empty CI secrets, sentinel tests | Revoke/rotate, contain workload, correct leak path |
+| Credential disclosure | Ignore rules, redacted wrappers/logs, empty CI secrets, and direct sentinel tests for the file-loader rendering/error surfaces | Revoke/rotate, contain workload, correct leak path |
 | SQL injection or routing override | SQLAlchemy binding and rejected URL override keys | Refuse startup/request; inspect audit evidence |
 | Strategy bypass of risk | Separate strategy, risk, planner, and broker responsibilities | Block execution and add architecture regression test |
 | Submission timeout or duplicate event | Intent-first persistence, stable client ID, idempotent events | Mark ambiguous and reconcile; never blind retry |
@@ -162,8 +171,9 @@ submission disabled, no default path submits.
 ## Residual risks
 
 - Credential-based Alpaca behavior and hosted database operation have not been validated.
-- Environment-variable secrets are visible to the process; target secret-file interfaces
-  and stronger process-role separation are `NOT_IMPLEMENTED`.
+- Legacy environment-variable secrets remain visible to their processes. The low-level platform
+  file loader exists, but `RuntimeSettings`, service-scoped startup/mounts, local bootstrap, and
+  full sentinel integration are `NOT_IMPLEMENTED`.
 - The current dashboard reads SQLite directly rather than through an authenticated API.
 - The local dashboard launcher removes legacy paper variables but can inherit data-provider and
   database variables from its parent environment; code does not consume them, but least-privilege

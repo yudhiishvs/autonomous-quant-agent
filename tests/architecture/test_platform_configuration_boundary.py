@@ -7,6 +7,7 @@ from pathlib import Path
 
 CONFIG_MODULE = Path("src/adaptive_trader/platform/config.py")
 CLI_MODULE = Path("src/adaptive_trader/platform/cli.py")
+SECURITY_MODULE = Path("src/adaptive_trader/platform/security.py")
 UNIVERSE_MODULE = Path("src/adaptive_trader/platform/universe.py")
 ALLOWED_IMPORTS = {
     CLI_MODULE: {
@@ -37,6 +38,16 @@ ALLOWED_IMPORTS = {
         "yaml.constructor",
         "yaml.events",
         "yaml.nodes",
+    },
+    SECURITY_MODULE: {
+        "__future__",
+        "enum",
+        "os",
+        "pathlib",
+        "pydantic",
+        "pydantic_core",
+        "stat",
+        "typing",
     },
     UNIVERSE_MODULE: {"__future__", "enum", "pydantic", "re", "typing"},
 }
