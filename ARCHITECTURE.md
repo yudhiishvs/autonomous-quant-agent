@@ -57,15 +57,18 @@ access with fakes and guard the common Python TCP connection paths used by curre
 
 | Module or entry point | Responsibility and owned state | Public interface | Allowed dependencies | Forbidden direction / failure behavior |
 | --- | --- | --- | --- | --- |
-| `adaptive_trader.cli` | Commands for backtest, replay, observer, paper checks, status, reconciliation, halt/resume, and reports | `main()` and `adaptive-portfolio-agent` | Configuration and lazily constructed adapters | Import alone must not construct network clients; failed gates stop mutation |
-| `config.py` and `configs/*.yaml` | Strict non-secret configuration and hashes | `AppConfig`, section models, and `load_config()` | Pydantic and YAML | Credentials and real-money configuration are rejected |
-| `data.py`, `market_data_live.py` | Daily research data and legacy minute-stream providers | `MarketData`, load/validate/generate functions including compatibility-only `download_market_data()`, `MarketDataProvider`, and concrete providers | Synthetic/replay sources; Alpaca at explicit runtime boundaries; optional `legacy-yahoo` adapter | Future data cannot enter an earlier decision |
-| `strategies/`, `regimes.py`, `allocator.py` | Legacy long-only proposals and allocation | Strategy classes plus regime and allocation functions consumed by orchestration | Feature and immutable input data | No broker mutation or risk-policy ownership |
-| `risk.py` | Independent legacy exposure, freshness, loss, and drawdown controls | `RiskContext`, `RiskEngine`, and `apply_risk_controls()` | Proposed weights and operational context | Missing or nonfinite safety inputs block exposure |
-| `execution.py`, `broker.py`, `reconciliation.py` | Plan, persist, submit when gated, consume updates, reconcile | `OrderStateMachine`, `OrderPlanner`, `OrderManager`, `Broker`, fake/paper implementations, and `Reconciler` | Fake broker or literal-paper Alpaca clients | No real-money client; ambiguous submission is not blindly retried |
-| `persistence.py` | SQLite schema, immutable receipts, events, projections, incidents, and latches | `Database`, `AuditRepository`, readiness and canonical-hash helpers | SQLAlchemy | Receipts are not rewritten with later outcomes |
-| `live.py` | Once-per-session orchestration, monitors, shutdown, and recovery | `LiveService`, `LiveCycleResult`, and `one_shot()` | Explicit clock, data, broker, repository boundaries | Blocking incidents and stale state dominate strategy output |
-| `reporting.py`, `forward_reporting.py`, `app.py` | Derived evidence and read-only presentation | Report-generation functions and the Streamlit process entry point | SQLite and generated artifacts | No broker mutation from presentation code |
+| `adaptive_trader.cli` | Dispatches commands; owns parsed arguments and temporary adapter lifetimes, not durable state | `main()` and `adaptive-portfolio-agent` | Configuration, orchestrators, repositories, and reports constructed lazily | Import alone must not construct network clients; command failure exits nonzero and failed gates stop mutation |
+| `config.py` and `configs/*.yaml` | Validates configuration and derives its canonical hash; owns parsed in-memory settings | `AppConfig`, section models, and `load_config()` | Dataclasses and YAML | Credentials and real-money configuration are rejected; unknown/invalid fields fail startup |
+| `data.py`, `market_data_live.py` | Validates daily research data and implements legacy historical/stream providers; provider/`BarStore` instances own connection, buffer, and freshness state | `MarketData`, load/validate/generate functions including compatibility-only `download_market_data()`, `MarketDataProvider`, concrete providers, and `BarStore` | Synthetic/replay data, optional `legacy-yahoo`, Alpaca SDK at explicit runtime boundaries, clock, logging, and persistence | Future/inconsistent bars fail validation; connection errors stay typed/redacted; these modules do not plan or submit orders |
+| `strategies/`, `regimes.py`, `allocator.py` | Produces legacy long-only proposals and allocations; owns configuration/in-memory calculation state only | Strategy classes plus regime and allocation functions consumed by orchestration | Features, immutable market inputs, and configuration | No persistence, broker mutation, execution authority, or risk-policy ownership; invalid numerical inputs reject or yield documented safe outputs |
+| `decision_engine.py` | Builds a completed-history forward target; owns its injected config/provider, calculation components, mutable operational context, and latest immutable diagnostic metadata | `ForwardDecisionEngine`, `ForwardDecisionMetadata`, and `ForwardDecisionError` | Data-provider protocol, features, strategies, regime, allocator, and risk | No broker, order manager, or repository dependency; future bars are excluded and incomplete/nonfinite inputs fail without producing a target |
+| `backtest.py` | Runs six causal historical portfolios and owns in-memory simulation/results until artifacts are written | `BacktestSuiteResult`, `run_backtest_suite()`, and `run_pipeline_from_config()` | Configuration, normalized data, strategies, regime, allocator, risk, NumPy, and pandas | No broker side effect or live state; invalid chronology/assumptions raise `BacktestError` and partial results are not presented as complete |
+| `risk.py` | Independently evaluates legacy exposure, freshness, loss, and drawdown; owns configuration and per-call calculation state only | `RiskContext`, `RiskEngine`, and `apply_risk_controls()` | Proposed weights, market/account facts, configuration, NumPy, and pandas | No broker or persistence mutation; missing, stale, or nonfinite safety input blocks or reduces exposure |
+| `execution.py`, `broker.py`, `reconciliation.py` | Plans and persists orders, talks to a selected broker, consumes updates, and reconciles; manager/fake-broker instances own bounded runtime state while SQLite owns durable facts | `OrderStateMachine`, `OrderPlanner`, `OrderManager`, `Broker`, fake/paper implementations, and `Reconciler` | Clock, configuration, logging/redaction, `AuditRepository`, and fake or fixed paper-only Alpaca clients | No real-money client; invalid transitions reject, and ambiguous submission is persisted and reconciled rather than blindly retried |
+| `persistence.py` | Owns legacy SQLite schema, immutable receipts, events, projections, incidents, and latches | `Database`, `AuditRepository`, readiness and canonical-hash helpers | SQLAlchemy, SQLite, and canonical serialization helpers | Transaction failure rolls back; immutable facts are not rewritten with later outcomes |
+| `live.py` | Coordinates once-per-session work, monitors, shutdown, and recovery; owns worker threads, stop state, and current-cycle context | `LiveService`, `LiveCycleResult`, and `one_shot()` | Explicit clock, data provider, decision target, broker, execution, reconciliation, and repository boundaries | Blocking incidents, stale/ambiguous state, or worker failure prevent exposure and propagate a bounded failure |
+| `replay.py` | Replays supplied event order through the live path; owns a fake clock/broker and, by default, an isolated in-memory database for a run | `ReplayResult`, `generate_synthetic_replay_events()`, `load_replay_events()`, and `run_replay()` | Fake broker/clock, replay provider, decision engine, live orchestration, and persistence | No external provider/broker; malformed or duplicate-sequence evidence fails, out-of-order timestamps cannot move the clock backward, and deterministic logical state is required |
+| `reporting.py`, `forward_reporting.py`, `app.py` | Derives evidence and renders read-only views; owns transient frames/UI state and generated report files | Report-generation functions and the Streamlit process entry point | SQLite, bounded artifact paths, pandas, and Streamlit | No broker mutation; missing/corrupt state produces a bounded report/UI error rather than changing authority state |
 
 The detailed legacy schema and behavior remain documented in
 `docs/architecture.md` and `docs/data_dictionary.md`.
@@ -74,13 +77,13 @@ The detailed legacy schema and behavior remain documented in
 
 | Module | Responsibility and owned state | Public interface | Allowed dependencies | Forbidden direction / failure behavior |
 | --- | --- | --- | --- | --- |
-| `collection.universe` | Immutable 29-symbol, content-addressed collection contract | `CollectionRole`, `UniverseMemberV1`, `CollectionUniverseV1`, and `COLLECTION_UNIVERSE_V1` | Standard library | Every member has `execution_authorized=false`; WDC cannot substitute for SNDK |
-| `collection.contracts` | Canonical OHLCV validation, identity/content hashes, raw provenance | `MarketBarV1` and `RawBarObservationV1` | Frozen dataclasses, `Decimal`, UTC | Invalid, nonfinite, future-inconsistent, or malformed values are rejected |
-| `collection.alpaca` | Fixed historical REST and IEX WebSocket data transports | `AlpacaHistoricalBarSource`, `AlpacaLiveBarSource`, and `AlpacaDataSourceError` | `requests`, `websockets` | No trading SDK, broker endpoint override, or paper credential access |
-| `collection.service` | XNYS session catch-up, live ingestion, overlap reconciliation, retries, and worker shutdown | Source protocols, `CollectorServiceConfig`, `CollectorService`, and `completed_bar_cutoff()` | Provider and repository protocols | Deterministic/protocol failures stop; retry and shutdown waits are bounded |
-| `collection.postgres` | Atomic observation/projection/checkpoint writes and lease fencing | `PostgresMarketDataRepository`, `normalize_postgres_url()`, and `postgres_connect_args()` | SQLAlchemy and psycopg | Ingestion/run/event/bar/checkpoint mutations after acquisition are fenced; idempotent universe registration and lease lifecycle are explicit exceptions; SQL is parameterized |
-| `collection.schema`, `migrations/` | Alembic-owned `market_data` schema and immutable-row triggers | SQLAlchemy metadata/revision contract and `alembic upgrade head` | PostgreSQL | Runtime startup refuses schema or trigger drift |
-| `collection.cli` | Collector command dispatch and safe output | `main()`, `adaptive-market-data`, and `migrate`/`status`/`ready`/`backfill`/`run` commands | Collector modules only | Only `backfill` and `run` load data credentials; errors omit secret values |
+| `collection.universe` | Defines the immutable in-process 29-symbol collection contract; owns no runtime state | `CollectionRole`, `UniverseMemberV1`, `CollectionUniverseV1`, and `COLLECTION_UNIVERSE_V1` | Standard library | Every member has `execution_authorized=false`; WDC cannot substitute for SNDK |
+| `collection.contracts` | Validates canonical OHLCV, identity/content hashes, and raw provenance; value objects own immutable event data | `MarketBarV1` and `RawBarObservationV1` | Frozen dataclasses, `Decimal`, and UTC | Invalid, nonfinite, future-inconsistent, or malformed values are rejected before persistence |
+| `collection.alpaca` | Implements fixed historical REST and IEX WebSocket data transports; instances own bounded HTTP/stream lifecycle state | `AlpacaHistoricalBarSource`, `AlpacaLiveBarSource`, and `AlpacaDataSourceError` | `requests`, `websockets`, canonical contracts, and collection-universe checks | No trading SDK, broker endpoint override, paper credential access, or persistence mutation; malformed/protocol failures are typed |
+| `collection.service` | Coordinates XNYS catch-up, live ingestion, overlap reconciliation, retries, and worker shutdown; owns lease/run references, counters, stop/fatal state, and worker threads | Source protocols, `CollectorServiceConfig`, `CollectorService`, and `completed_bar_cutoff()` | Source/repository protocols, canonical contracts, immutable universe, `exchange_calendars`, and bounded threading/timing primitives | No trading or DDL dependency; deterministic/protocol failures stop, retry and shutdown waits are bounded, and stale fencing rejects writes |
+| `collection.postgres` | Owns collector PostgreSQL rows and implements transactional observation/projection batches, separate or combined checkpoint updates, runs, events, and lease fencing | `PostgresMarketDataRepository`, `normalize_postgres_url()`, and `postgres_connect_args()` | SQLAlchemy, psycopg, schema metadata, repository contracts, canonical observations, and immutable universe | Ingestion/run/event/bar/checkpoint mutations after acquisition are fenced; idempotent universe registration and lease lifecycle are explicit exceptions; SQL is parameterized and failures roll back the current transaction |
+| `collection.schema`, `migrations/` | Defines Alembic-owned `market_data` tables, constraints, indexes, and selected immutable-row triggers; PostgreSQL owns durable schema state | SQLAlchemy metadata/revision contract and `alembic upgrade head` | PostgreSQL and Alembic | Runtime startup refuses schema or required-trigger drift; runtime code does not create schema |
+| `collection.cli` | Dispatches collector commands; owns parsed settings and adapter lifetimes, not durable state | `main()`, `adaptive-market-data`, and `migrate`/`status`/`ready`/`backfill`/`run` commands | Collector configuration, sources, service, repository, and migrations | Only `backfill` and `run` load data credentials; import/status/readiness avoid provider construction and errors omit secret values |
 
 The collector owns eight PostgreSQL tables: `collection_universes`,
 `bar_observations`, `current_bars`, `collector_checkpoints`, `collector_leases`,
@@ -92,13 +95,15 @@ reconciliation are the active recovery mechanism.
 
 ### Collector
 
-1. The CLI verifies the Alembic head and immutable collection-universe hash.
+1. The CLI verifies the Alembic head and registers the content-addressed collection-universe row.
 2. A singleton lease is acquired; fencing tokens authorize each state mutation.
 3. Historical requests are clipped to XNYS regular-session windows.
 4. REST and WebSocket payloads pass through the same canonical contracts.
 5. `bar_observations` retains each stable observation; `current_bars` selects one
    deterministic projection and increments revisions for effective content changes.
-6. A checkpoint advances in the same transaction only after its queried interval commits.
+6. After every observation batch is durable, a separate fenced transaction advances the queried
+   interval checkpoint. A crash between these steps leaves the checkpoint behind; overlap replay
+   is idempotent and does not skip the already-stored bars.
 7. The live path reconciles an overlapping completed interval every minute.
 8. Shutdown stops admission, joins workers within a shared bound, finalizes the run, and
    releases the lease without hiding the primary failure.
@@ -143,9 +148,11 @@ reconciliation are the active recovery mechanism.
 ## Error, concurrency, and recovery model
 
 Collector REST, stream, database, and worker waits are bounded. Retryable provider failures
-use capped backoff; invalid protocol or bar content fails closed. PostgreSQL transactions
-couple observation, projection, and checkpoint updates. A singleton lease plus fencing token
-prevents a stale process from continuing to write after takeover.
+use capped backoff; invalid protocol or bar content fails closed. Each PostgreSQL observation
+batch atomically updates its current-bar projection. Historical collection advances coverage in a
+separate transaction after all batches for that request are durable. A crash can therefore cause
+safe duplicate replay, not an optimistic checkpoint. A singleton lease plus fencing token prevents
+a stale process from continuing to write after takeover.
 
 The legacy live service coordinates scheduled work and monitor loops around injected clock,
 broker, data, and repository boundaries. Durable decision identity prevents a restart from
@@ -156,7 +163,9 @@ before exposure can increase.
 
 - Collection authority is not execution authority.
 - A strategy proposal is not order authorization.
-- Market-data and paper-account credentials use separate names and containers.
+- The standalone collector's data credentials use a namespace/container separate from the legacy
+  paper adapter. The legacy Alpaca market-data provider still shares the legacy paper credential
+  object and environment namespace; target service-specific file secrets are not implemented.
 - The collector image omits the external Alpaca package and legacy execution modules.
 - The current dashboard is read-only but still has direct access to legacy SQLite; moving
   reads behind a private API is target work.
@@ -222,7 +231,8 @@ acceptance evidence live in `docs/execution-plans/platform-core.md`.
 2. No ordinary test, CI job, or offline regression contacts Alpaca.
 3. Collection membership grants no research or execution authority.
 4. A bar identity includes provider, feed, adjustment, symbol, timeframe, and UTC start.
-5. Observation persistence and checkpoint advancement are atomic and lease-fenced.
+5. Observation/projection batches and later checkpoint advancement are ordered, transactional,
+   lease-fenced, and idempotently replayable; the two steps are not one transaction.
 6. A decision cannot use data that became available after its recorded cutoff.
 7. Strategy output cannot bypass independent risk and execution authorization.
 8. Intent is durable before broker submission, and ambiguous submission is never retried
@@ -240,6 +250,8 @@ acceptance evidence live in `docs/execution-plans/platform-core.md`.
 - The current dashboard reads SQLite directly and no private HTTP control plane exists.
 - Current collector credentials are application-isolated but not provider-scoped as
   market-data-only credentials.
+- Stored collection-universe membership is not reverified at startup and has no immutability
+  trigger; a database owner can alter it without runtime detection.
 - Compose does not provision PostgreSQL or enforce a general outbound firewall.
 - The generic platform and its paper authorization path are `NOT_IMPLEMENTED`; the current
   legacy paper adapter must not be presented as target-platform validation.
