@@ -61,7 +61,7 @@ the dependency direction in `../ARCHITECTURE.md` when added.
 
 | Boundary | Untrusted input | Current transport and control |
 | --- | --- | --- |
-| Configuration and environment | YAML values, paths, mode flags, database URLs, and credential presence | Strict YAML parsing and the owner-private secret-file primitive are implemented; `RuntimeSettings`, environment selection, and service-specific loading are not |
+| Configuration and environment | YAML values, paths, mode flags, URLs, and credential-file presence | Strict YAML parsing, explicit injected-environment snapshots, exact service/secret scopes, opaque file references, and the owner-private loader are implemented; service commands, bootstrap, and container mounts are not |
 | Standalone collector Alpaca data | REST pages, stream frames, timestamps, symbols, numeric values, rate-limit metadata, disconnects, and error categories | Direct HTTPS/WSS to fixed official data hosts using the collector data-key namespace, certificate/hostname verification, explicit timeouts, bounds, and shared canonical validation |
 | Legacy Alpaca market data | Historical/stream SDK responses, account-scoped feed access, timestamps, bars, disconnects, and SDK exceptions | Locked `alpaca-py` clients using the legacy paper credential object/namespace; feed allowlist, bounded reconnects, completed-bar checks, durable bar storage, and redacted errors; it is not process-credential-isolated from legacy paper execution |
 | Legacy Yahoo compatibility | Configured tickers/date bounds and yfinance responses | Optional `legacy-yahoo` dependency; normalization/empty-series validation applies, but fixed-host and explicit transport-timeout controls are not implemented |
@@ -89,6 +89,9 @@ not an egress firewall.
   bounded canonical POSIX path without following symlinks. It requires a current-owner regular
   file in mode 0400 or 0600, reads at most 16 KiB of UTF-8 without NUL, and removes exactly one
   terminal LF; all rejection errors omit the path, value, and operating-system exception.
+- Platform runtime composition accepts only an explicitly injected mapping, rejects generic Alpaca
+  credential variables by presence, validates six nonsecret settings, and selects opaque
+  secret-file references from an exact service/mode matrix without reading their contents.
 - Legacy broker construction fixes `paper=True`; static tests reject live endpoints,
   generic credential names, and alternate live broker classes.
 - Durable intent precedes submission; deterministic client IDs and reconciliation contain
@@ -108,10 +111,13 @@ database rows, or test fixtures. Current collector error paths report exception 
 credential wrappers redact their values. Legacy logging redacts known values and common
 secret-bearing key/header forms.
 
-The reusable platform loader keeps its result only in a closed, immutable in-memory wrapper whose
+The reusable platform loader keeps its result only in an immutable in-memory wrapper whose
 ordinary, container, logging, and Pydantic renderings are `<redacted>` and whose pickling is
-rejected. It does not inspect the environment, persist a value, or grant service authority. No
-runtime service consumes it yet.
+rejected. `RuntimeSettings` stores only opaque references whose rendering and JSON schema omit the
+path; loading still requires an explicit call at the future adapter boundary. Neither primitive
+inspects ambient process state, persists a value, or creates a client. No runtime service command
+consumes the loader yet. Installed in-process Python remains trusted; process and mount isolation,
+not object-construction tricks, is the credential security boundary.
 
 PostgreSQL should be private and encrypted in transit; backups and encryption at rest are
 operator/provider responsibilities. SQLite, runtime logs, downloaded data, and outputs are
@@ -171,9 +177,9 @@ submission disabled, no default path submits.
 ## Residual risks
 
 - Credential-based Alpaca behavior and hosted database operation have not been validated.
-- Legacy environment-variable secrets remain visible to their processes. The low-level platform
-  file loader exists, but `RuntimeSettings`, service-scoped startup/mounts, local bootstrap, and
-  full sentinel integration are `NOT_IMPLEMENTED`.
+- Legacy environment-variable secrets remain visible to their processes. Platform runtime settings
+  select service-scoped opaque references, but service command integration, least-privilege mounts,
+  local bootstrap, and full sentinel integration are `NOT_IMPLEMENTED`.
 - The current dashboard reads SQLite directly rather than through an authenticated API.
 - The local dashboard launcher removes legacy paper variables but can inherit data-provider and
   database variables from its parent environment; code does not consume them, but least-privilege

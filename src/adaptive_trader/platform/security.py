@@ -8,7 +8,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, SupportsIndex
 
-from pydantic import GetCoreSchemaHandler
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
 _MAX_SECRET_BYTES = 16 * 1024
@@ -16,6 +17,7 @@ _MAX_SECRET_PATH_BYTES = 4096
 _REDACTED = "<redacted>"
 _CONCRETE_PATH_TYPE = type(Path())
 _SECRET_CONSTRUCTION_TOKEN = object()
+_SECRET_REFERENCE_CONSTRUCTION_TOKEN = object()
 
 
 class SecretFileVariable(StrEnum):
@@ -117,6 +119,209 @@ class RedactedSecret:
             ),
         )
 
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema_: core_schema.CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Describe only the redacted output surface, never accepted secret input."""
+
+        del core_schema_
+        if handler.mode == "validation":
+            return {
+                "not": {},
+                "description": "Python RedactedSecret instance only; JSON input is rejected.",
+            }
+        return {
+            "type": "string",
+            "const": _REDACTED,
+            "readOnly": True,
+            "description": "Output-only redacted secret marker.",
+        }
+
+
+class SecretFileReference:
+    """An immutable, redacted reference to one lexically validated secret file."""
+
+    __slots__ = ("__path", "__source")
+    __path: Path
+    __source: SecretFileVariable
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        source: SecretFileVariable,
+        _token: object,
+    ) -> None:
+        if (
+            _token is not _SECRET_REFERENCE_CONSTRUCTION_TOKEN
+            or type(path) is not _CONCRETE_PATH_TYPE
+            or type(source) is not SecretFileVariable
+        ):
+            raise TypeError("secret file references must be created with from_path")
+        object.__setattr__(self, "_SecretFileReference__path", path)
+        object.__setattr__(self, "_SecretFileReference__source", source)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise AttributeError("secret file references are immutable")
+
+    def __delattr__(self, name: str) -> None:
+        raise AttributeError("secret file references are immutable")
+
+    def __str__(self) -> str:
+        return f"<secret-file-reference source={self.__source.value} configured=true>"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __eq__(self, other: object) -> bool:
+        return self is other
+
+    def __hash__(self) -> int:
+        return id(self)
+
+    def __copy__(self) -> SecretFileReference:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, object]) -> SecretFileReference:
+        return self
+
+    def __reduce__(self) -> str | tuple[Any, ...]:
+        raise TypeError("secret file references cannot be serialized")
+
+    def __reduce_ex__(self, protocol: SupportsIndex) -> str | tuple[Any, ...]:
+        raise TypeError("secret file references cannot be serialized")
+
+    @property
+    def source(self) -> SecretFileVariable:
+        """Return the allowlisted source identity without disclosing the path."""
+
+        return self.__source
+
+    @property
+    def configured(self) -> bool:
+        """Report that this closed reference was successfully configured."""
+
+        return True
+
+    @classmethod
+    def from_path(
+        cls,
+        path: str | Path,
+        *,
+        source: SecretFileVariable,
+        application_root: Path,
+    ) -> SecretFileReference:
+        """Create a reference using canonical POSIX path syntax without filesystem access."""
+
+        if cls is not SecretFileReference:
+            raise TypeError("secret file references do not support subclass factories")
+        if type(source) is not SecretFileVariable:
+            raise SecretFileError("secret file source is not supported")
+        if type(application_root) is not _CONCRETE_PATH_TYPE:
+            raise _error(source, "application root must be an exact pathlib.Path")
+
+        root_is_absolute, root_components = _secret_path_components(
+            application_root,
+            source=source,
+            allow_root=True,
+        )
+        if not root_is_absolute:
+            raise _error(source, "application root must be absolute")
+
+        path_is_absolute, path_components = _secret_path_components(path, source=source)
+        absolute_components = (
+            path_components if path_is_absolute else root_components + path_components
+        )
+        absolute_rendered = "/" + "/".join(absolute_components)
+        if len(absolute_rendered.encode("utf-8")) > _MAX_SECRET_PATH_BYTES:
+            raise _error(source, "path is not bounded UTF-8")
+
+        absolute_path = _CONCRETE_PATH_TYPE(absolute_rendered)
+        return SecretFileReference(
+            absolute_path,
+            source=source,
+            _token=_SECRET_REFERENCE_CONSTRUCTION_TOKEN,
+        )
+
+    def load(self) -> RedactedSecret:
+        """Load the referenced value through the hardened secret-file boundary."""
+
+        return load_secret_file(self.__path, source=self.__source)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        source_type: Any,
+        handler: GetCoreSchemaHandler,
+    ) -> core_schema.CoreSchema:
+        del source_type, handler
+
+        def configured_instance_or_redacted_marker(value: object) -> object:
+            if type(value) is cls:
+                return value
+            return _REJECTED_SECRET_INPUT
+
+        def serialize_metadata(value: object) -> dict[str, str | bool]:
+            if type(value) is not cls:
+                return {"source": "unsupported", "configured": False}
+            reference = value
+            return {
+                "source": reference.__source.value,
+                "configured": True,
+            }
+
+        metadata_schema = core_schema.typed_dict_schema(
+            {
+                "source": core_schema.typed_dict_field(core_schema.str_schema()),
+                "configured": core_schema.typed_dict_field(core_schema.bool_schema()),
+            }
+        )
+        return core_schema.chain_schema(
+            [
+                core_schema.no_info_plain_validator_function(
+                    configured_instance_or_redacted_marker,
+                ),
+                core_schema.is_instance_schema(cls),
+            ],
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                serialize_metadata,
+                return_schema=metadata_schema,
+                when_used="always",
+            ),
+        )
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema_: core_schema.CoreSchema,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Describe safe reference metadata without exposing the configured path."""
+
+        del core_schema_
+        if handler.mode == "validation":
+            return {
+                "not": {},
+                "description": "Python SecretFileReference instance only; JSON input is rejected.",
+            }
+        return {
+            "type": "object",
+            "readOnly": True,
+            "additionalProperties": False,
+            "properties": {
+                "source": {
+                    "type": "string",
+                    "enum": [source.value for source in SecretFileVariable],
+                },
+                "configured": {"type": "boolean", "const": True},
+            },
+            "required": ["source", "configured"],
+            "description": "Output-only secret-file reference metadata.",
+        }
+
 
 def _error(source: SecretFileVariable, reason: str) -> SecretFileError:
     return SecretFileError(f"{source.value}: secret file {reason}")
@@ -152,12 +357,15 @@ def _secret_path_components(
     path: str | Path,
     *,
     source: SecretFileVariable,
+    allow_root: bool = False,
 ) -> tuple[bool, tuple[str, ...]]:
     if type(path) not in {str, _CONCRETE_PATH_TYPE}:
         raise _error(source, "path must be exact text or pathlib.Path")
     rendered = os.fspath(path)
     if type(rendered) is not str or not rendered or "\x00" in rendered or "\\" in rendered:
         raise _error(source, "path is not a canonical POSIX path")
+    if len(rendered) > _MAX_SECRET_PATH_BYTES:
+        raise _error(source, "path is not bounded UTF-8")
 
     encoding_failed = False
     encoded = b""
@@ -169,6 +377,8 @@ def _secret_path_components(
         raise _error(source, "path is not bounded UTF-8")
 
     is_absolute = rendered.startswith("/")
+    if allow_root and rendered == "/":
+        return True, ()
     components = rendered.split("/")
     if is_absolute:
         components = components[1:]
@@ -310,6 +520,7 @@ def load_secret_file(
                         file_status.st_mode,
                         file_status.st_size,
                         file_status.st_mtime_ns,
+                        file_status.st_ctime_ns,
                     )
                     with os.fdopen(file_descriptor, "rb", closefd=False) as stream:
                         payload = stream.read(_MAX_SECRET_BYTES + 1)
@@ -321,6 +532,7 @@ def load_secret_file(
                         after_status.st_mode,
                         after_status.st_size,
                         after_status.st_mtime_ns,
+                        after_status.st_ctime_ns,
                     )
                     if before_read != after_read:
                         failure_reason = "changed while being read"

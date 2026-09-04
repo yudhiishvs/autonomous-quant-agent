@@ -54,7 +54,7 @@ The Phase 0 current/target matrix is:
 | Subsystem | Current evidence | Current limitations | Reuse plan | New work | Security implications |
 | --- | --- | --- | --- | --- | --- |
 | Package and commands | Typed `adaptive_trader` package, generic canonical/configuration boundary, two legacy scripts, and both new aliases | Remaining platform modules and the composed operational commands are absent | Preserve every legacy import and command | Add each nonempty platform boundary and remaining CLI command with its owning service | New modules must not collapse service authority or expose broker objects |
-| Configuration and secrets | Strict legacy/collector settings, immutable experiment/profile composition, broker-free static validation, and an owner-private secret-file primitive | Current collector secrets remain direct `APA_*` values; platform `RuntimeSettings`, service-scoped loading, and bootstrap are absent | Reuse validation patterns only | Add file-backed runtime settings and secret bootstrap without expanding static-profile authority | Reject unknown fields, unsafe files, generic SDK variables, and secret serialization |
+| Configuration and secrets | Strict legacy/collector settings, immutable experiment/profile composition, broker-free static validation, owner-private secret loading, and pure service-scoped runtime composition | Current collector secrets remain direct `APA_*` values; target service commands, least-privilege mounts, and bootstrap are absent | Reuse validation patterns only | Adopt file-backed runtime settings in service commands and add secret bootstrap without expanding static-profile authority | Reject unknown fields, unsafe files, generic SDK variables, out-of-scope references, and secret serialization |
 | Market data | Tested REST/WebSocket collector, normalization, overlap reconciliation, leases, and shutdown | Fixed 29-symbol universe, predecessor schema, checkpoint is not contiguous readiness | Adapt proven transport and lifecycle behavior behind generic contracts | Add canonical revisions, calendars, gaps, aggregation, basket watermarks, and datasets | Collector remains data-only, fixed-host, bounded, and unable to import trading code |
 | Persistence | SQLite legacy evidence plus PostgreSQL collector migration and transactions | No 25-table `aqa_*` schema, service roles, unified repositories, or audit chain | Preserve legacy/collector state and additive migration history | Add PostgreSQL 16 operational schema, grants, repositories, and SQLite test compatibility | Least-privilege roles, transactional invariants, append-only history, and tamper detection |
 | Scheduling and signals | Legacy cycle orchestration and strategy decisions | No durable slots, leases, registered proposal contract, or signed envelope | Characterize only compatibility-facing behavior | Add deterministic slots, recovery, entry points, built-ins, envelopes, and default-deny approval | Strategy code receives no broker credential or execution authority |
@@ -65,12 +65,13 @@ The Phase 0 current/target matrix is:
 
 The generic `adaptive_trader.platform` package now contains canonical serialization, hashing,
 universe roles, strict experiment/profile loading, immutable `ExperimentSpec`/`PlatformConfig`
-composition, broker-free static CLI validation through both new aliases, and a descriptor-relative
-owner-private secret-file loader. The exact experiment and all three profiles are present.
-`RuntimeSettings`, service-scoped secret loading, local bootstrap, signed domain contracts, the
-complete `aqa_*` schema and roles, aggregation, basket watermarks, scheduler, jobs/outbox, private
-API, API-backed dashboard, unified audit chain, offline vertical slice, PG16 restore proof, and the
-complete delivery/security harness remain absent.
+composition, broker-free static CLI validation through both new aliases, descriptor-relative
+owner-private secret loading, opaque secret-file references, and strict `RuntimeSettings` composed
+from an explicitly injected environment and exact service/mode authority matrix. The exact
+experiment and all three profiles are present. Service command adoption, local bootstrap, signed
+domain contracts, the complete `aqa_*` schema and roles, aggregation, basket watermarks, scheduler,
+jobs/outbox, private API, API-backed dashboard, unified audit chain, offline vertical slice, PG16
+restore proof, and the complete delivery/security harness remain absent.
 
 ## 4. Requirements being addressed
 
@@ -466,9 +467,13 @@ commit count is planned.
   source inventory, descriptor-relative no-symlink traversal, current-owner 0400/0600 files,
   bounded content, immutable redaction, and safe Pydantic/error behavior without environment,
   persistence, client, or network authority.
+- [x] `IMPLEMENTED_AND_VERIFIED` — strict immutable runtime settings snapshot only an explicitly
+  injected environment, enforce the exact six nonsecret defaults and seven file-reference names,
+  reject generic Alpaca variables, confine paths, and select only mode-compatible service secrets
+  without loading values or constructing clients.
 - [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene, canonical/configuration boundaries,
-  profiles, static doctor, aliases, secret-file primitive, and Python 3.11 typing are in place;
-  `RuntimeSettings`, service composition, bootstrap, and the remaining commands remain.
+  profiles, static doctor, aliases, secret/runtime composition, and Python 3.11 typing are in place;
+  bootstrap, service command integration, mount isolation, and the remaining commands remain.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -491,7 +496,7 @@ commit count is planned.
 | Retain Python, `uv`, PostgreSQL/SQLite, Typer, and Streamlit; add the required FastAPI boundary. | Preserves the implemented stack while adding the specified private API; FastAPI is not currently installed. | PARTIALLY_IMPLEMENTED |
 | Use PostgreSQL jobs/outbox, not a message broker. | Current workload needs transactional durability more than another distributed dependency. | NOT_IMPLEMENTED |
 | Move dashboard reads behind the API. | Removes database authority from presentation code. | NOT_IMPLEMENTED |
-| Use only file-backed secrets in new services. | The reusable loader now prevents unsafe file acceptance and ordinary serialization; runtime/service selection and mounts remain. | PARTIALLY_IMPLEMENTED |
+| Use only file-backed secrets in new services. | The reusable loader prevents unsafe file acceptance and ordinary serialization, while runtime composition selects opaque references through an exact service/mode matrix; service command adoption and mounts remain. | PARTIALLY_IMPLEMENTED |
 | Keep paper submission unreachable by default. | Current legacy configuration disables submission; the target adds its independent default-deny verifier, and this program performs no connection. | PARTIALLY_IMPLEMENTED |
 | Reuse collector behavior selectively rather than rename it into place. | Current symbol, secret, schema, and readiness contracts differ materially. | NOT_IMPLEMENTED |
 | Use `docs/adr/` as the single decision-record authority. | Core specifies this path; the harness's conceptual `docs/design-decisions/` directory is omitted to avoid two mutable indexes. | IMPLEMENTED_AND_VERIFIED |
@@ -740,6 +745,22 @@ Secret-file primitive candidate evidence on 2026-09-04:
 | `docker compose --env-file .env.example -f docker-compose.yml config --quiet` and `git diff --check` | PASS. |
 | Independent architecture and security re-reviews | PASS after replacing a race-prone pathname check and mutable Pydantic secret with pinned descriptor-relative traversal and a closed immutable wrapper; no remaining high or medium finding. |
 
+Runtime-settings and opaque-reference candidate evidence on 2026-09-04:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv sync --locked --extra dev --extra dashboard` and `uv lock --check` | PASS — all 105 locked packages resolved, 90 packages checked, and the lockfile remained unchanged. |
+| `uv run --no-sync ruff format --check .`, `ruff check .`, and `mypy src` | PASS — 142 files formatted, lint clean, and 51 source files type-checked. |
+| `uv run --no-sync mypy --python-version 3.11 src/adaptive_trader/platform` | PASS — all seven platform source files type-checked against Python 3.11. |
+| Focused runtime-settings, secret, and configuration-boundary tests | PASS — 283 tests covering service/profile/secret matrices, hostile injected mappings, safe defaults, path and URL confinement, opaque references, secret mutation detection, Pydantic integration, and serialization/schema redaction. |
+| Focused platform branch coverage with `--cov-fail-under=85` | PASS — 477 tests and 91.19 percent branch-aware coverage for `adaptive_trader.platform`. |
+| Exact documented security-test selection | PASS — 549 tests and one upstream WebSocket deprecation warning. |
+| `uv run --no-sync pytest -q` | PASS — 886 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 63.26 seconds. |
+| Synthetic backtest and deterministic replay | PASS — the synthetic backtest completed across all six legacy portfolios; replay processed nine events, one cycle, and three fake-broker submissions. |
+| `docker compose --env-file .env.example -f docker-compose.yml config --quiet` and `git diff --check` | PASS. |
+| Local application and collector image builds | NOT RUN — Docker CLI was present, but the local daemon was unavailable; remote CI remains the applicable image-build evidence. |
+| Three independent security, API/maintainability, and final-diff reviews | PASS after correcting public construction guardrails, concurrent-file identity checks, Pydantic revalidation and schema modes, and filesystem-derived path limits; no confirmed high or medium source/test finding remains. |
+
 No real credential file was read, no external data or broker connection was made, and no Alpaca
 paper or real-money order was submitted during this baseline.
 
@@ -747,17 +768,18 @@ paper or real-money order was submitted during this baseline.
 
 Current outcome: `PARTIALLY_IMPLEMENTED`.
 
-Phase 0 and the Phase 1 canonical, universe, experiment, profile, static-validation, and secret-file
-primitive boundaries are implemented with recorded evidence. The existing collector and legacy
-regression suite provide reusable code and characterization, but they do not satisfy the complete
-generic platform contract. Phase 1 `RuntimeSettings`, service-scoped secret composition, bootstrap,
-and remaining command composition plus Phases 2–10 remain as listed in the progress checklist.
+Phase 0 and the Phase 1 canonical, universe, experiment, profile, static-validation, secret-file,
+and service-scoped runtime-setting boundaries are implemented with recorded evidence. The existing
+collector and legacy regression suite provide reusable code and characterization, but they do not
+satisfy the complete generic platform contract. Phase 1 bootstrap, service command/mount
+integration, and remaining command composition plus Phases 2–10 remain as listed in the progress
+checklist.
 Fresh PostgreSQL 16, target container runtime, image scan, SBOM, clean-package install, twice-run
 demo, and backup/restore evidence remain unavailable until their implementation exists and the
-required services are available. GitHub Actions run `33882660354` passed for pushed commit
-`3b8a995`; that run validates the existing PostgreSQL 15 and image boundaries plus the profile and
-static-CLI boundary. The current secret-loader candidate has complete local evidence above but no
-remote run yet. The target PostgreSQL 16 platform and every external adapter remain unvalidated;
+required services are available. GitHub Actions run `33888970372` passed for pushed commit
+`aab1ab5`; that run validates the existing PostgreSQL 15 and image boundaries plus the secret-file
+primitive. The current runtime-settings candidate has local evidence above but no remote run yet.
+The target PostgreSQL 16 platform and every external adapter remain unvalidated;
 credentialed external validation is intentionally prohibited in this program.
 
 This section must be replaced with exact implemented outcomes, remaining requirement statuses,

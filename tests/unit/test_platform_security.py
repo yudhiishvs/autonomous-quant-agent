@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import os
 import pickle
 import stat
 import traceback
-from pathlib import Path, PosixPath
+from pathlib import Path, PosixPath, PurePosixPath
 
 import pytest
 from pydantic import BaseModel, ValidationError
 
+import adaptive_trader.platform.security as platform_security
 from adaptive_trader.platform import (
     CanonicalizationError,
     RedactedSecret,
@@ -21,6 +23,7 @@ from adaptive_trader.platform import (
     canonical_json_bytes,
     load_secret_file,
 )
+from adaptive_trader.platform.security import SecretFileReference
 
 SENTINEL = "TEST_AQA_DATA_SECRET_DO_NOT_LEAK"
 SOURCE = SecretFileVariable.ALPACA_DATA_SECRET_KEY
@@ -28,6 +31,10 @@ SOURCE = SecretFileVariable.ALPACA_DATA_SECRET_KEY
 
 class _SecretContainer(BaseModel):
     value: RedactedSecret
+
+
+class _SecretReferenceContainer(BaseModel):
+    value: SecretFileReference
 
 
 def _write_secret(path: Path, payload: bytes, *, mode: int = 0o600) -> Path:
@@ -46,6 +53,31 @@ def test_secret_file_variable_inventory_is_exact() -> None:
         "AQA_ALPACA_PAPER_SECRET_KEY_FILE",
         "AQA_PAPER_ACCOUNT_ID_HASH_FILE",
     }
+
+
+def test_secret_types_publish_only_redacted_output_json_schemas() -> None:
+    secret_input_schema = _SecretContainer.model_json_schema(mode="validation")
+    reference_input_schema = _SecretReferenceContainer.model_json_schema(mode="validation")
+    secret_output_schema = _SecretContainer.model_json_schema(mode="serialization")
+    reference_output_schema = _SecretReferenceContainer.model_json_schema(mode="serialization")
+    secret_schema = json.dumps((secret_input_schema, secret_output_schema), sort_keys=True)
+    reference_schema = json.dumps((reference_input_schema, reference_output_schema), sort_keys=True)
+
+    assert SENTINEL not in secret_schema
+    assert SENTINEL not in reference_schema
+    assert "/run/secrets" not in reference_schema
+    assert '"const": "<redacted>"' in secret_schema
+    assert '"readOnly": true' in secret_schema
+    assert '"readOnly": true' in reference_schema
+    assert secret_input_schema["properties"]["value"]["not"] == {}
+    assert reference_input_schema["properties"]["value"]["not"] == {}
+
+    with pytest.raises(ValidationError):
+        _SecretContainer.model_validate_json('{"value":"<redacted>"}')
+    with pytest.raises(ValidationError):
+        _SecretReferenceContainer.model_validate_json(
+            '{"value":{"source":"AQA_DATABASE_URL_FILE","configured":true}}'
+        )
 
 
 @pytest.mark.parametrize(
@@ -339,6 +371,36 @@ def test_secret_loader_rejects_file_metadata_change_during_read(
         load_secret_file(path, source=SOURCE)
 
 
+def test_secret_loader_rejects_same_size_rewrite_with_restored_mtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_secret(tmp_path / "secret", b"aaaaaaaa")
+    original_status = path.stat()
+    real_fstat = os.fstat
+    regular_file_calls = 0
+
+    def rewrite_before_final_file_status(file_descriptor: int) -> os.stat_result:
+        nonlocal regular_file_calls
+        current = real_fstat(file_descriptor)
+        if stat.S_ISREG(current.st_mode):
+            regular_file_calls += 1
+            if regular_file_calls == 2:
+                path.write_bytes(b"bbbbbbbb")
+                path.chmod(0o600)
+                os.utime(
+                    path,
+                    ns=(original_status.st_atime_ns, original_status.st_mtime_ns),
+                )
+                return real_fstat(file_descriptor)
+        return current
+
+    monkeypatch.setattr(os, "fstat", rewrite_before_final_file_status)
+
+    with pytest.raises(SecretFileError, match="changed while being read"):
+        load_secret_file(path, source=SOURCE)
+
+
 def test_redacted_secret_never_renders_or_serializes_its_value(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -432,3 +494,320 @@ def test_secret_file_error_never_discloses_path_content_or_exception_context(
     assert str(path) not in rendered
     assert captured.value.__cause__ is None
     assert captured.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    ("supplied_path", "expected_path"),
+    [
+        ("secrets/key", Path("/trusted/application/secrets/key")),
+        (Path("secrets/key"), Path("/trusted/application/secrets/key")),
+        ("/mounted/secrets/key", Path("/mounted/secrets/key")),
+        (Path("/mounted/secrets/key"), Path("/mounted/secrets/key")),
+    ],
+)
+def test_secret_file_reference_anchors_relative_paths_and_loads_only_on_demand(
+    supplied_path: str | Path,
+    expected_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded_marker = object()
+    calls: list[tuple[str | Path, SecretFileVariable]] = []
+
+    def fake_load_secret_file(
+        path: str | Path,
+        *,
+        source: SecretFileVariable,
+    ) -> object:
+        calls.append((path, source))
+        return loaded_marker
+
+    monkeypatch.setattr(platform_security, "load_secret_file", fake_load_secret_file)
+
+    reference = SecretFileReference.from_path(
+        supplied_path,
+        source=SOURCE,
+        application_root=Path("/trusted/application"),
+    )
+
+    assert calls == []
+    assert reference.source is SOURCE
+    assert reference.configured is True
+    assert reference.load() is loaded_marker
+    assert calls == [(expected_path, SOURCE)]
+
+
+def test_secret_file_reference_factory_is_purely_lexical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def filesystem_access_is_forbidden(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("reference construction attempted filesystem access")
+
+    with monkeypatch.context() as lexical_guard:
+        lexical_guard.setattr(Path, "resolve", filesystem_access_is_forbidden)
+        lexical_guard.setattr(Path, "stat", filesystem_access_is_forbidden)
+        lexical_guard.setattr(Path, "read_bytes", filesystem_access_is_forbidden)
+        lexical_guard.setattr(platform_security.os, "stat", filesystem_access_is_forbidden)
+        lexical_guard.setattr(platform_security.os, "open", filesystem_access_is_forbidden)
+        lexical_guard.setattr(
+            platform_security,
+            "load_secret_file",
+            filesystem_access_is_forbidden,
+        )
+
+        reference = SecretFileReference.from_path(
+            "uncreated/secret",
+            source=SOURCE,
+            application_root=Path("/uncreated/application"),
+        )
+
+    assert reference.configured is True
+
+
+def test_secret_file_reference_is_independent_of_later_working_directory_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded_marker = object()
+    selected_path: Path | None = None
+
+    def capture_path(path: str | Path, *, source: SecretFileVariable) -> object:
+        nonlocal selected_path
+        assert source is SOURCE
+        selected_path = Path(path)
+        return loaded_marker
+
+    monkeypatch.setattr(platform_security, "load_secret_file", capture_path)
+    reference = SecretFileReference.from_path(
+        "secrets/key",
+        source=SOURCE,
+        application_root=Path("/trusted/application"),
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    assert reference.load() is loaded_marker
+    assert selected_path == Path("/trusted/application/secrets/key")
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        ".",
+        "..",
+        "./secret",
+        "directory/../secret",
+        "directory//secret",
+        "secret/",
+        "/",
+        "//secret",
+        "/directory//secret",
+        "/secret/",
+        "a\\b",
+        f"{SENTINEL}\x00after",
+        "\ud800",
+        "a" * 4097,
+    ],
+)
+def test_secret_file_reference_rejects_noncanonical_or_unbounded_paths(path: str) -> None:
+    with pytest.raises(SecretFileError) as captured:
+        SecretFileReference.from_path(
+            path,
+            source=SOURCE,
+            application_root=Path("/trusted/application"),
+        )
+
+    rendered = "\n".join(
+        (
+            str(captured.value),
+            repr(captured.value),
+            repr(captured.value.args),
+            "".join(traceback.format_exception(captured.value)),
+        )
+    )
+    assert SENTINEL not in rendered
+    assert captured.value.__cause__ is None
+    assert captured.value.__context__ is None
+
+
+@pytest.mark.parametrize(
+    "application_root",
+    [
+        Path("relative"),
+        Path("."),
+        Path("/trusted/../escape"),
+        Path("//trusted"),
+    ],
+)
+def test_secret_file_reference_requires_an_absolute_canonical_application_root(
+    application_root: Path,
+) -> None:
+    with pytest.raises(SecretFileError):
+        SecretFileReference.from_path(
+            "secret",
+            source=SOURCE,
+            application_root=application_root,
+        )
+
+
+def test_secret_file_reference_requires_an_exact_concrete_application_root() -> None:
+    for application_root in ("/trusted", PurePosixPath("/trusted")):
+        with pytest.raises(SecretFileError, match=r"exact pathlib\.Path"):
+            SecretFileReference.from_path(
+                "secret",
+                source=SOURCE,
+                application_root=application_root,  # type: ignore[arg-type]
+            )
+
+
+def test_secret_file_reference_accepts_the_root_and_enforces_anchored_byte_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded_marker = object()
+    selected_path: Path | None = None
+
+    def capture_path(path: str | Path, *, source: SecretFileVariable) -> object:
+        nonlocal selected_path
+        assert source is SOURCE
+        selected_path = Path(path)
+        return loaded_marker
+
+    monkeypatch.setattr(platform_security, "load_secret_file", capture_path)
+    maximum_reference = SecretFileReference.from_path(
+        "a" * 4095,
+        source=SOURCE,
+        application_root=Path("/"),
+    )
+
+    assert maximum_reference.load() is loaded_marker
+    assert selected_path == Path("/" + "a" * 4095)
+
+    with pytest.raises(SecretFileError, match="bounded UTF-8"):
+        SecretFileReference.from_path(
+            "x",
+            source=SOURCE,
+            application_root=Path("/" + "a" * 4094),
+        )
+
+
+def test_secret_file_reference_rendering_and_pydantic_serialization_hide_path(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    reference = SecretFileReference.from_path(
+        f"secrets/{SENTINEL}",
+        source=SOURCE,
+        application_root=Path(f"/trusted/{SENTINEL}"),
+    )
+    model = _SecretReferenceContainer(value=reference)
+    expected_metadata = {"source": SOURCE.value, "configured": True}
+
+    with caplog.at_level(logging.INFO):
+        logging.getLogger("platform-secret-reference-test").info(
+            "reference=%s",
+            reference,
+        )
+
+    rendered_values = (
+        str(reference),
+        repr(reference),
+        repr([reference]),
+        repr({"reference": reference}),
+        repr(model),
+        repr(model.model_dump()),
+        model.model_dump_json(),
+        json.dumps({"reference": reference}, default=str),
+        caplog.text,
+    )
+    assert all(SENTINEL not in rendered for rendered in rendered_values)
+    assert str(reference) == f"<secret-file-reference source={SOURCE.value} configured=true>"
+    assert repr(reference) == str(reference)
+    assert model.model_dump() == {"value": expected_metadata}
+    assert json.loads(model.model_dump_json()) == {"value": expected_metadata}
+
+
+def test_secret_file_reference_rejects_direct_construction_mutation_and_pickling() -> None:
+    reference = SecretFileReference.from_path(
+        f"secrets/{SENTINEL}",
+        source=SOURCE,
+        application_root=Path("/trusted/application"),
+    )
+
+    with pytest.raises(TypeError, match="created with from_path"):
+        SecretFileReference(Path(f"/{SENTINEL}"), source=SOURCE, _token=object())
+    with pytest.raises(TypeError):
+        vars(reference)
+    with pytest.raises(AttributeError, match="immutable"):
+        reference.source = SOURCE  # type: ignore[misc]
+    with pytest.raises(AttributeError, match="immutable"):
+        del reference.source
+    with pytest.raises(TypeError, match="cannot be serialized"):
+        pickle.dumps(reference)
+
+    assert copy.copy(reference) is reference
+    assert copy.deepcopy(reference) is reference
+
+
+def test_secret_file_reference_rejects_hostile_inputs_without_disclosure() -> None:
+    class HostileText(str):
+        def __str__(self) -> str:
+            raise RuntimeError(SENTINEL)
+
+        def __repr__(self) -> str:
+            raise RuntimeError(SENTINEL)
+
+    class HostilePath(PosixPath):
+        def __fspath__(self) -> str:
+            raise RuntimeError(SENTINEL)
+
+    hostile_inputs: tuple[tuple[object, object, object], ...] = (
+        (HostileText(f"/{SENTINEL}"), SOURCE, Path("/trusted")),
+        (HostilePath(f"/{SENTINEL}"), SOURCE, Path("/trusted")),
+        ("secret", SOURCE, HostilePath(f"/{SENTINEL}")),
+        ("secret", HostileText(SENTINEL), Path("/trusted")),
+    )
+
+    for path, source, application_root in hostile_inputs:
+        with pytest.raises((SecretFileError, TypeError)) as captured:
+            SecretFileReference.from_path(
+                path,  # type: ignore[arg-type]
+                source=source,  # type: ignore[arg-type]
+                application_root=application_root,  # type: ignore[arg-type]
+            )
+
+        rendered = "\n".join(
+            (
+                str(captured.value),
+                repr(captured.value),
+                repr(captured.value.args),
+                "".join(traceback.format_exception(captured.value)),
+            )
+        )
+        assert SENTINEL not in rendered
+        assert captured.value.__cause__ is None
+        assert captured.value.__context__ is None
+
+
+def test_secret_file_reference_rejects_untrusted_pydantic_input_without_disclosure() -> None:
+    hostile_input = {"source": SOURCE.value, "configured": True, "path": SENTINEL}
+
+    with pytest.raises(ValidationError) as captured:
+        _SecretReferenceContainer.model_validate({"value": hostile_input})
+    with pytest.raises(ValidationError) as captured_json:
+        _SecretReferenceContainer.model_validate_json(json.dumps({"value": hostile_input}))
+
+    rendered_errors = (
+        str(captured.value),
+        repr(captured.value),
+        repr(captured.value.errors()),
+        captured.value.json(),
+        str(captured_json.value),
+        repr(captured_json.value),
+        repr(captured_json.value.errors()),
+        captured_json.value.json(),
+    )
+    assert all(SENTINEL not in rendered for rendered in rendered_errors)
+
+    bypassed_model = _SecretReferenceContainer.model_construct(value=hostile_input)
+    assert bypassed_model.model_dump() == {"value": {"source": "unsupported", "configured": False}}
+    assert SENTINEL not in bypassed_model.model_dump_json()

@@ -14,7 +14,7 @@ either current system.
 | Legacy observer and guarded Alpaca paper adapter | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` | Code and safety tests exist; tracked submission is disabled and no credential-based run is recorded |
 | Data-only collector contracts, orchestration, and PostgreSQL schema | `IMPLEMENTED_AND_VERIFIED` | Fake-source tests, PostgreSQL integration tests, and migration checks |
 | Collector operation against Alpaca and a hosted database | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` | Transport exists; no credential-based or hosted-runtime evidence is recorded |
-| Generic signed platform path | `PARTIALLY_IMPLEMENTED` | Canonical/hash, universe/experiment/profile, static CLI, and owner-private secret-file primitives plus tests |
+| Generic signed platform path | `PARTIALLY_IMPLEMENTED` | Canonical/hash, universe/experiment/profile, static CLI, owner-private secret-file, and service-scoped runtime-setting primitives plus tests |
 | New model training and replacement backtester | `INTENTIONALLY_DEFERRED` | Excluded from the current platform-backbone work |
 
 ## Current system context
@@ -98,9 +98,9 @@ reconciliation are the active recovery mechanism.
 | `platform.canonical` | Converts a closed and explicitly bounded set of scalar/container values into deterministic UTF-8 JSON bytes; owns no mutable state | `CanonicalizationError` and `canonical_json_bytes()` | Standard-library JSON, UTC datetime, Decimal, and Enum types | No provider, persistence, environment, filesystem, or secret dependency; unsupported, nonfinite, naive-time, unordered, cyclic, subclassed-wrapper, oversized, or invalid-UTF-8 input fails with structural context and without rendering values |
 | `platform.hashing` | Derives content hashes from canonical bytes; owns no mutable state | `sha256_hex()` | `platform.canonical` and standard-library SHA-256 | No alternate serializer or implicit coercion; canonicalization failure prevents a hash result |
 | `platform.universe` | Owns immutable generic symbol roles and derives deterministic collection/order allowlists | `SymbolRole` and `UniverseSpec` | Pydantic and standard-library validation | No flagship literals, provider, persistence, environment, broker, or alias authority; invalid, duplicate, overlapping, or empty active membership fails closed |
-| `platform.config` | Loads bounded no-symlink experiment/profile YAML, verifies the mandatory profile pin, enforces mode authority, and composes deterministic identities; owns immutable in-memory configuration only | `ExperimentDefinition`, `PlatformProfile`, `ExperimentSpec`, `PlatformConfig`, and loaders | Canonical/hash/universe primitives, Pydantic, PyYAML, and POSIX file operations | No environment/secret, client, database, plugin, or network authority; malformed paths/YAML/types/hashes/mode combinations fail with safe context-free errors |
+| `platform.config` | Loads bounded no-symlink experiment/profile YAML, verifies the mandatory profile pin, enforces mode authority, and composes immutable service-scoped startup settings from an explicitly injected environment mapping | `ExperimentDefinition`, `PlatformProfile`, `ExperimentSpec`, `PlatformConfig`, `RuntimeService`, `RuntimeSettings`, and loaders | Canonical/hash/universe/security primitives, Pydantic, PyYAML, URL parsing, and POSIX file operations | No ambient environment, secret-value, client, database, plugin, or network authority; malformed paths/YAML/types/hashes/mode/service combinations fail with safe context-free errors |
 | `platform.cli` | Exposes broker-free static `doctor` and `config validate` commands through the new aliases; owns no state | Typer `app` and `main()` | `platform.config`, JSON, paths, and Typer | No environment, secret, provider, broker, persistence, dynamic-import, network, or write authority; invalid configuration exits nonzero without constructing a client |
-| `platform.security` | Validates one explicitly sourced secret path and owns only the returned immutable in-memory redacted value | `SecretFileVariable`, `SecretFileError`, `RedactedSecret`, and `load_secret_file()` | POSIX descriptor-relative file APIs, paths/stat, and Pydantic serialization hooks | No environment lookup, persistence, provider/broker/client, dynamic import, or network authority; unsafe type/path/owner/mode/size/content fails without exposing the path, value, or operating-system exception |
+| `platform.security` | Validates opaque secret-file references and loads one explicitly sourced secret into an immutable redacted value only at an authorized adapter boundary | `SecretFileVariable`, `SecretFileReference`, `SecretFileError`, `RedactedSecret`, and `load_secret_file()` | POSIX descriptor-relative file APIs, paths/stat, and Pydantic serialization hooks | No environment lookup, persistence, provider/broker/client, dynamic import, or network authority; unsafe type/path/owner/mode/size/content fails without exposing the path, value, or operating-system exception |
 
 ## Current data flows
 
@@ -176,8 +176,9 @@ before exposure can increase.
 - A strategy proposal is not order authorization.
 - The standalone collector's data credentials use a namespace/container separate from the legacy
   paper adapter. The legacy Alpaca market-data provider still shares the legacy paper credential
-  object and environment namespace. The low-level target secret-file loader is implemented;
-  `RuntimeSettings`, service selection, and mount isolation are not.
+  object and environment namespace. Target `RuntimeSettings` now rejects generic credential names
+  and composes exact service-scoped opaque file references, but startup commands, container mounts,
+  and service consumers do not yet enforce that target boundary.
 - The collector image omits the external Alpaca package and legacy execution modules.
 - The current dashboard is read-only but still has direct access to legacy SQLite; moving
   reads behind a private API is target work.
@@ -233,10 +234,11 @@ receive credentials, broker objects, DDL authority, or dynamic code-loading inpu
 execution worker is the only target process allowed paper credentials; tracked submission
 remains disabled and authorization defaults deny.
 
-Canonical serialization, hashing, universe/configuration, broker-free profile validation, and the
-owner-private secret-file primitive are implemented target-package boundaries. No service consumes
-the secret loader yet. Runtime settings, bootstrap, the remaining platform tree, services, tables,
-signed contracts, scheduler, jobs, API, artifact store, and deterministic vertical slice are
+Canonical serialization, hashing, universe/configuration, broker-free profile validation,
+service-scoped runtime settings, opaque secret-file references, and the owner-private secret-file
+primitive are implemented target-package boundaries. No service command consumes the runtime
+settings or secret loader yet. Bootstrap, the remaining platform tree, services, tables, signed
+contracts, scheduler, jobs, API, artifact store, and deterministic vertical slice are
 `NOT_IMPLEMENTED`. Their ordered work and acceptance evidence live in
 `docs/execution-plans/platform-core.md`.
 
@@ -268,8 +270,9 @@ signed contracts, scheduler, jobs, API, artifact store, and deterministic vertic
 - Stored collection-universe membership is not reverified at startup and has no immutability
   trigger; a database owner can alter it without runtime detection.
 - Compose does not provision PostgreSQL or enforce a general outbound firewall.
-- Platform `RuntimeSettings`, local secret bootstrap, per-service secret selection, and mounts are
-  not implemented; the low-level loader currently has no service consumer.
+- Platform runtime settings and per-service secret-reference selection are implemented as pure
+  startup composition, but local secret bootstrap, service command integration, and least-privilege
+  mounts are not; the low-level loader currently has no service consumer.
 - The generic platform remains `PARTIALLY_IMPLEMENTED`, and its paper authorization path is
   `NOT_IMPLEMENTED`; the current legacy paper adapter must not be presented as target-platform
   validation.
