@@ -62,7 +62,9 @@ the dependency direction in `../ARCHITECTURE.md` when added.
 | Boundary | Untrusted input | Current transport and control |
 | --- | --- | --- |
 | Configuration and environment | YAML values, paths, mode flags, database URLs, and credential presence | Local files/process environment; strict parsing and forbidden-live-term checks apply, while target file-backed secrets are not implemented |
-| Alpaca market data | REST pages, stream frames, timestamps, symbols, numeric values, rate-limit metadata, disconnects, and error categories | HTTPS/WSS to fixed official data hosts with certificate/hostname verification, explicit timeouts, bounds, and shared validation |
+| Standalone collector Alpaca data | REST pages, stream frames, timestamps, symbols, numeric values, rate-limit metadata, disconnects, and error categories | Direct HTTPS/WSS to fixed official data hosts using the collector data-key namespace, certificate/hostname verification, explicit timeouts, bounds, and shared canonical validation |
+| Legacy Alpaca market data | Historical/stream SDK responses, account-scoped feed access, timestamps, bars, disconnects, and SDK exceptions | Locked `alpaca-py` clients using the legacy paper credential object/namespace; feed allowlist, bounded reconnects, completed-bar checks, durable bar storage, and redacted errors; it is not process-credential-isolated from legacy paper execution |
+| Legacy Yahoo compatibility | Configured tickers/date bounds and yfinance responses | Optional `legacy-yahoo` dependency; normalization/empty-series validation applies, but fixed-host and explicit transport-timeout controls are not implemented |
 | PostgreSQL | Configured URL, stored rows, lock timing, constraint failures, and connection errors | Loopback may be plaintext; non-loopback requires TLS with `sslmode=verify-full`; SQL is parameterized and routing override keys are rejected |
 | Optional Alpaca paper boundary | Account, asset, order, fill, status, stream, and error responses | Fixed paper client with TLS through the locked SDK; construction and submission remain behind explicit legacy gates and are not externally validated |
 | Local SQLite and artifacts | Existing rows, filenames, serialized JSON/CSV, and generated reports | Host filesystem permissions are the transport boundary; current dashboard has direct read access |
@@ -91,10 +93,11 @@ not an egress firewall.
 ## Credentials and data handling
 
 Collector variables are `APA_ALPACA_DATA_API_KEY` and
-`APA_ALPACA_DATA_SECRET_KEY`; legacy paper variables use the separate
-`APA_ALPACA_PAPER_*` namespace. The collector image omits the Alpaca SDK and execution
-modules. These controls isolate effective use, but Alpaca keys are not claimed to be
-provider-scoped as data-only.
+`APA_ALPACA_DATA_SECRET_KEY`; the standalone collector image omits the Alpaca SDK and execution
+modules. The legacy Alpaca market-data provider and paper adapter both consume a
+`PaperCredentials` object loaded from the `APA_ALPACA_PAPER_*` namespace, so they are not separate
+process authorities. These controls isolate the standalone collector only, and Alpaca keys are not
+claimed to be provider-scoped as data-only.
 
 No credential belongs in YAML, `.env.example`, Git, image layers, logs, reports, metrics,
 database rows, or test fixtures. Current collector error paths report exception types and
@@ -138,8 +141,9 @@ submission disabled, no default path submits.
 
 ## Operational controls
 
-- Collector startup validates configuration, migration head, immutable universe identity, and
-  singleton lease ownership before ingestion; status/readiness commands do not load data secrets.
+- Collector startup validates configuration and migration head, registers the content-addressed
+  universe row, and acquires singleton lease ownership before ingestion; status/readiness commands
+  do not load data secrets.
 - Bounded retries, deadlines, worker joins, fencing tokens, intent-first persistence, stable
   identifiers, reconciliation, and latches contain duplicate, stale, ambiguous, or partial work.
 - Tracked profiles disable paper submission. Legacy paper operation additionally requires an
@@ -166,6 +170,8 @@ submission disabled, no default path submits.
 - Compose isolation is not an outbound firewall and the dashboard port is not loopback-bound.
 - Explicit collector gap lifecycle, downstream readiness, backup/restore proof, retention,
   and artifact integrity are `NOT_IMPLEMENTED`.
+- Stored collector-universe membership is not compared with the in-process contract at startup and
+  has no immutability trigger; a database owner can change it without runtime detection.
 - Locally installed future strategy plugins will be operator-trusted code; arbitrary Python
   sandboxing is `INTENTIONALLY_DEFERRED`.
 

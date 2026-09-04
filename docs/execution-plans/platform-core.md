@@ -434,9 +434,9 @@ commit count is planned.
   tooling, and review standards established.
 - [x] `IMPLEMENTED_AND_VERIFIED` — ordinary pytest startup removes ambient Alpaca authority and
   forces paper submission off before test-module collection.
-- [x] `IMPLEMENTED_AND_VERIFIED` — current/target architecture and security boundaries are
-  documented with explicit interfaces, authority limits, external inputs, controls, and residual
-  risks.
+- [x] `IMPLEMENTED_AND_VERIFIED` — the current/target architecture and security map documents
+  major-module state/interfaces/dependencies/failures, actual authority gaps, external inputs,
+  controls, and residual risks; target mechanical boundaries remain Phase 1 implementation work.
 - [ ] `NOT_IMPLEMENTED` — Phase 1 project boundary and secure configuration.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
@@ -489,6 +489,11 @@ commit count is planned.
 - The ordinary pytest command previously depended on the caller to clear ambient Alpaca variables.
   The engineering-standards boundary moves that denial into test bootstrap and retains per-test
   cleanup; universal process-level socket denial is still separate target work.
+- Collector historical observation batches commit before coverage advances in a separate fenced
+  transaction. A crash between them causes idempotent overlap replay; documentation must not call
+  the two service-level steps atomic.
+- Collector universe registration is content-addressed but does not verify an existing row's stored
+  members and has no immutability trigger; runtime verification remains platform work.
 - Docker Compose configuration validation passed, but the Docker daemon became unavailable before
   a fresh PG16/image runtime validation. This is unavailable evidence, not a product failure.
 - The README is an extensive target design; code and tests, not that prose, determine statuses.
@@ -520,6 +525,7 @@ Approved natural-change evidence:
 | Platform execution plan | `94ba212608b91e883a120791db6cb6b3f1e294c7`; five files; 778 insertions and 21 deletions | Maintainer supplied the exact authorization for `Document platform execution plan`; author and committer timestamps are 2026-09-03 20:20:20 -0400; configured identity was used and no trailer was added. The maintainer separately authorized publication; local and `origin/feature/market-data-platform` heads both resolved to `94ba212`. |
 | Published-branch verification | GitHub Actions run `33821556434` for exact head `94ba212608b91e883a120791db6cb6b3f1e294c7` | PASS at 2026-09-04 00:34:41 UTC — locked install, Ruff format/lint, mypy, PostgreSQL migration and full pytest, synthetic backtest, deterministic replay, Compose validation, both image builds, and network-disabled collector image checks all completed successfully. |
 | Engineering standards and offline test isolation | `d2b287effc6f046617e3d979381da10b0bbe556e`; 11 files; 721 insertions and 16 deletions | Author and committer timestamps are 2026-09-03 20:49:14 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed and `origin/feature/market-data-platform` matched `d2b287e`. GitHub Actions run `33823350043` passed at 2026-09-04 00:55:49 UTC, including locked install, static checks, PostgreSQL migration/full tests, backtest/replay, Compose validation, both image builds, and network-disabled collector checks. |
+| Initial architecture and security documentation | `165d4b978e3dc8b7f1759f42bc4825d0147e1678`; five files; 555 insertions and six deletions | Author and committer timestamps are 2026-09-03 21:01:25 -0400; configured identity was used and no trailer was added. A post-commit independent review found an incorrect service-level atomicity claim and incomplete current external-interface/component detail; the following documentation correction addresses those findings rather than treating this commit as final evidence. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -558,6 +564,9 @@ Architecture/security-memory candidate evidence on 2026-09-03:
 | `.venv/bin/python -m pytest -q` | PASS — 376 passed, one PostgreSQL module skipped, one upstream WebSocket deprecation warning, 75.95 seconds. |
 | `git diff --check` and candidate link-target checks | PASS. |
 | Candidate attribution, private-path, and credential-pattern scan | PASS — no match. |
+| Corrective four-file `.venv/bin/ruff format --check .`, `.venv/bin/ruff check .`, and `.venv/bin/mypy src` | PASS — 125 files formatted, lint clean, and 44 source files type-checked. |
+| Corrective four-file `.venv/bin/python -m pytest -q` | PASS — 376 passed, one PostgreSQL module skipped, one upstream WebSocket deprecation warning, 70.78 seconds. |
+| Independent architecture and skeptical security/simplification re-reviews | PASS after correction — service-level checkpoint atomicity, legacy data adapters/credentials, module state/dependencies/failures, universe registration, and status language match the inspected implementation; no remaining finding. |
 
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.
