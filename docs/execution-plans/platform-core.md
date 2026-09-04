@@ -444,7 +444,12 @@ commit count is planned.
   and a current documentation authority index are established.
 - [x] `IMPLEMENTED_AND_VERIFIED` — repository-local workflow skills cover every core workflow and
   each currently active conditional boundary, with validated metadata and authority links.
-- [ ] `NOT_IMPLEMENTED` — Phase 1 project boundary and secure configuration.
+- [x] `IMPLEMENTED_AND_VERIFIED` — required local-secret, mutable-state, cache, and generated-output
+  classes are excluded from Git and Docker contexts while reviewed fixtures remain eligible.
+- [x] `IMPLEMENTED_AND_VERIFIED` — minimal repository editor recommendations, Python/Ruff/Pytest
+  settings, and cross-editor formatting basics are checked without replacing CLI or CI gates.
+- [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene is in place; the project boundary,
+  canonical contracts, configuration, file-backed secrets, doctor, aliases, and typing remain.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -536,6 +541,7 @@ Approved natural-change evidence:
 | Architecture documentation correction | `39d106544b5e2b7f07b2fead44b75b01875dcfd5`; four files; 61 insertions and 34 deletions | Author and committer timestamps are 2026-09-03 21:10:19 -0400; configured identity was used and no trailer was added. Two independent re-reviews found no remaining issue after the correction, and the commit was fast-forward pushed. GitHub Actions run `33824733267` passed at 2026-09-04 01:19:37 UTC; run `33824137014` for the superseded head was cancelled by configured concurrency. |
 | Observability and performance policy | `acd71c69eb59603a8e44feba8923e61528452475`; four files; 268 insertions and one deletion | Author and committer timestamps are 2026-09-03 21:19:54 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed. GitHub Actions run `33825372703` passed at 2026-09-04 01:31:27 UTC, including locked setup, static checks, PostgreSQL migration/full tests, legacy regressions, Compose validation, both image builds, and network-disabled collector checks. |
 | Repository operating and contribution guidance | `65aa1fc50f25e4bce289f5c3d6340a555e1775b4`; five files; 412 insertions and three deletions | Author and committer timestamps are 2026-09-03 21:32:00 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed. GitHub Actions run `33826139563` passed at 2026-09-04 01:43:42 UTC with the complete existing CI workflow. |
+| Repository workflow skills | `c101879d6327b8961662f22a92fc5c969b003025`; 17 files; 551 insertions and one deletion | Author and committer timestamps are 2026-09-03 21:51:10 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed after adversarial corrections. GitHub Actions run `33827328111` passed at 2026-09-04 02:03:13 UTC with the complete existing CI workflow. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -607,6 +613,18 @@ Workflow-skill candidate evidence on 2026-09-03:
 | Whole-worktree Ruff format/lint and mypy checks | PASS — 127 files formatted, lint clean, and 44 source files type-checked. |
 | `uv run --no-sync pytest -q` | PASS — 380 passed, one PostgreSQL module skipped, and one upstream WebSocket deprecation warning in 72.79 seconds. |
 | Exact documented security-test selection and `git diff --check` | PASS — 92 security-focused tests, one upstream warning, and no whitespace errors. |
+
+Development and artifact-hygiene candidate evidence on 2026-09-03:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv run --no-sync pytest -q tests/safety/test_development_environment.py tests/test_phase2_environment.py` | PASS — nine editor, Git-ignore, Docker-context-policy, and local-environment tests in 0.73 seconds. |
+| Focused Ruff format/lint and mypy checks | PASS — both affected Python test modules are formatted, lint clean, and type clean. |
+| `git check-ignore --no-index` representative secret, tool-state, nested fixture/skill, editor, and mutable-state paths | PASS — sensitive paths are excluded while the root `.env.example`, reviewed workspace settings/skills, and deterministic fixtures remain eligible. |
+| `.dockerignore` default-deny/allowlist and recursive re-exclusion policy tests | PASS — current image inputs and public fixtures are explicitly included, sensitive classes are re-excluded last, and the root placeholder is the sole final exception; local daemon context validation is unavailable. |
+| Whole-worktree Ruff format/lint and mypy plus `docker compose ... config --quiet` | PASS — 128 files formatted, lint clean, 44 source files type-checked, and Compose configuration valid. |
+| Exact documented security-test selection and `git diff --check` | PASS — 95 security-focused tests, one upstream warning, and no whitespace errors. |
+| `uv run --no-sync pytest -q` | PASS — 383 passed, one PostgreSQL module skipped, and one upstream WebSocket deprecation warning in 86.73 seconds. |
 
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.

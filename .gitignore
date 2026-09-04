@@ -1,3 +1,28 @@
+# Unreviewed hidden files and tool-state directories are local by default.
+.*
+!/.dockerignore
+!/.editorconfig
+!/.gitignore
+!/.github/
+!/.github/**
+!/.agents/
+/.agents/*
+!/.agents/skills/
+!/.agents/skills/**
+!/.vscode/
+/.vscode/*
+!/.vscode/extensions.json
+!/.vscode/settings.json
+
+# Public deterministic fixtures are the only default-trackable data subtree.
+data/*
+!data/fixtures/
+!data/fixtures/**
+
+# Re-exclude hidden state and caches beneath reviewed recursive subtrees.
+/.github/**/.*
+/.agents/skills/**/.*
+data/fixtures/**/.*
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -8,11 +33,12 @@ __pycache__/
 coverage.xml
 htmlcov/
 .venv/
+
+# Operating-system, editor, and temporary state.
 .DS_Store
 Thumbs.db
 Desktop.ini
 .idea/
-.vscode/
 *.swp
 *.tmp
 *.partial
@@ -22,14 +48,17 @@ Desktop.ini
 # Credentials and local environment overrides must never be committed.
 .env
 .env.*
-!.env.example
+.local/
 *.pem
 *.key
+*.p12
+*.pfx
 *.secret
 *.token
 credentials/
 .credentials/
 local_credentials/
+secrets/
 credentials.json
 local_credentials.json
 generated_secrets.json
@@ -43,6 +72,11 @@ generated_secrets.json
 
 # Downloaded data, generated evidence, and mutable operational state are local artifacts.
 audit/
-data/
 runtime/
 outputs/
+scratch/
+tmp/
+transcripts/
+
+# The reviewed placeholder is the only environment-file exception.
+!/.env.example
