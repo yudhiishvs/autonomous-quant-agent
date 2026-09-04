@@ -140,10 +140,19 @@ review packet is pending. The maintainer responds with exactly one of:
 
 Stop after presenting the packet and do not edit its boundary until one response arrives.
 
-After exact approval, verify the worktree still matches the reviewed diff, stage only the approved
-paths or hunks, run the cached-diff checks, and commit with the exact approved message, configured
-identity, and current time. Then inspect the commit and remaining worktree before continuing.
-Remote publication and history-changing operations require separate authorization.
+A maintainer may explicitly delegate repeated commit authorization for a named branch and scope.
+Record that delegation and its limits in the active plan. It replaces only the response pause:
+each candidate still requires a frozen boundary, complete internal review record, exact checks,
+staged-diff inspection, atomic message, configured identity, and current time. A scope change or
+any destructive, credentialed, financially consequential, or otherwise irreversible action ends
+the delegation unless it was named explicitly. Commit delegation does not itself authorize a
+push, pull request, merge, release, image publication, or deployment.
+
+After exact approval, or under a recorded delegation, verify the worktree still matches the
+reviewed diff, stage only the reviewed paths or hunks, run the cached-diff checks, and commit with
+the reviewed message, configured identity, and current time. Then inspect the commit and remaining
+worktree before continuing. Remote publication and history-changing operations require their own
+recorded authority.
 
 ## Completion and archival
 
