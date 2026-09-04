@@ -434,6 +434,9 @@ commit count is planned.
   tooling, and review standards established.
 - [x] `IMPLEMENTED_AND_VERIFIED` — ordinary pytest startup removes ambient Alpaca authority and
   forces paper submission off before test-module collection.
+- [x] `IMPLEMENTED_AND_VERIFIED` — current/target architecture and security boundaries are
+  documented with explicit interfaces, authority limits, external inputs, controls, and residual
+  risks.
 - [ ] `NOT_IMPLEMENTED` — Phase 1 project boundary and secure configuration.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
@@ -462,6 +465,7 @@ commit count is planned.
 | Treat unsupported early-close sessions as entry-ineligible and fail closed for forced-risk reduction. | The fixed regular-session timetable cannot be assumed safe on a shortened session. | NOT_IMPLEMENTED |
 | Resolve dashboard read-only authorization before implementing the private API. | The exact secret list has one operator token, while a shared bearer token could authorize control mutations after dashboard compromise. | NOT_IMPLEMENTED |
 | Continue natural commits without a separate approval pause after each internal review. | After approving the first two boundaries, the maintainer explicitly delegated continued work on this feature branch and requested no further approval prompts; coherent boundaries, full diff review, configured identity, and verification remain mandatory. | PARTIALLY_IMPLEMENTED |
+| Fast-forward reviewed feature-branch checkpoints without repeated publication prompts. | The maintainer explicitly requested uninterrupted continuation after authorizing the feature branch push; history rewrite, force-push, pull-request merge, and publication outside this branch remain excluded. | PARTIALLY_IMPLEMENTED |
 
 ## 25. Unexpected discoveries
 
@@ -515,6 +519,7 @@ Approved natural-change evidence:
 | Normalized platform requirements | `89a00dd794fc25a903be0e9461fe33736480b897`; one new file; 608 insertions; SHA-256 `9838f5c90eb03a665250b0dfe6e7feb6de956056e61011678b28466e4e101e1e` | Maintainer supplied the exact authorization for `Document platform requirements`; author and committer timestamps are 2026-09-03 18:57:07 -0400; configured identity was used; no trailer, push, or pull request was added. |
 | Platform execution plan | `94ba212608b91e883a120791db6cb6b3f1e294c7`; five files; 778 insertions and 21 deletions | Maintainer supplied the exact authorization for `Document platform execution plan`; author and committer timestamps are 2026-09-03 20:20:20 -0400; configured identity was used and no trailer was added. The maintainer separately authorized publication; local and `origin/feature/market-data-platform` heads both resolved to `94ba212`. |
 | Published-branch verification | GitHub Actions run `33821556434` for exact head `94ba212608b91e883a120791db6cb6b3f1e294c7` | PASS at 2026-09-04 00:34:41 UTC — locked install, Ruff format/lint, mypy, PostgreSQL migration and full pytest, synthetic backtest, deterministic replay, Compose validation, both image builds, and network-disabled collector image checks all completed successfully. |
+| Engineering standards and offline test isolation | `d2b287effc6f046617e3d979381da10b0bbe556e`; 11 files; 721 insertions and 16 deletions | Author and committer timestamps are 2026-09-03 20:49:14 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed and `origin/feature/market-data-platform` matched `d2b287e`. GitHub Actions run `33823350043` passed at 2026-09-04 00:55:49 UTC, including locked install, static checks, PostgreSQL migration/full tests, backtest/replay, Compose validation, both image builds, and network-disabled collector checks. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -543,6 +548,17 @@ Engineering-standards candidate evidence on 2026-09-03:
 | Independent engineering-document review | PASS after corrections — test taxonomy, authority delegation, credential-free startup, coding rules, tool deferrals, and CI evidence were inspected against the appendix. |
 | Independent test-safety and simplification review | PASS with no blocker — no check was weakened and the boundary remained coherent; residual limitations are clearing after plugin/conftest import, a current-name-only credential list, two guarded TCP paths rather than universal denial, duplicated sentinel inventory, and scrubbed environment persistence only for unusual in-process `pytest.main()` callers. |
 
+Architecture/security-memory candidate evidence on 2026-09-03:
+
+| Command or evidence | Result |
+| --- | --- |
+| `.venv/bin/ruff format --check .` | PASS — 125 files already formatted. |
+| `.venv/bin/ruff check .` | PASS. |
+| `.venv/bin/mypy src` | PASS — 44 source files. |
+| `.venv/bin/python -m pytest -q` | PASS — 376 passed, one PostgreSQL module skipped, one upstream WebSocket deprecation warning, 75.95 seconds. |
+| `git diff --check` and candidate link-target checks | PASS. |
+| Candidate attribution, private-path, and credential-pattern scan | PASS — no match. |
+
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.
 
@@ -555,8 +571,8 @@ The existing collector and legacy regression suite provide reusable code and cha
 they do not satisfy the complete generic platform contract. Phases 1–10 remain as listed in the
 progress checklist. Fresh PostgreSQL 16, container runtime, image scan, SBOM, clean-package
 install, twice-run demo, and backup/restore evidence remain unavailable until their implementation
-exists and the required services are available. GitHub Actions run `33821556434` passed for pushed
-commit `94ba212`; that run validates the existing PostgreSQL 15 and image boundaries, not the target
+exists and the required services are available. GitHub Actions run `33823350043` passed for pushed
+commit `d2b287e`; that run validates the existing PostgreSQL 15 and image boundaries, not the target
 PostgreSQL 16 platform or any external adapter. External adapter credential validation is
 intentionally prohibited in this program.
 
