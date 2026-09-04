@@ -85,6 +85,14 @@ def test_check_paper_environment_rejects_enabled_configuration(
 def test_sensitive_local_artifact_patterns_are_gitignored(project_root: Path) -> None:
     candidates = (
         ".env",
+        ".local/operator-settings.json",
+        ".unreviewed-tool/session.json",
+        ".agents/session/transcript.txt",
+        ".agents/skills/example/__pycache__/module.pyc",
+        ".agents/skills/example/local.log",
+        ".agents/skills/example/.agents/session.json",
+        ".agents/skills/example/.git/config",
+        ".agents/skills/example/.vscode/settings.json",
         "runtime/observer.db",
         "runtime/observer.log",
         "local-observer.db",
@@ -98,14 +106,33 @@ def test_sensitive_local_artifact_patterns_are_gitignored(project_root: Path) ->
         "credentials/paper.key.txt",
         ".credentials/paper.secret",
         "local_credentials/paper.txt",
+        "secrets/database_url",
+        "certificates/client.p12",
+        "certificates/client.pfx",
+        "data/cache/market_data.csv",
+        "data/raw/provider-bars.jsonl",
+        "data/provider-export/bars.csv",
+        "data/processed/private.parquet",
+        "data/fixtures/.env",
+        "data/fixtures/private.key",
+        "data/fixtures/secrets/api-token",
+        "data/fixtures/local.db",
+        "data/fixtures/session.log",
+        "data/fixtures/__pycache__/fixture.pyc",
+        "data/fixtures/.agents/session.json",
+        "data/fixtures/.vscode/settings.json",
+        "data/fixtures/.git/config",
         "tmp/observer.tmp",
+        "tmp/notes.txt",
+        "scratch/local-analysis.md",
+        "transcripts/local-session.txt",
         "tmp/arbitrary.partial",
         "merge-conflict.orig",
         "Thumbs.db",
         "Desktop.ini",
         "observer-session.partial",
         ".idea/workspace.xml",
-        ".vscode/settings.json",
+        ".vscode/local-overrides.json",
         "__pycache__/module.pyc",
     )
     for candidate in candidates:
@@ -116,36 +143,96 @@ def test_sensitive_local_artifact_patterns_are_gitignored(project_root: Path) ->
         )
         assert result.returncode == 0, f"sensitive local artifact is not ignored: {candidate}"
 
+    for candidate in (
+        ".env.example",
+        ".vscode/extensions.json",
+        ".vscode/settings.json",
+        ".agents/skills/example/SKILL.md",
+        "data/fixtures/synthetic-bars.jsonl",
+    ):
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "--quiet", "--", candidate],
+            cwd=project_root,
+            check=False,
+        )
+        assert result.returncode == 1, f"tracked project artifact is ignored: {candidate}"
+
 
 def test_docker_context_excludes_credentials_and_mutable_state(project_root: Path) -> None:
-    rules = {
+    ordered_rules = [
         line.strip()
         for line in (project_root / ".dockerignore").read_text(encoding="utf-8").splitlines()
         if line.strip() and not line.lstrip().startswith("#")
+    ]
+    required_recursive_exclusions = {
+        "**/.agents",
+        "**/.env*",
+        "**/.git",
+        "**/.git/**",
+        "**/.idea",
+        "**/.local",
+        "**/.venv",
+        "**/.vscode",
+        "**/.*",
+        "**/__pycache__",
+        "**/*.backup",
+        "**/*.db",
+        "**/*.egg-info",
+        "**/*.key",
+        "**/*.log",
+        "**/*.orig",
+        "**/*.p12",
+        "**/*.pfx",
+        "**/*.pem",
+        "**/*.pid",
+        "**/*.py[cod]",
+        "**/*.secret",
+        "**/*.sqlite",
+        "**/*.sqlite3",
+        "**/*.swp",
+        "**/*.tmp",
+        "**/*.token",
+        "**/*~",
+        "**/credentials",
+        "**/local_credentials",
+        "**/outputs",
+        "**/runtime",
+        "**/scratch",
+        "**/secrets",
+        "**/tmp",
+        "**/transcripts",
     }
-
-    required_rules = {
-        ".git",
-        ".env*",
-        ".venv",
-        "*.pem",
-        "*.key",
-        "*.secret",
-        "*.token",
-        "credentials",
-        ".credentials",
-        "local_credentials",
-        "runtime",
-        "outputs",
-        "data",
-        "*.db",
-        "*.sqlite",
-        "*.sqlite3",
-        "*.log",
-        "*.bak",
-        "*.backup",
-    }
-    assert required_rules <= rules
+    expected_inclusions = [
+        "!.dockerignore",
+        "!Dockerfile",
+        "!README.md",
+        "!alembic.ini",
+        "!app.py",
+        "!pyproject.toml",
+        "!uv.lock",
+        "!configs/",
+        "!configs/**",
+        "!data/",
+        "!data/fixtures/",
+        "!data/fixtures/**",
+        "!docs/",
+        "!docs/**",
+        "!migrations/",
+        "!migrations/**",
+        "!scripts/",
+        "!scripts/**",
+        "!src/",
+        "!src/**",
+        "!/.env.example",
+    ]
+    assert ordered_rules[0] == "**"
+    assert [rule for rule in ordered_rules if rule.startswith("!")] == expected_inclusions
+    assert required_recursive_exclusions <= set(ordered_rules)
+    content_inclusions = expected_inclusions[:-1]
+    assert max(ordered_rules.index(rule) for rule in content_inclusions) < min(
+        ordered_rules.index(rule) for rule in required_recursive_exclusions
+    )
+    assert ordered_rules[-1] == "!/.env.example"
 
 
 def test_quality_generator_uses_active_virtual_environment_tools(project_root: Path) -> None:

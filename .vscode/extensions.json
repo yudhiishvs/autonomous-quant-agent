@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "EditorConfig.EditorConfig",
+    "charliermarsh.ruff",
+    "github.vscode-github-actions",
+    "ms-azuretools.vscode-containers",
+    "ms-python.python",
+    "ms-python.vscode-pylance"
+  ]
+}
