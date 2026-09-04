@@ -56,6 +56,8 @@ market-data-runtime = [
 [project.scripts]
 adaptive-portfolio-agent = "adaptive_trader.cli:main"
 adaptive-market-data = "adaptive_trader.collection.cli:main"
+aqa = "adaptive_trader.platform.cli:main"
+autonomous-quant-agent = "adaptive_trader.platform.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
