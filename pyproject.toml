@@ -9,21 +9,26 @@ description = "Educational, paper-only regime-aware portfolio research prototype
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.16,<2",
     "alpaca-py>=0.42,<1",
+    "exchange-calendars>=4.11,<5",
     "matplotlib>=3.8",
     "numpy>=1.26",
     "pandas>=2.1",
     "plotly>=5.24",
+    "psycopg[binary]>=3.2,<4",
     "pyarrow>=17",
     "pydantic>=2.9",
     "pydantic-settings>=2.5",
     "python-dotenv>=1.0",
     "PyYAML>=6.0",
+    "requests>=2.32,<3",
     "rich>=13.8",
     "scipy>=1.11",
     "SQLAlchemy>=2.0",
     "tenacity>=9.0",
     "typer>=0.12",
+    "websockets>=15,<18",
 ]
 
 [project.optional-dependencies]
@@ -37,8 +42,20 @@ dev = [
     "ruff>=0.6",
 ]
 
+[dependency-groups]
+market-data-runtime = [
+    "alembic>=1.16,<2",
+    "exchange-calendars>=4.11,<5",
+    "psycopg[binary]>=3.2,<4",
+    "requests>=2.32,<3",
+    "SQLAlchemy>=2.0",
+    "typer>=0.12",
+    "websockets>=15,<18",
+]
+
 [project.scripts]
 adaptive-portfolio-agent = "adaptive_trader.cli:main"
+adaptive-market-data = "adaptive_trader.collection.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -51,6 +68,7 @@ addopts = "-ra"
 testpaths = ["tests"]
 markers = [
     "integration: offline integration tests",
+    "postgres: tests requiring a caller-provided PostgreSQL database",
     "safety: repository and execution safety checks",
 ]
 
