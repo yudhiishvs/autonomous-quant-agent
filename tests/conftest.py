@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import sqlite3
 from contextlib import suppress
@@ -14,13 +15,32 @@ from adaptive_trader.config import AppConfig, load_config
 from adaptive_trader.data import MarketData, generate_synthetic_market_data
 from adaptive_trader.persistence import Database
 
+_ALPACA_CREDENTIAL_ENV_NAMES = (
+    "APA_ALPACA_DATA_API_KEY",
+    "APA_ALPACA_DATA_SECRET_KEY",
+    "APA_ALPACA_PAPER_API_KEY",
+    "APA_ALPACA_PAPER_SECRET_KEY",
+)
+
+
+def pytest_configure() -> None:
+    """Remove ambient Alpaca authority before pytest collects test modules."""
+
+    for variable_name in _ALPACA_CREDENTIAL_ENV_NAMES:
+        os.environ.pop(variable_name, None)
+    os.environ["APA_ENABLE_PAPER_ORDERS"] = "NO"
+
 
 @pytest.fixture(autouse=True)
 def deny_external_network(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> None:
-    """Make every test fail immediately if production code attempts a network call."""
+    """Remove ambient Alpaca authority and block common Python TCP connection paths."""
+
+    for variable_name in _ALPACA_CREDENTIAL_ENV_NAMES:
+        monkeypatch.delenv(variable_name, raising=False)
+    monkeypatch.setenv("APA_ENABLE_PAPER_ORDERS", "NO")
 
     original_create_connection = socket.create_connection
     original_socket_connect = socket.socket.connect

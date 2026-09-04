@@ -430,6 +430,10 @@ commit count is planned.
 - [x] `IMPLEMENTED_AND_VERIFIED` — requirements normalized into stable IDs.
 - [x] `IMPLEMENTED_AND_VERIFIED` — execution-plan standard and 27-section active plan created.
 - [x] `IMPLEMENTED_AND_VERIFIED` — decision-record authority, index, and template established.
+- [x] `IMPLEMENTED_AND_VERIFIED` — stack-specific engineering, coding, testing, dependency,
+  tooling, and review standards established.
+- [x] `IMPLEMENTED_AND_VERIFIED` — ordinary pytest startup removes ambient Alpaca authority and
+  forces paper submission off before test-module collection.
 - [ ] `NOT_IMPLEMENTED` — Phase 1 project boundary and secure configuration.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
@@ -457,6 +461,7 @@ commit count is planned.
 | Use `docs/adr/` as the single decision-record authority. | Core specifies this path; the harness's conceptual `docs/design-decisions/` directory is omitted to avoid two mutable indexes. | IMPLEMENTED_AND_VERIFIED |
 | Treat unsupported early-close sessions as entry-ineligible and fail closed for forced-risk reduction. | The fixed regular-session timetable cannot be assumed safe on a shortened session. | NOT_IMPLEMENTED |
 | Resolve dashboard read-only authorization before implementing the private API. | The exact secret list has one operator token, while a shared bearer token could authorize control mutations after dashboard compromise. | NOT_IMPLEMENTED |
+| Continue natural commits without a separate approval pause after each internal review. | After approving the first two boundaries, the maintainer explicitly delegated continued work on this feature branch and requested no further approval prompts; coherent boundaries, full diff review, configured identity, and verification remain mandatory. | PARTIALLY_IMPLEMENTED |
 
 ## 25. Unexpected discoveries
 
@@ -477,6 +482,9 @@ commit count is planned.
 - The current project virtual environment is Python 3.14.3 and mypy currently targets 3.14 because
   installed NumPy stubs use newer syntax; runtime and CI are Python 3.11. Phase 1 must resolve this
   honestly without fake typing.
+- The ordinary pytest command previously depended on the caller to clear ambient Alpaca variables.
+  The engineering-standards boundary moves that denial into test bootstrap and retains per-test
+  cleanup; universal process-level socket denial is still separate target work.
 - Docker Compose configuration validation passed, but the Docker daemon became unavailable before
   a fresh PG16/image runtime validation. This is unavailable evidence, not a product failure.
 - The README is an extensive target design; code and tests, not that prose, determine statuses.
@@ -505,6 +513,8 @@ Approved natural-change evidence:
 | Boundary | Commit evidence | Review evidence |
 | --- | --- | --- |
 | Normalized platform requirements | `89a00dd794fc25a903be0e9461fe33736480b897`; one new file; 608 insertions; SHA-256 `9838f5c90eb03a665250b0dfe6e7feb6de956056e61011678b28466e4e101e1e` | Maintainer supplied the exact authorization for `Document platform requirements`; author and committer timestamps are 2026-09-03 18:57:07 -0400; configured identity was used; no trailer, push, or pull request was added. |
+| Platform execution plan | `94ba212608b91e883a120791db6cb6b3f1e294c7`; five files; 778 insertions and 21 deletions | Maintainer supplied the exact authorization for `Document platform execution plan`; author and committer timestamps are 2026-09-03 20:20:20 -0400; configured identity was used and no trailer was added. The maintainer separately authorized publication; local and `origin/feature/market-data-platform` heads both resolved to `94ba212`. |
+| Published-branch verification | GitHub Actions run `33821556434` for exact head `94ba212608b91e883a120791db6cb6b3f1e294c7` | PASS at 2026-09-04 00:34:41 UTC — locked install, Ruff format/lint, mypy, PostgreSQL migration and full pytest, synthetic backtest, deterministic replay, Compose validation, both image builds, and network-disabled collector image checks all completed successfully. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -518,6 +528,21 @@ The exact five-file candidate was overlaid on a disposable archive of `89a00dd` 
 | `docker compose --env-file .env.example -f docker-compose.yml config --quiet` | PASS. |
 | Ad hoc read-only candidate inspections | PASS — 142 unique seven-column requirements, 27 ordered plan sections, six ADR sections, three boundary-file local links, five-file whitespace, attribution, and private-material checks passed; three independent reviewers examined Core, Harness, and safety/maintainability scope. |
 
+Engineering-standards candidate evidence on 2026-09-03:
+
+| Command or evidence | Result |
+| --- | --- |
+| `env APA_ALPACA_DATA_API_KEY=sentinel-data-key APA_ALPACA_DATA_SECRET_KEY=sentinel-data-secret APA_ALPACA_PAPER_API_KEY=sentinel-paper-key APA_ALPACA_PAPER_SECRET_KEY=sentinel-paper-secret APA_ENABLE_PAPER_ORDERS=I_ACKNOWLEDGE_PAPER_ONLY .venv/bin/python -m pytest -q tests/test_offline_environment.py tests/test_collection_credentials.py tests/test_cli_modes.py` | PASS — 32 tests; test bootstrap removed the fake credential authority and forced submission off. |
+| The same sentinel environment with `.venv/bin/python -m pytest -q` | PASS twice — 376 passed, one PostgreSQL module skipped, and one upstream WebSocket deprecation warning; the final exact-candidate run took 70.17 seconds. |
+| `.venv/bin/ruff format --check .` | PASS — 125 files already formatted. |
+| `.venv/bin/ruff check .` | PASS. |
+| `.venv/bin/mypy src` | PASS — 44 source files. |
+| `git diff --check` | PASS. |
+| Initial `uv run --no-sync` format/lint/mypy attempts in the restricted process | FAIL before project tool execution — the process could not initialize the user-level uv cache; direct tools from the existing locked `.venv` then passed. |
+| GitHub Actions run `33821556434` against preceding exact head `94ba212608b91e883a120791db6cb6b3f1e294c7` | PASS — all existing CI steps completed successfully at 2026-09-04 00:34:41 UTC. |
+| Independent engineering-document review | PASS after corrections — test taxonomy, authority delegation, credential-free startup, coding rules, tool deferrals, and CI evidence were inspected against the appendix. |
+| Independent test-safety and simplification review | PASS with no blocker — no check was weakened and the boundary remained coherent; residual limitations are clearing after plugin/conftest import, a current-name-only credential list, two guarded TCP paths rather than universal denial, duplicated sentinel inventory, and scrubbed environment persistence only for unusual in-process `pytest.main()` callers. |
+
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.
 
@@ -530,9 +555,10 @@ The existing collector and legacy regression suite provide reusable code and cha
 they do not satisfy the complete generic platform contract. Phases 1–10 remain as listed in the
 progress checklist. Fresh PostgreSQL 16, container runtime, image scan, SBOM, clean-package
 install, twice-run demo, and backup/restore evidence remain unavailable until their implementation
-exists and the required services are available. Remote CI evidence for this branch is not run
-because push and pull-request publication remain unauthorized, not because the existing workflow
-is absent. External adapter credential validation is intentionally prohibited in this program.
+exists and the required services are available. GitHub Actions run `33821556434` passed for pushed
+commit `94ba212`; that run validates the existing PostgreSQL 15 and image boundaries, not the target
+PostgreSQL 16 platform or any external adapter. External adapter credential validation is
+intentionally prohibited in this program.
 
 This section must be replaced with exact implemented outcomes, remaining requirement statuses,
 final hashes, review findings, and external limitations after Phase 10; it cannot prove completion.
