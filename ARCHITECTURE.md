@@ -97,6 +97,9 @@ reconciliation are the active recovery mechanism.
 | --- | --- | --- | --- | --- |
 | `platform.canonical` | Converts a closed and explicitly bounded set of scalar/container values into deterministic UTF-8 JSON bytes; owns no mutable state | `CanonicalizationError` and `canonical_json_bytes()` | Standard-library JSON, UTC datetime, Decimal, and Enum types | No provider, persistence, environment, filesystem, or secret dependency; unsupported, nonfinite, naive-time, unordered, cyclic, subclassed-wrapper, oversized, or invalid-UTF-8 input fails with structural context and without rendering values |
 | `platform.hashing` | Derives content hashes from canonical bytes; owns no mutable state | `sha256_hex()` | `platform.canonical` and standard-library SHA-256 | No alternate serializer or implicit coercion; canonicalization failure prevents a hash result |
+| `platform.universe` | Owns immutable generic symbol roles and derives deterministic collection/order allowlists | `SymbolRole` and `UniverseSpec` | Pydantic and standard-library validation | No flagship literals, provider, persistence, environment, broker, or alias authority; invalid, duplicate, overlapping, or empty active membership fails closed |
+| `platform.config` | Loads bounded no-symlink experiment/profile YAML, verifies the mandatory profile pin, enforces mode authority, and composes deterministic identities; owns immutable in-memory configuration only | `ExperimentDefinition`, `PlatformProfile`, `ExperimentSpec`, `PlatformConfig`, and loaders | Canonical/hash/universe primitives, Pydantic, PyYAML, and POSIX file operations | No environment/secret, client, database, plugin, or network authority; malformed paths/YAML/types/hashes/mode combinations fail with safe context-free errors |
+| `platform.cli` | Exposes broker-free static `doctor` and `config validate` commands through the new aliases; owns no state | Typer `app` and `main()` | `platform.config`, JSON, paths, and Typer | No environment, secret, provider, broker, persistence, dynamic-import, network, or write authority; invalid configuration exits nonzero without constructing a client |
 
 ## Current data flows
 
@@ -228,10 +231,11 @@ receive credentials, broker objects, DDL authority, or dynamic code-loading inpu
 execution worker is the only target process allowed paper credentials; tracked submission
 remains disabled and authorization defaults deny.
 
-Canonical serialization and hashing are the first implemented target-package boundary. The
-remaining platform tree, services, tables, signed contracts, scheduler, jobs, API, artifact store,
-and deterministic vertical slice are `NOT_IMPLEMENTED`. Their ordered work and acceptance evidence
-live in `docs/execution-plans/platform-core.md`.
+Canonical serialization, hashing, universe/configuration, and broker-free profile validation are
+implemented target-package boundaries. The remaining platform tree, services, tables, signed
+contracts, scheduler, jobs, API, artifact store, and deterministic vertical slice are
+`NOT_IMPLEMENTED`. Their ordered work and acceptance evidence live in
+`docs/execution-plans/platform-core.md`.
 
 ## Critical invariants
 

@@ -1,6 +1,51 @@
 """Deterministic, broker-independent platform primitives."""
 
 from adaptive_trader.platform.canonical import CanonicalizationError, canonical_json_bytes
+from adaptive_trader.platform.config import (
+    BrokerAdapter,
+    ExecutionMode,
+    ExecutionSpec,
+    ExperimentConfigError,
+    ExperimentDefinition,
+    ExperimentHashMismatchError,
+    ExperimentSpec,
+    MarketDataAdapter,
+    MarketDataSpec,
+    PlatformConfig,
+    PlatformProfile,
+    RiskGroupSpec,
+    RiskPolicySpec,
+    SessionSpec,
+    SignalProviderSpec,
+    StoragePolicySpec,
+    load_experiment,
+    load_platform_config,
+)
 from adaptive_trader.platform.hashing import sha256_hex
+from adaptive_trader.platform.universe import SymbolRole, UniverseSpec
 
-__all__ = ["CanonicalizationError", "canonical_json_bytes", "sha256_hex"]
+__all__ = [
+    "BrokerAdapter",
+    "CanonicalizationError",
+    "ExecutionMode",
+    "ExecutionSpec",
+    "ExperimentConfigError",
+    "ExperimentDefinition",
+    "ExperimentHashMismatchError",
+    "ExperimentSpec",
+    "MarketDataAdapter",
+    "MarketDataSpec",
+    "PlatformConfig",
+    "PlatformProfile",
+    "RiskGroupSpec",
+    "RiskPolicySpec",
+    "SessionSpec",
+    "SignalProviderSpec",
+    "StoragePolicySpec",
+    "SymbolRole",
+    "UniverseSpec",
+    "canonical_json_bytes",
+    "load_experiment",
+    "load_platform_config",
+    "sha256_hex",
+]

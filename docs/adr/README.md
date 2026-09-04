@@ -6,11 +6,13 @@ provisional decisions; promote a decision here when implementation makes it dura
 
 ## Index
 
-No architectural decision has yet been promoted to an `Accepted` ADR. The exact 12-record backlog
-is listed in the
-[requirements inventory](../requirements.md#normative-package-and-decision-record-inventory), and
-the [active plan](../execution-plans/platform-core.md) records implementation timing and
-provisional decisions until each boundary is reviewed.
+1. [ADR 0001: Separate the generic platform from shipped experiment configuration](0001-generic-platform-and-shipped-experiment.md)
+   — Accepted, 2026-09-04.
+
+The remaining exact decision-record backlog is listed in the
+[requirements inventory](../requirements.md#normative-package-and-decision-record-inventory).
+The [active plan](../execution-plans/platform-core.md) records provisional decisions until each
+implementation boundary is reviewed.
 
 ## Conventions
 

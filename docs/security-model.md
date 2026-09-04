@@ -146,9 +146,12 @@ submission disabled, no default path submits.
   do not load data secrets.
 - Bounded retries, deadlines, worker joins, fencing tokens, intent-first persistence, stable
   identifiers, reconciliation, and latches contain duplicate, stale, ambiguous, or partial work.
-- Tracked profiles disable paper submission. Legacy paper operation additionally requires an
-  explicit command, exact acknowledgement, paper account verification, fresh state, open session,
-  risk approval, and clean reconciliation.
+- Every tracked platform profile disables submission. Static `aqa doctor` and
+  `aqa config validate` use a mandatory experiment hash pin and reject symlinked configuration
+  paths, invalid mode/adapter/provider combinations, and reserved profile-name mismatches without
+  reading credentials or constructing external clients. Legacy paper operation additionally
+  requires an explicit command, exact acknowledgement, paper account verification, fresh state,
+  open session, risk approval, and clean reconciliation.
 - Current logs and durable events support local diagnosis with redaction. Credential rotation,
   incident containment, and reporting follow `../SECURITY.md` and the existing runbooks.
 - Database access policy, TLS, backup retention, encryption at rest, host firewalling, and process

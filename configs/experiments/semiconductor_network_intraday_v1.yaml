@@ -1,0 +1,48 @@
+schema_version: 1
+experiment_id: semiconductor_network_intraday_v1
+experiment_version: 1
+active_tradable: [AAOI, AMD, AXTI, CSCO, HLIT, INSG, NVDA, SNDK]
+benchmark_only: [SOXX]
+context_only: [QQQ, SPY]
+excluded: [AAPL, AMZN, BOX, GOOGL, LCID, META, NET, OKTA, PAYC, PUBM, RBLX, RIVN, ROKU, SOUN, TSLA, UBER, WDAY, ZG]
+market_data:
+  provider: alpaca
+  feed: iex
+  adjustment: raw
+  source_timeframe: 1Min
+  decision_timeframe: 15Min
+  exchange_calendar: XNAS
+  regular_hours_only: true
+session:
+  open: "09:30:00"
+  close: "16:00:00"
+  first_strategy_bar_close: "09:45:00"
+  last_strategy_bar_close: "14:30:00"
+  decision_ready_delay_seconds: 60
+  decision_deadline_delay_seconds: 120
+  forced_flat_target_time: "15:43:00"
+  forced_flat_submit_deadline: "15:44:00"
+  required_flat_time: "15:45:00"
+risk_groups:
+  - id: connectivity
+    symbols: [AAOI, CSCO, HLIT, INSG]
+    max_gross_weight: "0.60"
+  - id: compute_storage_materials
+    symbols: [AMD, AXTI, NVDA, SNDK]
+    max_gross_weight: "0.60"
+risk_policy:
+  id: paper_v1
+  version: 1
+  max_absolute_symbol_weight: "0.15"
+  max_gross_weight: "1.00"
+  min_net_weight: "-0.30"
+  max_net_weight: "0.30"
+  max_cluster_gross_weight: "0.40"
+  correlation_edge_threshold: "0.80"
+  minimum_rebalance_equity_fraction: "0.0025"
+  session_loss_trigger: "-0.02"
+  deployment_drawdown_trigger: "-0.15"
+  target_annualized_volatility: "0.10"
+  sigma_floor: "0.20"
+  edge_saturation_bps: "25"
+  covariance_eigenvalue_floor: "0.00000001"
