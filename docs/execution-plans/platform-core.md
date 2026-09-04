@@ -448,8 +448,10 @@ commit count is planned.
   classes are excluded from Git and Docker contexts while reviewed fixtures remain eligible.
 - [x] `IMPLEMENTED_AND_VERIFIED` — minimal repository editor recommendations, Python/Ruff/Pytest
   settings, and cross-editor formatting basics are checked without replacing CLI or CI gates.
+- [x] `IMPLEMENTED_AND_VERIFIED` — canonical JSON and SHA-256 primitives have closed exact-type
+  inputs, safe structural failures, independently calculated known answers, and Python 3.11 typing.
 - [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene is in place; the project boundary,
-  canonical contracts, configuration, file-backed secrets, doctor, aliases, and typing remain.
+  configuration, file-backed secrets, doctor, aliases, and repository-wide typing remain.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -465,7 +467,7 @@ commit count is planned.
 | Decision | Rationale | Status |
 | --- | --- | --- |
 | Continue on `feature/market-data-platform` from `5690205`. | Explicit maintainer direction preserves the committed collector work. | IMPLEMENTED_AND_VERIFIED |
-| Build a separate signed platform path under `adaptive_trader.platform`. | Protects legacy long-only contracts and follows the required public namespace. | NOT_IMPLEMENTED |
+| Build a separate signed platform path under `adaptive_trader.platform`. | Protects legacy long-only contracts and follows the required public namespace. | PARTIALLY_IMPLEMENTED |
 | Treat the flagship basket as versioned configuration. | Keeps algorithms reusable and makes symbol authority hashable/testable. | NOT_IMPLEMENTED |
 | Retain Python, `uv`, PostgreSQL/SQLite, Typer, and Streamlit; add the required FastAPI boundary. | Preserves the implemented stack while adding the specified private API; FastAPI is not currently installed. | PARTIALLY_IMPLEMENTED |
 | Use PostgreSQL jobs/outbox, not a message broker. | Current workload needs transactional durability more than another distributed dependency. | NOT_IMPLEMENTED |
@@ -542,6 +544,7 @@ Approved natural-change evidence:
 | Observability and performance policy | `acd71c69eb59603a8e44feba8923e61528452475`; four files; 268 insertions and one deletion | Author and committer timestamps are 2026-09-03 21:19:54 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed. GitHub Actions run `33825372703` passed at 2026-09-04 01:31:27 UTC, including locked setup, static checks, PostgreSQL migration/full tests, legacy regressions, Compose validation, both image builds, and network-disabled collector checks. |
 | Repository operating and contribution guidance | `65aa1fc50f25e4bce289f5c3d6340a555e1775b4`; five files; 412 insertions and three deletions | Author and committer timestamps are 2026-09-03 21:32:00 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed. GitHub Actions run `33826139563` passed at 2026-09-04 01:43:42 UTC with the complete existing CI workflow. |
 | Repository workflow skills | `c101879d6327b8961662f22a92fc5c969b003025`; 17 files; 551 insertions and one deletion | Author and committer timestamps are 2026-09-03 21:51:10 -0400; configured identity was used and no trailer was added. The reviewed commit was fast-forward pushed after adversarial corrections. GitHub Actions run `33827328111` passed at 2026-09-04 02:03:13 UTC with the complete existing CI workflow. |
+| Development and artifact hygiene | `c9082c2183f3bb4c78f532e8d6da4a0a74395e46`; nine files; 404 insertions and 69 deletions | Author and committer timestamps are 2026-09-03 23:36:00 -0400; configured identity was used and no trailer was added. Two independent final reviews found no remaining issue, and the commit was fast-forward pushed. GitHub Actions run `33833840910` passed at 2026-09-04 03:46:50 UTC with the complete existing CI workflow. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -625,6 +628,19 @@ Development and artifact-hygiene candidate evidence on 2026-09-03:
 | Whole-worktree Ruff format/lint and mypy plus `docker compose ... config --quiet` | PASS — 128 files formatted, lint clean, 44 source files type-checked, and Compose configuration valid. |
 | Exact documented security-test selection and `git diff --check` | PASS — 95 security-focused tests, one upstream warning, and no whitespace errors. |
 | `uv run --no-sync pytest -q` | PASS — 383 passed, one PostgreSQL module skipped, and one upstream WebSocket deprecation warning in 86.73 seconds. |
+
+Canonical serialization and hashing candidate evidence on 2026-09-03:
+
+| Command or evidence | Result |
+| --- | --- |
+| Independently encoded UTF-8 known answer checked with SHA-256 command-line implementations | PASS — both checks produced `34ab327fa7efe5ea2512e17fd38ffff70428ff1761468a4d2d2c6014bdc569a7`. |
+| `uv run --no-sync pytest -q tests/unit/test_platform_canonical.py` | PASS — 49 known-answer, normalization, limit, cycle, hostile-wrapper, and safe-error tests in 0.04 seconds. |
+| Focused branch coverage with `--cov=adaptive_trader.platform --cov-branch --cov-fail-under=85` | PASS — 89.05% branch coverage for the new package. |
+| Focused Ruff format/lint and mypy checks, including `mypy --python-version 3.11 src/adaptive_trader/platform` | PASS — four affected Python files are formatted, lint clean, and type clean; all three platform source files pass the Python 3.11 target. |
+| Whole-worktree Ruff format/lint and mypy plus `uv lock --check` and `docker compose ... config --quiet` | PASS — 132 files formatted, lint clean, 47 source files type-checked, the lock is consistent, and Compose configuration is valid. |
+| Exact documented security-test selection and `git diff --check` | PASS — 95 security-focused tests, one upstream warning, and no whitespace errors. |
+| `uv run --no-sync pytest -q` | PASS — 432 passed, one PostgreSQL module skipped, and one upstream WebSocket deprecation warning in 70.86 seconds. |
+| Independent design and security re-reviews | PASS — no remaining acceptance blocker after fixed bounds, context-free safe errors, accessor-safe enum handling, and fixed-offset timezone restrictions. |
 
 No real credential file was read, no external data or broker connection was made, and no order was
 submitted during this baseline.
