@@ -11,17 +11,29 @@ from adaptive_trader.platform.config import (
     ExperimentSpec,
     MarketDataAdapter,
     MarketDataSpec,
+    PaperOrderEnablement,
     PlatformConfig,
     PlatformProfile,
     RiskGroupSpec,
     RiskPolicySpec,
+    RuntimeService,
+    RuntimeSettings,
+    RuntimeSettingsError,
     SessionSpec,
     SignalProviderSpec,
     StoragePolicySpec,
     load_experiment,
     load_platform_config,
+    load_runtime_settings,
 )
 from adaptive_trader.platform.hashing import sha256_hex
+from adaptive_trader.platform.security import (
+    RedactedSecret,
+    SecretFileError,
+    SecretFileReference,
+    SecretFileVariable,
+    load_secret_file,
+)
 from adaptive_trader.platform.universe import SymbolRole, UniverseSpec
 
 __all__ = [
@@ -35,10 +47,18 @@ __all__ = [
     "ExperimentSpec",
     "MarketDataAdapter",
     "MarketDataSpec",
+    "PaperOrderEnablement",
     "PlatformConfig",
     "PlatformProfile",
+    "RedactedSecret",
     "RiskGroupSpec",
     "RiskPolicySpec",
+    "RuntimeService",
+    "RuntimeSettings",
+    "RuntimeSettingsError",
+    "SecretFileError",
+    "SecretFileReference",
+    "SecretFileVariable",
     "SessionSpec",
     "SignalProviderSpec",
     "StoragePolicySpec",
@@ -47,5 +67,7 @@ __all__ = [
     "canonical_json_bytes",
     "load_experiment",
     "load_platform_config",
+    "load_runtime_settings",
+    "load_secret_file",
     "sha256_hex",
 ]
