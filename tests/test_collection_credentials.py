@@ -11,7 +11,9 @@ import pytest
 
 from adaptive_trader.collection.credentials import (
     ALPACA_DATA_API_KEY_ENV,
+    ALPACA_DATA_API_KEY_FILE_ENV,
     ALPACA_DATA_SECRET_KEY_ENV,
+    ALPACA_DATA_SECRET_KEY_FILE_ENV,
     AlpacaDataCredentialError,
     AlpacaDataCredentials,
 )
@@ -29,6 +31,46 @@ def test_data_credentials_read_only_dedicated_environment_names() -> None:
 
     assert credentials.api_key == "data-key"
     assert credentials.secret_key == "data-secret"
+
+
+def test_data_credentials_load_from_owner_private_secret_files(tmp_path: Path) -> None:
+    api_key_file = tmp_path / "alpaca-data-api-key"
+    secret_key_file = tmp_path / "alpaca-data-secret-key"
+    for path, value in (
+        (api_key_file, "synthetic-data-key"),
+        (secret_key_file, "synthetic-data-secret"),
+    ):
+        path.write_text(f"{value}\n", encoding="utf-8")
+        path.chmod(0o600)
+
+    credentials = AlpacaDataCredentials.from_environment(
+        {
+            ALPACA_DATA_API_KEY_FILE_ENV: str(api_key_file),
+            ALPACA_DATA_SECRET_KEY_FILE_ENV: str(secret_key_file),
+        }
+    )
+
+    assert credentials.api_key == "synthetic-data-key"
+    assert credentials.secret_key == "synthetic-data-secret"
+
+
+def test_data_credentials_reject_incomplete_or_ambiguous_secret_sources(
+    tmp_path: Path,
+) -> None:
+    api_key_file = tmp_path / "alpaca-data-api-key"
+    api_key_file.write_text("synthetic-data-key\n", encoding="utf-8")
+    api_key_file.chmod(0o600)
+
+    with pytest.raises(AlpacaDataCredentialError, match="both Alpaca data secret files"):
+        AlpacaDataCredentials.from_environment({ALPACA_DATA_API_KEY_FILE_ENV: str(api_key_file)})
+    with pytest.raises(AlpacaDataCredentialError, match="ambiguous"):
+        AlpacaDataCredentials.from_environment(
+            {
+                ALPACA_DATA_API_KEY_FILE_ENV: str(api_key_file),
+                ALPACA_DATA_SECRET_KEY_FILE_ENV: str(api_key_file),
+                ALPACA_DATA_API_KEY_ENV: "legacy-key",
+            }
+        )
 
 
 def test_unrelated_alpaca_environment_names_cannot_supply_data_credentials() -> None:

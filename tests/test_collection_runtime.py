@@ -12,6 +12,8 @@ import adaptive_trader.collection.cli as collector_cli
 from adaptive_trader.collection.postgres import normalize_postgres_url
 from adaptive_trader.collection.repository import CollectorStatus
 from adaptive_trader.collection.runtime import (
+    MARKET_DATA_DATABASE_URL_ENV,
+    MARKET_DATA_DATABASE_URL_FILE_ENV,
     CollectorEnvironment,
     migration_database_url_from_environment,
     parse_utc_boundary,
@@ -33,6 +35,48 @@ def test_runtime_environment_parses_hosted_postgres_and_redacts_password() -> No
     assert environment.history_start == datetime(2025, 1, 2, tzinfo=UTC)
     assert "private-password" not in repr(environment)
     assert "private-password" not in str(environment)
+
+
+def test_runtime_environment_loads_database_url_from_owner_private_file(
+    tmp_path: Path,
+) -> None:
+    database_url = (
+        "postgresql://collector:synthetic-password@db.example.invalid/market_data"
+        "?sslmode=verify-full"
+    )
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(f"{database_url}\n", encoding="utf-8")
+    database_url_file.chmod(0o600)
+
+    environment = CollectorEnvironment.from_environment(
+        {
+            MARKET_DATA_DATABASE_URL_FILE_ENV: str(database_url_file),
+            "APA_MARKET_DATA_HISTORY_START": "2025-01-02",
+        }
+    )
+
+    assert environment.database_url.startswith("postgresql+psycopg://collector:")
+    assert environment.history_start == datetime(2025, 1, 2, tzinfo=UTC)
+    assert "synthetic-password" not in repr(environment)
+
+
+def test_runtime_environment_rejects_ambiguous_database_sources(tmp_path: Path) -> None:
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(
+        "postgresql://collector:synthetic@127.0.0.1:5432/collector_test\n",
+        encoding="utf-8",
+    )
+    database_url_file.chmod(0o600)
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        CollectorEnvironment.from_environment(
+            {
+                MARKET_DATA_DATABASE_URL_FILE_ENV: str(database_url_file),
+                MARKET_DATA_DATABASE_URL_ENV: (
+                    "postgresql://collector:legacy@127.0.0.1:5432/collector_test"
+                ),
+            }
+        )
 
 
 def test_runtime_environment_rejects_non_postgres_and_naive_timestamp() -> None:

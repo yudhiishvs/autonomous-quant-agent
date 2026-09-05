@@ -6,12 +6,15 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
+from pathlib import Path
 
 from adaptive_trader.collection.postgres import normalize_postgres_url
+from adaptive_trader.platform.security import SecretFileVariable, load_secret_file
 
 MARKET_DATA_DATABASE_URL_ENV = "APA_MARKET_DATA_DATABASE_URL"
 MARKET_DATA_MIGRATION_DATABASE_URL_ENV = "APA_MARKET_DATA_MIGRATION_DATABASE_URL"
 MARKET_DATA_HISTORY_START_ENV = "APA_MARKET_DATA_HISTORY_START"
+MARKET_DATA_DATABASE_URL_FILE_ENV = SecretFileVariable.DATABASE_URL.value
 
 
 def parse_utc_boundary(value: str, *, field_name: str) -> datetime:
@@ -56,9 +59,22 @@ class CollectorEnvironment:
         environment: Mapping[str, str] | None = None,
     ) -> CollectorEnvironment:
         values = os.environ if environment is None else environment
-        database_url = values.get(MARKET_DATA_DATABASE_URL_ENV, "").strip()
+        legacy_database_url = values.get(MARKET_DATA_DATABASE_URL_ENV, "").strip()
+        database_url_file = values.get(MARKET_DATA_DATABASE_URL_FILE_ENV, "").strip()
+        if legacy_database_url and database_url_file:
+            raise ValueError("market-data database credential sources are ambiguous")
+        database_url = (
+            load_secret_file(
+                Path(database_url_file),
+                source=SecretFileVariable.DATABASE_URL,
+            ).reveal()
+            if database_url_file
+            else legacy_database_url
+        )
         if not database_url:
-            raise ValueError(f"{MARKET_DATA_DATABASE_URL_ENV} must be set")
+            raise ValueError(
+                f"{MARKET_DATA_DATABASE_URL_FILE_ENV} or {MARKET_DATA_DATABASE_URL_ENV} must be set"
+            )
         raw_start = values.get(MARKET_DATA_HISTORY_START_ENV, "").strip()
         history_start = (
             None
