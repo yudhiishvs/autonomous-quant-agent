@@ -26,6 +26,14 @@ from adaptive_trader.platform.config import (
     load_platform_config,
     load_runtime_settings,
 )
+from adaptive_trader.platform.domain import (
+    DecimalRounding,
+    DeterministicId,
+    quantize_decimal,
+    require_finite_decimal,
+    require_utc_instant,
+)
+from adaptive_trader.platform.errors import DomainValidationError
 from adaptive_trader.platform.hashing import sha256_hex
 from adaptive_trader.platform.security import (
     LOCAL_BOOTSTRAP_FILENAMES,
@@ -44,6 +52,9 @@ __all__ = [
     "LOCAL_BOOTSTRAP_FILENAMES",
     "BrokerAdapter",
     "CanonicalizationError",
+    "DecimalRounding",
+    "DeterministicId",
+    "DomainValidationError",
     "ExecutionMode",
     "ExecutionSpec",
     "ExperimentConfigError",
@@ -77,5 +88,8 @@ __all__ = [
     "load_platform_config",
     "load_runtime_settings",
     "load_secret_file",
+    "quantize_decimal",
+    "require_finite_decimal",
+    "require_utc_instant",
     "sha256_hex",
 ]

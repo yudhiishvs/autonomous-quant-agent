@@ -23,6 +23,8 @@ ALLOWED_IMPORTS = {
     CONFIG_MODULE: {
         "__future__",
         "adaptive_trader.platform.canonical",
+        "adaptive_trader.platform.constants",
+        "adaptive_trader.platform.errors",
         "adaptive_trader.platform.hashing",
         "adaptive_trader.platform.security",
         "adaptive_trader.platform.universe",
@@ -45,6 +47,7 @@ ALLOWED_IMPORTS = {
     },
     SECURITY_MODULE: {
         "__future__",
+        "adaptive_trader.platform.errors",
         "dataclasses",
         "enum",
         "fcntl",

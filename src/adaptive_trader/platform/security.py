@@ -16,6 +16,8 @@ from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
+from adaptive_trader.platform.errors import LocalSecretBootstrapError, SecretFileError
+
 _MAX_SECRET_BYTES = 16 * 1024
 _MAX_SECRET_PATH_BYTES = 4096
 _REDACTED = "<redacted>"
@@ -50,14 +52,6 @@ class SecretFileVariable(StrEnum):
     ALPACA_PAPER_API_KEY = "AQA_ALPACA_PAPER_API_KEY_FILE"
     ALPACA_PAPER_SECRET_KEY = "AQA_ALPACA_PAPER_SECRET_KEY_FILE"
     PAPER_ACCOUNT_ID_HASH = "AQA_PAPER_ACCOUNT_ID_HASH_FILE"
-
-
-class SecretFileError(ValueError):
-    """Raised when a secret file cannot be accepted without weakening its boundary."""
-
-
-class LocalSecretBootstrapError(ValueError):
-    """Raised when local infrastructure secrets cannot be created safely."""
 
 
 @dataclass(frozen=True, slots=True)

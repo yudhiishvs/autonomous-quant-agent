@@ -36,6 +36,12 @@ from yaml.events import (
 from yaml.nodes import MappingNode
 
 from adaptive_trader.platform.canonical import CanonicalizationError
+from adaptive_trader.platform.constants import MAX_SIGNED_64_BIT_INTEGER
+from adaptive_trader.platform.errors import (
+    ExperimentConfigError,
+    ExperimentHashMismatchError,
+    RuntimeSettingsError,
+)
 from adaptive_trader.platform.hashing import sha256_hex
 from adaptive_trader.platform.security import SecretFileReference, SecretFileVariable
 from adaptive_trader.platform.universe import UniverseSpec, _normalize_symbol_tuple
@@ -43,7 +49,6 @@ from adaptive_trader.platform.universe import UniverseSpec, _normalize_symbol_tu
 _MAX_CONFIG_BYTES = 65_536
 _MAX_YAML_DEPTH = 32
 _MAX_YAML_NODES = 2_048
-_MAX_VERSION = 2**63 - 1
 _IDENTIFIER_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$", flags=re.ASCII)
 _TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$", flags=re.ASCII)
 _TIME_PATTERN = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$", flags=re.ASCII)
@@ -62,14 +67,6 @@ _CONCRETE_PATH_TYPE = type(Path())
 _RUNTIME_SETTINGS_CONSTRUCTION_TOKEN = object()
 _MAX_RUNTIME_PATH_BYTES = 4_096
 _MAX_RUNTIME_PATH_COMPONENT_BYTES = 255
-
-
-class ExperimentConfigError(ValueError):
-    """Raised when an experiment file cannot be safely loaded and validated."""
-
-
-class ExperimentHashMismatchError(ExperimentConfigError):
-    """Raised when a validated experiment does not match its pinned digest."""
 
 
 class _StrictFrozenModel(BaseModel):
@@ -240,7 +237,7 @@ class RiskPolicySpec(_StrictFrozenModel):
     """Versioned numeric risk policy referenced by an experiment."""
 
     id: str
-    version: int = Field(ge=1, le=_MAX_VERSION)
+    version: int = Field(ge=1, le=MAX_SIGNED_64_BIT_INTEGER)
     max_absolute_symbol_weight: Decimal
     max_gross_weight: Decimal
     min_net_weight: Decimal
@@ -329,7 +326,7 @@ class ExperimentDefinition(UniverseSpec):
 
     schema_version: Literal[1]
     experiment_id: str
-    experiment_version: int = Field(ge=1, le=_MAX_VERSION)
+    experiment_version: int = Field(ge=1, le=MAX_SIGNED_64_BIT_INTEGER)
     market_data: MarketDataSpec
     session: SessionSpec
     risk_groups: tuple[RiskGroupSpec, ...]
@@ -1111,10 +1108,6 @@ class PaperOrderEnablement(StrEnum):
 
     DISABLED = "disabled"
     ACKNOWLEDGED = "acknowledged"
-
-
-class RuntimeSettingsError(ValueError):
-    """Raised when a service runtime cannot be composed through the safe boundary."""
 
 
 _NONSECRET_RUNTIME_VARIABLES = (

@@ -11,21 +11,21 @@ from decimal import Decimal
 from enum import Enum
 from typing import TypeAlias, cast
 
+from adaptive_trader.platform.constants import (
+    MAX_SIGNED_64_BIT_INTEGER,
+    MIN_SIGNED_64_BIT_INTEGER,
+)
+from adaptive_trader.platform.errors import CanonicalizationError
+
 JsonScalar: TypeAlias = bool | int | float | str | None
 JsonValue: TypeAlias = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 
-_MIN_INTEGER = -(2**63)
-_MAX_INTEGER = 2**63 - 1
 _MAX_DEPTH = 32
 _MAX_NODES = 4096
 _MAX_STRING_BYTES = 65_536
 _MAX_TEXT_BYTES = 1_048_576
 _MAX_DECIMAL_CHARACTERS = 1024
 _MAX_OUTPUT_BYTES = 8_388_608
-
-
-class CanonicalizationError(ValueError):
-    """Raised when a value cannot safely enter a canonical hash input."""
 
 
 @dataclass(slots=True)
@@ -119,7 +119,7 @@ def _normalize(
 
     if value_type is int:
         integer = cast(int, value)
-        if not _MIN_INTEGER <= integer <= _MAX_INTEGER:
+        if not MIN_SIGNED_64_BIT_INTEGER <= integer <= MAX_SIGNED_64_BIT_INTEGER:
             raise CanonicalizationError(f"integer range limit exceeded at {path}")
         return integer
 
