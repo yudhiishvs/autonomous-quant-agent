@@ -14,17 +14,20 @@ from decimal import Decimal
 from typing import cast
 
 import pytest
-from alembic import command
-from sqlalchemy import delete, func, inspect, select, text, update
+from sqlalchemy import create_engine, delete, func, inspect, select, text, update
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.schema import DropSchema
 
 from adaptive_trader.collection.contracts import MarketBarV1, RawBarObservationV1
 from adaptive_trader.collection.migrations import (
-    _alembic_config,
     database_revision,
     upgrade_database,
 )
-from adaptive_trader.collection.postgres import PostgresMarketDataRepository, normalize_postgres_url
+from adaptive_trader.collection.postgres import (
+    PostgresMarketDataRepository,
+    normalize_postgres_url,
+    postgres_connect_args,
+)
 from adaptive_trader.collection.repository import (
     CheckpointKey,
     CheckpointRegressionError,
@@ -63,19 +66,35 @@ if _TEST_DATABASE.database != "collector_test":
     raise RuntimeError("PostgreSQL integration tests require the collector_test database")
 
 _BASE = datetime(2026, 9, 3, 14, 30, tzinfo=UTC)
+_PLATFORM_SCHEMA = "aqa"
+
+
+def _drop_disposable_test_schemas() -> None:
+    """Reset only the positively guarded schemas in the disposable test database."""
+
+    engine = create_engine(
+        _TEST_DATABASE,
+        hide_parameters=True,
+        connect_args=postgres_connect_args("collection-pg-test-reset", migration=True),
+    )
+    try:
+        with engine.begin() as connection:
+            connection.execute(DropSchema(_PLATFORM_SCHEMA, cascade=True, if_exists=True))
+            connection.execute(DropSchema(SCHEMA_NAME, cascade=True, if_exists=True))
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture(scope="module")
 def database_url() -> Iterator[str]:
     """Migrate a caller-designated disposable database from base to head."""
 
-    config = _alembic_config(_DATABASE_URL)
-    command.downgrade(config, "base")
+    _drop_disposable_test_schemas()
     upgrade_database(_DATABASE_URL)
     try:
         yield _DATABASE_URL
     finally:
-        command.downgrade(config, "base")
+        _drop_disposable_test_schemas()
 
 
 @pytest.fixture
@@ -148,7 +167,7 @@ def test_migration_up_creates_the_complete_schema(
 ) -> None:
     current, expected = database_revision(database_url)
 
-    assert current == expected == "20260903_0001"
+    assert current == expected
     repository.verify_schema()
     assert {
         "bar_observations",

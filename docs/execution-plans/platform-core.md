@@ -69,10 +69,11 @@ composition, broker-free static CLI validation through both new aliases, descrip
 owner-private secret loading, opaque secret-file references, and strict `RuntimeSettings` composed
 from an explicitly injected environment and exact service/mode authority matrix. The exact
 experiment and all three profiles are present. Local infrastructure-secret bootstrap is also
-implemented. Service command adoption, signed
-domain contracts, the complete `aqa_*` schema and roles, aggregation, basket watermarks, scheduler,
-jobs/outbox, private API, API-backed dashboard, unified audit chain, offline vertical slice, PG16
-restore proof, and the complete delivery/security harness remain absent.
+implemented. The platform database engine, exact 25-table SQLAlchemy metadata, and additive
+Alembic revision are now implemented locally with SQLite and offline PostgreSQL-DDL tests. Service
+command adoption, service roles, the complete atomic repository set, aggregation, basket
+watermarks, scheduler, jobs/outbox, private API, API-backed dashboard, offline vertical slice,
+PostgreSQL restore proof, and the complete delivery/security harness remain incomplete.
 
 ## 4. Requirements being addressed
 
@@ -481,7 +482,9 @@ commit count is planned.
   composition, local bootstrap, repository hygiene, Python 3.11 typing, initial STRIDE register,
   and current/target security architecture are in place. Later service command consumption,
   process mounts, and feature-specific commands belong to their implementation phases.
-- [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
+- [ ] `PARTIALLY_IMPLEMENTED` — Phase 2 has the redacted database-engine boundary, exact 25-table
+  metadata, additive Alembic revision, SQLite compatibility, and guarded PostgreSQL 16 migration
+  tests. Service roles, the full atomic repository set, and published PostgreSQL evidence remain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
 - [ ] `NOT_IMPLEMENTED` — Phase 5 signed risk and latches.
@@ -819,6 +822,18 @@ PostgreSQL 16 CI candidate evidence on 2026-09-05:
 | Whole-worktree Ruff format/lint and full-source Mypy | PASS — 153 files formatted, lint clean, and 54 source files type-checked. |
 | Local PostgreSQL 16 service execution | NOT RUN — the local Docker daemon remains unavailable; the workflow itself asserts the runtime server major before migration. |
 | Independent CI security and maintainability review | PASS after current-state documentation was corrected; the digest, GitHub service-container context, quoted shell boundary, validation ordering, and credential-free behavior were verified with no blocker or high finding. |
+| Published PostgreSQL 16 baseline | PASS — GitHub Actions run `33974704565` completed successfully for exact commit `d214e3a265c58fe5aeef69376123445615f5225c`, including the runtime PostgreSQL 16 assertion, migration, full tests, legacy regressions, Compose validation, and image checks. |
+
+Phase 2 schema candidate evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv lock --check`; whole-worktree Ruff format check/lint; `mypy src`; `git diff --check` | PASS — lock metadata is consistent, 164 files are formatted, lint is clean, and 58 source files type-check. |
+| Focused schema/engine/migration/architecture selection | PASS — 72 tests cover the exact 25-table inventory, keys/relationships/checks/indexes, SQLite schema translation, exact finite Decimal storage, UTC behavior, redacted URL loading, PostgreSQL DDL compilation, and destructive-downgrade refusal. |
+| `uv run --no-sync pytest -q` | PASS — 1,095 passed, two guarded PostgreSQL modules skipped for an absent caller-authorized URL, and one upstream WebSocket deprecation warning in 66.51 seconds. |
+| Synthetic backtest, deterministic replay, Compose configuration, and diff hygiene | PASS — all six deterministic backtest portfolios completed; replay processed nine events, one cycle, and three fake-broker submissions; Compose rendered without starting services; the diff has no whitespace errors. |
+| Independent persistence review | PASS after correcting SQLite schema translation, PostgreSQL session/result UTC handling, PostgreSQL nonfinite-numeric checks, pre-bind nonfinite rejection, and exact cross-dialect Decimal precision/scale behavior; final review found no blocker, high, or medium issue. |
+| Local PostgreSQL 16 platform migration execution | NOT RUN — the local Docker daemon is unavailable; the guarded fresh/prior-state, metadata-drift, downgrade-preservation, and bound nonfinite-value cases remain for published CI. |
 
 No real credential file was read, no external data or broker connection was made, and no Alpaca
 paper or real-money order was submitted during this baseline.
@@ -830,18 +845,18 @@ Current outcome: `PARTIALLY_IMPLEMENTED`.
 Phases 0 and 1 are implemented with recorded evidence: the generic project/domain boundary,
 canonical identity/time/numeric primitives, universe, experiment, profiles, static validation,
 secret-file and service-scoped runtime settings, local bootstrap, initial security architecture,
-and STRIDE register. The existing
+and STRIDE register. Phase 2 is in progress with a redacted platform database engine, exact
+25-table metadata, additive Alembic migration, and guarded fresh/prior-state PostgreSQL tests. The existing
 collector and legacy regression suite provide reusable code and characterization, but they do not
 satisfy the complete generic platform contract. Service command/mount integration and remaining
-feature commands are assigned to their dependent later phases; Phases 2–10 remain as listed in the
-progress checklist.
-Fresh PostgreSQL 16, target container runtime, image scan, SBOM, clean-package install, twice-run
+feature commands are assigned to their dependent later phases; the incomplete parts of Phases
+2–10 remain as listed in the progress checklist.
+The new platform migration has not yet run in published CI. Target container runtime, image scan, SBOM, clean-package install, twice-run
 demo, and backup/restore evidence remain unavailable until their implementation exists and the
-required services are available. GitHub Actions run `33972693704` passed for pushed commit
-`ba1a3ca`; that run validates the existing PostgreSQL 15 and image boundaries plus the Phase 1
-configuration, secret, bootstrap, and Python 3.11 foundations. Domain commit `f28bc91` remains
-local until the reviewed Phase 1 boundary is published.
-The target PostgreSQL 16 platform and every external adapter remain unvalidated;
+required services are available. GitHub Actions run `33974704565` passed for pushed commit
+`d214e3a`; that run validates the digest-pinned PostgreSQL 16 and image boundaries plus all
+published Phase 1 foundations. The uncommitted Phase 2 schema remains locally validated only.
+Every credentialed external adapter remains unvalidated;
 credentialed external validation is intentionally prohibited in this program.
 
 This section must be replaced with exact implemented outcomes, remaining requirement statuses,
