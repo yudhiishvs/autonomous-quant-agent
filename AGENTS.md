@@ -14,7 +14,9 @@ the supported system.
 - Engineering principles: `docs/engineering-principles.md`
 - Coding standards: `docs/coding-standards.md`
 - Testing strategy: `docs/testing-strategy.md`
-- Security and trust boundaries: `docs/security-model.md`
+- Security boundaries and current controls: `docs/security-model.md`
+- Target security architecture: `docs/security_architecture.md`
+- STRIDE threat register and test traceability: `docs/threat_model.md`
 - Review rules: `docs/code-review.md`
 - Tool versions and commands: `docs/tooling.md`
 - Legacy prototype details: `docs/architecture.md`, `docs/data_dictionary.md`
@@ -125,7 +127,8 @@ one-command local full harness and benchmark command are `NOT_IMPLEMENTED`; do n
   bootstrap is the narrow exception that generates infrastructure values solely for owner-private
   file publication and never returns or prints them.
 - No ordinary verification command may contact Alpaca or submit an order.
-- Follow `SECURITY.md` and `docs/security-model.md` for reporting and residual risks.
+- Follow `SECURITY.md`, `docs/security-model.md`, `docs/security_architecture.md`, and
+  `docs/threat_model.md` for reporting, authority boundaries, and residual risks.
 
 # Dependency Rules
 

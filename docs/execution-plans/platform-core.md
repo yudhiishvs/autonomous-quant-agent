@@ -476,9 +476,11 @@ commit count is planned.
   passwords and operator token with cryptographic randomness, exact owner-only modes,
   process/thread serialization, atomic no-overwrite publication, safe reruns, and path-only output;
   it has no Alpaca credential, client, network, or order authority.
-- [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene, canonical/configuration boundaries,
-  profiles, static doctor, aliases, secret/runtime composition, and full-source Python 3.11 typing
-  are in place; service command integration, mount isolation, and the remaining commands remain.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 1 project/domain skeleton, canonical identity/time/numeric
+  boundaries, experiment and profile configuration, static doctor and aliases, secret-file/runtime
+  composition, local bootstrap, repository hygiene, Python 3.11 typing, initial STRIDE register,
+  and current/target security architecture are in place. Later service command consumption,
+  process mounts, and feature-specific commands belong to their implementation phases.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -598,6 +600,7 @@ Approved natural-change evidence:
 | Immutable universe and experiment configuration | `4eec0bfff423bf7130d30a75d674b4320dbea013`; 12 files; 1,927 insertions and 34 deletions | Author and committer timestamps are 2026-09-04 08:20:48 -0400; configured identity was used and no trailer was added. Independent design and security re-reviews found no remaining issue after hostile-YAML, numeric, path, session, and provenance corrections. The commit was fast-forward pushed, and GitHub Actions run `33872331527` passed at 2026-09-04 12:31:10 UTC. |
 | Repository workflow-skill validator correction | `0804b6f1e110fc028d0d15ba06c3fecc9b15674b`; three files; 385 insertions and 122 deletions | Author and committer timestamps are 2026-09-04 08:48:04 -0400; configured identity was used and no trailer was added. Adversarial re-review found no remaining high or medium issue after URI, tracked-inventory, multiline HTML, reference-link, path, and symlink corrections. The commit was fast-forward pushed, and GitHub Actions run `33874642483` passed at 2026-09-04 12:58:27 UTC. |
 | Platform profiles and broker-free static validation | `3b8a99560f7278b62a18738926987b9ec4487fca`; 16 files; 1,386 insertions and 72 deletions | Author and committer timestamps are 2026-09-04 10:14:50 -0400; configured identity was used and no trailer was added. Independent design, security, and final-diff reviews found no remaining high or medium issue after profile-extension identity, provider provenance, mode authority, canonical-path, and root-symlink corrections. The commit was fast-forward pushed, and GitHub Actions run `33882660354` passed at 2026-09-04 14:24:40 UTC. |
+| Platform domain foundations | `f28bc9156da17778a0170d89727038e0f0c9a563`; ten files; 598 insertions and 30 deletions | The maintainer authorized uninterrupted continuation on the feature branch. The configured identity and a `type: description` subject were used with no trailer. Independent review found no remaining blocker, high, or medium issue after semantic-UTC normalization, generic test inputs, early ID-prefix validation, embedded-symbol checks, and precise requirement wording. Publication and remote CI are recorded only after they occur. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -794,6 +797,18 @@ Python 3.11 type-boundary candidate evidence on 2026-09-05:
 | Synthetic backtest and deterministic replay | PASS — after the awaitable wrappers changed, the synthetic backtest completed across all six legacy portfolios; replay processed nine events, one cycle, and three fake-broker submissions. |
 | Independent typing/code review | PASS — the coroutine wrappers preserve synchronous boundary behavior and accept general awaitables without casts, new suppressions, or weakened checks; no blocking finding remained. |
 
+Platform domain and initial security-documentation evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| Whole-worktree Ruff format and lint checks | PASS — 152 files already formatted and lint clean. |
+| `.venv/bin/mypy --no-incremental src` | PASS — 54 source files checked with Python 3.11. |
+| Focused domain/configuration architecture and domain behavior selection | PASS — 54 tests after semantic-UTC, deterministic-ID, Decimal-quantization, exception-compatibility, dependency, and experiment-independence corrections. |
+| Focused security-documentation and repository-authority selection | PASS — 34 tests covering the required STRIDE inventories/fields, exact runtime secret interfaces, authority registration, and repository-local skill contracts. |
+| `.venv/bin/pytest -q` | PASS — 987 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 64.94 seconds. |
+| Synthetic backtest, deterministic replay, and Compose configuration | PASS — the backtest completed all six deterministic portfolios; replay processed nine events, one cycle, and three fake-broker submissions; Compose rendered without starting services. |
+| Independent domain and security-documentation reviews | PASS after correcting semantic UTC handling, generic fixture inputs, validation precedence, embedded experiment-literal detection, current/target redaction scope, exact secret interfaces, process denials, dashboard authority wording, artifact-code threats, and evidence-status reconciliation. Re-review found no remaining blocker, high, or medium issue. |
+
 No real credential file was read, no external data or broker connection was made, and no Alpaca
 paper or real-money order was submitted during this baseline.
 
@@ -801,19 +816,20 @@ paper or real-money order was submitted during this baseline.
 
 Current outcome: `PARTIALLY_IMPLEMENTED`.
 
-Phase 0 and the Phase 1 canonical, universe, experiment, profile, static-validation, secret-file,
-service-scoped runtime-setting, and local-bootstrap boundaries are implemented with recorded
-evidence. The existing
+Phases 0 and 1 are implemented with recorded evidence: the generic project/domain boundary,
+canonical identity/time/numeric primitives, universe, experiment, profiles, static validation,
+secret-file and service-scoped runtime settings, local bootstrap, initial security architecture,
+and STRIDE register. The existing
 collector and legacy regression suite provide reusable code and characterization, but they do not
-satisfy the complete generic platform contract. Phase 1 service command/mount integration and
-remaining command composition plus Phases 2–10 remain as listed in the progress
-checklist.
+satisfy the complete generic platform contract. Service command/mount integration and remaining
+feature commands are assigned to their dependent later phases; Phases 2–10 remain as listed in the
+progress checklist.
 Fresh PostgreSQL 16, target container runtime, image scan, SBOM, clean-package install, twice-run
 demo, and backup/restore evidence remain unavailable until their implementation exists and the
-required services are available. GitHub Actions run `33967897130` passed for pushed commit
-`0cc83f8`; that run validates the existing PostgreSQL 15 and image boundaries plus the current
-runtime-settings and secret-file primitives. Bootstrap commit `64f8f6d` is pushed, and its GitHub
-Actions run `33972146651` was still in progress when this type-boundary candidate was prepared.
+required services are available. GitHub Actions run `33972693704` passed for pushed commit
+`ba1a3ca`; that run validates the existing PostgreSQL 15 and image boundaries plus the Phase 1
+configuration, secret, bootstrap, and Python 3.11 foundations. Domain commit `f28bc91` remains
+local until the reviewed Phase 1 boundary is published.
 The target PostgreSQL 16 platform and every external adapter remain unvalidated;
 credentialed external validation is intentionally prohibited in this program.
 

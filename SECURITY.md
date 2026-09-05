@@ -89,10 +89,10 @@ from existing history or clones.
 
 ## Security design and verification
 
-The implemented trust model, credential boundaries, storage privileges, test network guard,
-and residual risks are documented in `docs/security-model.md`. Operational collector
-containment and recovery are in `docs/market_data_runbook.md`; legacy incident actions are
-in `docs/incident_response.md`.
+The implemented trust model is documented in `docs/security-model.md`; current and target
+capability separation is in `docs/security_architecture.md`; the STRIDE register and test
+traceability are in `docs/threat_model.md`. Operational collector containment and recovery are in
+`docs/market_data_runbook.md`; legacy incident actions are in `docs/incident_response.md`.
 
 Run the current security-focused behavioral checks with:
 
