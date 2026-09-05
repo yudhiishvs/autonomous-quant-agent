@@ -13,7 +13,10 @@ ALLOWED_IMPORTS = {
     CLI_MODULE: {
         "__future__",
         "adaptive_trader.platform.config",
+        "adaptive_trader.platform.domain",
+        "adaptive_trader.platform.errors",
         "adaptive_trader.platform.security",
+        "adaptive_trader.platform.storage",
         "json",
         "os",
         "pathlib",

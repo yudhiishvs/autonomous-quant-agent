@@ -4,25 +4,28 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import signal
 from collections.abc import Callable
 from contextlib import suppress
 from datetime import datetime
-from typing import Any, NoReturn
+from pathlib import Path
+from typing import Annotated, Any, NoReturn
 
 import typer
 
 from adaptive_trader.collection.alpaca import AlpacaHistoricalBarSource, AlpacaLiveBarSource
 from adaptive_trader.collection.credentials import AlpacaDataCredentials
-from adaptive_trader.collection.migrations import require_database_at_head, upgrade_database
+from adaptive_trader.collection.migrations import require_database_at_head
 from adaptive_trader.collection.postgres import PostgresMarketDataRepository
 from adaptive_trader.collection.runtime import (
     CollectorEnvironment,
-    migration_database_url_from_environment,
     parse_utc_boundary,
 )
 from adaptive_trader.collection.service import CollectorService, CollectorServiceConfig
 from adaptive_trader.collection.universe import COLLECTION_UNIVERSE_V1
+from adaptive_trader.platform.security import SecretFileVariable, load_secret_file
+from adaptive_trader.platform.storage.migration_runner import migrate_platform_database
 
 app = typer.Typer(
     add_completion=False,
@@ -85,16 +88,58 @@ def _with_signals(service: CollectorService) -> Callable[[], None]:
 
 
 @app.command("migrate")
-def migrate() -> None:
-    """Apply the checked-in PostgreSQL schema migrations."""
+def migrate(
+    database_url_file: Annotated[
+        Path,
+        typer.Option(
+            "--database-url-file",
+            help="Owner-private file containing the target PostgreSQL URL.",
+        ),
+    ],
+    application_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--application-root",
+            help="Trusted root containing role passwords; defaults to the current directory.",
+        ),
+    ] = None,
+    bootstrap_admin_database_url_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--bootstrap-admin-database-url-file",
+            help=(
+                "Owner-private cluster-administrator URL file, required only to finalize a "
+                "legacy role handoff."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Apply migrations through the bounded platform-role handoff."""
 
     try:
-        database_url = migration_database_url_from_environment()
-        upgrade_database(database_url)
-        require_database_at_head(database_url)
-    except Exception as exc:
-        _fail(f"Database migration failed ({type(exc).__name__})")
-    typer.echo("Market-data database is at the expected migration revision.")
+        database_url = load_secret_file(
+            database_url_file,
+            source=SecretFileVariable.DATABASE_URL,
+        )
+        selected_root = Path(
+            os.path.abspath(os.fspath(Path.cwd() if application_root is None else application_root))
+        )
+        bootstrap_admin_database_url = (
+            None
+            if bootstrap_admin_database_url_file is None
+            else load_secret_file(
+                bootstrap_admin_database_url_file,
+                source=SecretFileVariable.DATABASE_URL,
+            )
+        )
+        migrate_platform_database(
+            database_url,
+            application_root=selected_root,
+            bootstrap_admin_database_url=bootstrap_admin_database_url,
+        )
+    except Exception as error:
+        _fail(f"Database migration failed ({type(error).__name__})")
+    typer.echo("Platform database is at the expected migration revision.")
 
 
 @app.command("status")

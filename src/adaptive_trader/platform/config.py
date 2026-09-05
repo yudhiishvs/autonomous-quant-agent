@@ -1099,6 +1099,7 @@ class RuntimeService(StrEnum):
     STRATEGY_WORKER = "strategy-worker"
     EXECUTION_WORKER = "execution-worker"
     DASHBOARD = "dashboard"
+    AUDIT_VERIFIER = "audit-verifier"
     MARKET_DATA_LIVE = "market-data-live"
     PAPER_EXECUTION_WORKER = "paper-execution-worker"
 
@@ -1145,6 +1146,7 @@ _SERVICE_SECRET_SOURCES = {
     RuntimeService.STRATEGY_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.EXECUTION_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.DASHBOARD: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.AUDIT_VERIFIER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.MARKET_DATA_LIVE: frozenset(
         {
             SecretFileVariable.DATABASE_URL,
@@ -1169,6 +1171,7 @@ _SERVICE_BASE_REQUIRED_SOURCES = {
     RuntimeService.STRATEGY_WORKER: frozenset(),
     RuntimeService.EXECUTION_WORKER: frozenset(),
     RuntimeService.DASHBOARD: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.AUDIT_VERIFIER: frozenset(),
     RuntimeService.MARKET_DATA_LIVE: frozenset(
         {
             SecretFileVariable.ALPACA_DATA_API_KEY,
@@ -1191,6 +1194,7 @@ _SERVICE_MODES = {
     RuntimeService.STRATEGY_WORKER: frozenset(ExecutionMode),
     RuntimeService.EXECUTION_WORKER: frozenset({ExecutionMode.OFFLINE}),
     RuntimeService.DASHBOARD: frozenset(ExecutionMode),
+    RuntimeService.AUDIT_VERIFIER: frozenset(ExecutionMode),
     RuntimeService.MARKET_DATA_LIVE: frozenset({ExecutionMode.SHADOW, ExecutionMode.PAPER}),
     RuntimeService.PAPER_EXECUTION_WORKER: frozenset({ExecutionMode.PAPER}),
 }
