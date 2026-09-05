@@ -357,15 +357,15 @@ def _role_bootstrap_root(
 def _temporary_descendant_migrations(root: Path) -> Path:
     migration_root = root / "migrations"
     shutil.copytree(_PROJECT_ROOT / "migrations", migration_root)
-    descendant = migration_root / "versions" / "20260905_0007_probe.py"
+    descendant = migration_root / "versions" / "20260905_0008_probe.py"
     descendant.write_text(
         '''"""Exercise a governed descendant through the deployment login."""
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20260905_0007_probe"
-down_revision = "20260905_0006"
+revision = "20260905_0008_probe"
+down_revision = "20260905_0007"
 branch_labels = None
 depends_on = None
 
@@ -751,7 +751,7 @@ def test_non_superuser_legacy_owner_hands_off_0004_then_descendants_use_migratio
         ) as admin_connection:
             assert admin_connection.execute(
                 "SELECT version_num FROM market_data.alembic_version"
-            ).fetchone() == ("20260905_0007_probe",)
+            ).fetchone() == ("20260905_0008_probe",)
             assert admin_connection.execute(
                 "SELECT session_identity, effective_identity FROM aqa.aqa_transition_probe"
             ).fetchone() == ("aqa_migrate_login", "aqa_migrate")
@@ -1840,7 +1840,7 @@ def test_migration_role_can_apply_ddl_and_maintain_alembic_revision(
     with _connection_as(provisioned_engine, "aqa_migrate") as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM market_data.alembic_version"))
-            == "20260905_0006"
+            == "20260905_0007"
         )
         assert connection.scalar(
             text("SELECT has_schema_privilege('aqa_migrate', 'market_data', 'CREATE')")

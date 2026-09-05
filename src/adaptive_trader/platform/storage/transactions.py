@@ -28,6 +28,8 @@ class PostgresAdvisoryLockNamespace(IntEnum):
     MARKET_DATA_WATERMARK = 10
     MARKET_DATA_IDENTITY = 20
     DATASET_MANIFEST = 30
+    RISK_SIGNAL = 40
+    RISK_LATCH = 50
     AUDIT = 90
 
 

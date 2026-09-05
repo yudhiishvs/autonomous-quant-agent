@@ -15,7 +15,7 @@ from alembic.script import ScriptDirectory
 
 _REVISION_MODULE = "migrations.versions.20260905_0002_platform_foundation"
 _REVISION = "20260905_0002"
-_HEAD_REVISION = "20260905_0006"
+_HEAD_REVISION = "20260905_0007"
 _PRIOR_REVISION = "20260903_0001"
 _EXPECTED_TABLES = frozenset(
     {

@@ -336,7 +336,7 @@ def test_upgrade_from_empty_database_creates_both_schemas(empty_database: str) -
     try:
         current, expected = database_revision(empty_database)
         inspector = inspect(engine)
-        assert current == expected == "20260905_0006"
+        assert current == expected == "20260905_0007"
         assert frozenset(inspector.get_table_names(schema=PLATFORM_SCHEMA)) == PLATFORM_TABLE_NAMES
         assert "collection_universes" in inspector.get_table_names(schema=COLLECTION_SCHEMA)
         assert _metadata_differences(engine) == []
@@ -645,7 +645,7 @@ def test_downgrade_refusal_preserves_platform_state(empty_database: str) -> None
                 .select_from(aqa_experiments)
                 .where(aqa_experiments.c.experiment_hash == experiment_hash)
             )
-        assert current == expected == "20260905_0006"
+        assert current == expected == "20260905_0007"
         assert retained_rows == 1
         assert (
             frozenset(inspect(engine).get_table_names(schema=PLATFORM_SCHEMA))
@@ -751,16 +751,28 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
                     policy_version=1,
                     decided_at=instant,
                     input_hash="8" * 64,
+                    signal_hash="9" * 64,
+                    policy_hash="a" * 64,
+                    statistics_hash="b" * 64,
+                    latch_state_hash="c" * 64,
+                    correlation_id="correlation-1",
+                    execution_scope="FULL",
+                    original_proposal={},
                     proposed_targets={},
                     approved_targets={},
+                    before_exposure={},
+                    after_exposure={},
+                    source_timestamps={},
+                    active_latches=[],
+                    required_latch_event_ids=[],
                     controls={},
                     reason_codes=[],
                     gross_exposure=Decimal("0"),
                     net_exposure=Decimal("0"),
                     cash_weight=Decimal("1"),
-                    payload_hash="9" * 64,
-                    signature="a" * 64,
-                    content_hash="b" * 64,
+                    payload_hash="d" * 64,
+                    signature="e" * 64,
+                    content_hash="f" * 64,
                 )
             )
             connection.execute(
