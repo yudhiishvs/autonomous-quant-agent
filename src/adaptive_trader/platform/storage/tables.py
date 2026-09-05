@@ -12,6 +12,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -286,8 +287,13 @@ aqa_bar_events = Table(
     Column("vwap", FiniteNumeric(38, 18)),
     Column("quality_flags", json_value, nullable=False),
     Column("source", String(32), nullable=False),
+    Column("source_mode", String(32), nullable=False),
     Column("source_event_id", String(128)),
+    Column("is_correction", Boolean, nullable=False),
+    Column("correction_of_source_event_id", String(128)),
     Column("source_payload_hash", String(64), nullable=False),
+    Column("lineage_hash", String(64)),
+    Column("normalized_payload_hash", String(64), nullable=False),
     Column("correction_of_event_id", String(128)),
     Column("content_hash", String(64), nullable=False),
     Column("created_at", UTCDateTime(), nullable=False),
@@ -297,7 +303,6 @@ aqa_bar_events = Table(
         name="bar_event_correction",
     ),
     UniqueConstraint("bar_identity_id", "revision", name="bar_identity_revision"),
-    UniqueConstraint("bar_identity_id", "content_hash", name="bar_identity_content"),
     UniqueConstraint(
         "bar_identity_id",
         "bar_event_id",
@@ -326,8 +331,21 @@ aqa_bar_events = Table(
     CheckConstraint("CAST(volume AS NUMERIC) >= 0", name="bar_volume_nonnegative"),
     CheckConstraint("trade_count IS NULL OR trade_count >= 0", name="bar_trades_nonnegative"),
     CheckConstraint(
-        "vwap IS NULL OR CAST(vwap AS NUMERIC) > 0",
-        name="bar_vwap_positive",
+        "vwap IS NULL OR CAST(vwap AS NUMERIC) >= 0",
+        name="bar_vwap_nonnegative",
+    ),
+    CheckConstraint(
+        "source_mode IN ('external_provider', 'offline_fixture')",
+        name="bar_source_mode",
+    ),
+    CheckConstraint(
+        "correction_of_source_event_id IS NULL OR is_correction",
+        name="bar_source_correction_consistent",
+    ),
+    CheckConstraint(
+        "correction_of_source_event_id IS NULL OR source_event_id IS NULL "
+        "OR correction_of_source_event_id <> source_event_id",
+        name="bar_source_correction_not_self",
     ),
     _finite_numeric_constraint(
         "open",
@@ -339,7 +357,16 @@ aqa_bar_events = Table(
         nullable=frozenset({"vwap"}),
     ),
     _hash_constraint("source_payload_hash"),
+    CheckConstraint(
+        "lineage_hash IS NULL OR length(lineage_hash) = 64",
+        name="lineage_hash_sha256_length",
+    ),
+    _hash_constraint("normalized_payload_hash"),
     _hash_constraint("content_hash"),
+    CheckConstraint(
+        "content_hash <> normalized_payload_hash",
+        name="event_hash_domain_separation",
+    ),
     info={"append_only": True},
 )
 aqa_bar_latest = Table(
@@ -468,7 +495,8 @@ aqa_basket_watermarks = Table(
     ),
     Column("role", String(16), nullable=False),
     Column("timeframe", String(16), nullable=False),
-    Column("contiguous_through", UTCDateTime(), nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("contiguous_through", UTCDateTime()),
     Column("component_hash", String(64), nullable=False),
     Column("content_hash", String(64), nullable=False),
     Column("version", BigInteger, nullable=False),
@@ -476,6 +504,12 @@ aqa_basket_watermarks = Table(
     UniqueConstraint("experiment_hash", "role", "timeframe", name="basket_watermark_role"),
     CheckConstraint(
         "role IN ('active', 'benchmark', 'context')", name="basket_watermark_role_value"
+    ),
+    CheckConstraint("status IN ('ready', 'blocked')", name="basket_watermark_status"),
+    CheckConstraint(
+        "(status = 'ready' AND contiguous_through IS NOT NULL) "
+        "OR (status = 'blocked' AND contiguous_through IS NULL)",
+        name="basket_watermark_readiness_consistent",
     ),
     CheckConstraint("version >= 1", name="basket_watermark_version_positive"),
     _hash_constraint("component_hash"),
@@ -537,48 +571,77 @@ aqa_decision_slots = Table(
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_experiments.experiment_hash"),
         nullable=False,
     ),
-    Column("source_bar_end", UTCDateTime(), nullable=False),
+    Column("experiment_id", String(64), nullable=False),
+    Column("experiment_version", BigInteger, nullable=False),
+    Column("signal_provider_id", String(64), nullable=False),
+    Column("signal_provider_version", String(64), nullable=False),
+    Column("session_date", Date(), nullable=False),
+    Column("source_interval_start", UTCDateTime(), nullable=False),
+    Column("source_interval_end", UTCDateTime(), nullable=False),
     Column("decision_type", String(32), nullable=False),
-    Column("scheduled_at", UTCDateTime(), nullable=False),
-    Column("data_deadline_at", UTCDateTime(), nullable=False),
-    Column("signal_deadline_at", UTCDateTime(), nullable=False),
-    Column("execution_deadline_at", UTCDateTime(), nullable=False),
+    Column("ready_at", UTCDateTime(), nullable=False),
+    Column("deadline_at", UTCDateTime(), nullable=False),
+    Column("required_completion_at", UTCDateTime(), nullable=False),
     Column("state", String(16), nullable=False),
     Column("claim_owner", String(128)),
+    Column("claimed_at", UTCDateTime()),
     Column("lease_expires_at", UTCDateTime()),
     Column("attempt_count", Integer, nullable=False),
+    Column("completed_at", UTCDateTime()),
     Column("reason_code", String(64)),
+    Column("correlation_id", String(128), nullable=False, unique=True),
     Column("content_hash", String(64), nullable=False),
     Column("version", BigInteger, nullable=False),
     Column("created_at", UTCDateTime(), nullable=False),
     Column("updated_at", UTCDateTime(), nullable=False),
     UniqueConstraint(
         "experiment_hash",
-        "source_bar_end",
+        "source_interval_end",
         "decision_type",
         name="decision_source_type",
     ),
     CheckConstraint(
-        "state IN ('pending', 'claimed', 'completed', 'skipped', 'expired', 'failed')",
+        "state IN ('PENDING', 'WAITING_FOR_DATA', 'READY', 'CLAIMED', 'COMPLETED', "
+        "'SKIPPED', 'EXPIRED', 'FAILED', 'FLATTEN_REQUIRED')",
         name="decision_state",
     ),
     CheckConstraint(
-        "((state = 'claimed' AND claim_owner IS NOT NULL AND lease_expires_at IS NOT NULL) "
-        "OR (state <> 'claimed' AND claim_owner IS NULL AND lease_expires_at IS NULL))",
+        "((state = 'CLAIMED' AND claim_owner IS NOT NULL AND claimed_at IS NOT NULL "
+        "AND lease_expires_at IS NOT NULL) OR (state <> 'CLAIMED' AND claim_owner IS NULL "
+        "AND claimed_at IS NULL AND lease_expires_at IS NULL))",
         name="decision_claim_consistent",
     ),
+    CheckConstraint(
+        "((state IN ('COMPLETED', 'SKIPPED', 'EXPIRED', 'FAILED') "
+        "AND completed_at IS NOT NULL) OR (state NOT IN "
+        "('COMPLETED', 'SKIPPED', 'EXPIRED', 'FAILED') AND completed_at IS NULL))",
+        name="decision_completion_consistent",
+    ),
+    CheckConstraint(
+        "state NOT IN ('WAITING_FOR_DATA', 'SKIPPED', 'EXPIRED', 'FAILED') "
+        "OR reason_code IS NOT NULL",
+        name="decision_reason_consistent",
+    ),
     CheckConstraint("attempt_count >= 0", name="decision_attempts_nonnegative"),
+    CheckConstraint("experiment_version >= 1", name="decision_experiment_version_positive"),
     CheckConstraint("version >= 1", name="decision_version_positive"),
     CheckConstraint(
-        "scheduled_at <= data_deadline_at AND data_deadline_at <= signal_deadline_at "
-        "AND signal_deadline_at <= execution_deadline_at",
+        "source_interval_start < source_interval_end "
+        "AND source_interval_end <= ready_at AND ready_at < deadline_at "
+        "AND deadline_at <= required_completion_at",
         name="decision_deadlines_ordered",
     ),
     _hash_constraint("content_hash"),
     info={"state": True},
 )
-Index("ix_aqa_decision_slots_claim", aqa_decision_slots.c.state, aqa_decision_slots.c.scheduled_at)
+Index("ix_aqa_decision_slots_claim", aqa_decision_slots.c.state, aqa_decision_slots.c.ready_at)
 Index("ix_aqa_decision_slots_lease", aqa_decision_slots.c.lease_expires_at)
+Index(
+    "ix_aqa_decision_slots_session",
+    aqa_decision_slots.c.experiment_hash,
+    aqa_decision_slots.c.session_date,
+    aqa_decision_slots.c.ready_at,
+)
 
 aqa_signal_envelopes = Table(
     "aqa_signal_envelopes",
@@ -599,21 +662,46 @@ aqa_signal_envelopes = Table(
     ),
     Column("provider_id", String(64), nullable=False),
     Column("provider_version", String(64), nullable=False),
-    Column("schema_version", Integer, nullable=False),
+    Column("contract_version", Integer, nullable=False),
+    Column("correlation_id", String(128), nullable=False),
+    Column("provider_source_mode", String(32), nullable=False),
+    Column("experiment_id", String(64), nullable=False),
+    Column("experiment_version", BigInteger, nullable=False),
+    Column("data_contract_hash", String(64), nullable=False),
+    Column("policy_hash", String(64), nullable=False),
     Column("source_bar_end", UTCDateTime(), nullable=False),
-    Column("emitted_at", UTCDateTime(), nullable=False),
+    Column("created_at", UTCDateTime(), nullable=False),
     Column("expires_at", UTCDateTime(), nullable=False),
-    Column("targets", json_value, nullable=False),
-    Column("reason_codes", json_value, nullable=False),
-    Column("payload_hash", String(64), nullable=False),
-    Column("signature", String(64), nullable=False),
+    Column("active_symbols", json_value, nullable=False),
+    Column("availability_mask", json_value, nullable=False),
+    Column("actions", json_value, nullable=False),
+    Column("expected_edge_bps", json_value, nullable=False),
+    Column("proposed_signed_target_inputs", json_value, nullable=False),
+    Column("artifact_id", String(128)),
+    Column("artifact_hash", String(64)),
+    Column("promotable", Boolean, nullable=False),
+    Column("paper_submission_eligible", Boolean, nullable=False),
     Column("content_hash", String(64), nullable=False, unique=True),
-    CheckConstraint("schema_version >= 1", name="signal_schema_version_positive"),
+    CheckConstraint("contract_version >= 1", name="signal_contract_version_positive"),
+    CheckConstraint("experiment_version >= 1", name="signal_experiment_version_positive"),
     CheckConstraint(
-        "source_bar_end <= emitted_at AND emitted_at < expires_at", name="signal_times_ordered"
+        "provider_source_mode IN ('builtin', 'offline_fixture', 'registered_plugin')",
+        name="signal_source_mode",
     ),
-    _hash_constraint("payload_hash"),
-    _hash_constraint("signature"),
+    CheckConstraint(
+        "source_bar_end <= created_at AND created_at < expires_at", name="signal_times_ordered"
+    ),
+    CheckConstraint(
+        "(artifact_id IS NULL AND artifact_hash IS NULL) "
+        "OR (artifact_id IS NOT NULL AND artifact_hash IS NOT NULL)",
+        name="signal_artifact_consistent",
+    ),
+    _hash_constraint("data_contract_hash"),
+    _hash_constraint("policy_hash"),
+    CheckConstraint(
+        "artifact_hash IS NULL OR length(artifact_hash) = 64",
+        name="signal_artifact_hash_sha256_length",
+    ),
     _hash_constraint("content_hash"),
     info={"append_only": True},
 )

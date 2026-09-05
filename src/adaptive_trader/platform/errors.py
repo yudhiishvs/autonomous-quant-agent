@@ -29,3 +29,15 @@ class SecretFileError(ValueError):
 
 class LocalSecretBootstrapError(ValueError):
     """Raised when local secret material cannot be created or preserved safely."""
+
+
+class AuditValidationError(ValueError):
+    """Raised when an audit event cannot safely enter the persistence boundary."""
+
+
+class AuditIntegrityError(RuntimeError):
+    """Raised when persisted audit evidence fails independent chain verification."""
+
+
+class AuditPersistenceError(RuntimeError):
+    """Raised when an audit event cannot be persisted without weakening its invariants."""

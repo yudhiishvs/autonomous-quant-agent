@@ -43,7 +43,9 @@ def _validated_application_name(value: object) -> str:
     return value
 
 
-def _normalize_postgres_url(value: str) -> URL:
+def normalize_platform_postgres_url(value: str) -> URL:
+    """Validate a platform PostgreSQL URL without opening a connection."""
+
     parse_failed = False
     parsed: URL | None = None
     try:
@@ -101,24 +103,41 @@ def _load_postgres_url(settings: RuntimeSettings) -> URL:
         load_failed = True
     if load_failed:
         raise _configuration_error("could not load the database URL secret")
-    return _normalize_postgres_url(value)
+    return normalize_platform_postgres_url(value)
 
 
-def _postgres_connect_args(application_name: str) -> dict[str, str | int]:
+def platform_postgres_connect_args(
+    application_name: str,
+    *,
+    read_only: bool,
+    migration: bool = False,
+) -> dict[str, str | int]:
+    """Return bounded psycopg settings for platform runtime or migration clients."""
+
+    selected_name = _validated_application_name(application_name)
+    statement_timeout = 300_000 if migration else _STATEMENT_TIMEOUT_MILLISECONDS
+    lock_timeout = 15_000 if migration else _LOCK_TIMEOUT_MILLISECONDS
+    idle_timeout = 300_000 if migration else _IDLE_TRANSACTION_TIMEOUT_MILLISECONDS
+    read_only_option = " -c default_transaction_read_only=on" if read_only else ""
     return {
-        "application_name": application_name,
+        "application_name": selected_name,
         "connect_timeout": _CONNECT_TIMEOUT_SECONDS,
         "options": (
             "-c timezone=UTC "
-            f"-c statement_timeout={_STATEMENT_TIMEOUT_MILLISECONDS} "
-            f"-c lock_timeout={_LOCK_TIMEOUT_MILLISECONDS} "
-            f"-c idle_in_transaction_session_timeout="
-            f"{_IDLE_TRANSACTION_TIMEOUT_MILLISECONDS}"
+            f"-c statement_timeout={statement_timeout} "
+            f"-c lock_timeout={lock_timeout} "
+            f"-c idle_in_transaction_session_timeout={idle_timeout}"
+            f"{read_only_option}"
         ),
     }
 
 
-def _create_postgres_engine(url: URL, *, application_name: str) -> Engine:
+def _create_postgres_engine(
+    url: URL,
+    *,
+    application_name: str,
+    read_only: bool,
+) -> Engine:
     creation_failed = False
     engine: Engine | None = None
     try:
@@ -131,7 +150,10 @@ def _create_postgres_engine(url: URL, *, application_name: str) -> Engine:
             pool_recycle=_POOL_RECYCLE_SECONDS,
             pool_use_lifo=True,
             hide_parameters=True,
-            connect_args=_postgres_connect_args(application_name),
+            connect_args=platform_postgres_connect_args(
+                application_name,
+                read_only=read_only,
+            ),
         )
     except Exception:
         creation_failed = True
@@ -167,6 +189,41 @@ def _validated_offline_database_path(settings: RuntimeSettings) -> Path:
     return path
 
 
+def _validated_read_only_offline_database_path(settings: RuntimeSettings) -> Path:
+    path = settings.offline_database_path
+    if (
+        type(path) is not _CONCRETE_PATH_TYPE
+        or not path.is_absolute()
+        or path.anchor != os.sep
+        or path.as_posix() != os.fspath(path)
+        or any(component in {"", ".", ".."} for component in path.parts[1:])
+    ):
+        raise _configuration_error("is missing a validated absolute offline database path")
+
+    validation_failed = False
+    try:
+        sidecars = tuple(path.with_name(path.name + suffix) for suffix in ("-shm", "-wal"))
+        if (
+            path.is_symlink()
+            or path.resolve(strict=True) != path
+            or not stat.S_ISREG(path.stat(follow_symlinks=False).st_mode)
+            or any(
+                sidecar.is_symlink()
+                or (
+                    sidecar.exists()
+                    and not stat.S_ISREG(sidecar.stat(follow_symlinks=False).st_mode)
+                )
+                for sidecar in sidecars
+            )
+        ):
+            validation_failed = True
+    except (OSError, RuntimeError, TypeError, ValueError):
+        validation_failed = True
+    if validation_failed:
+        raise _configuration_error("could not open the offline database read-only")
+    return path
+
+
 def _configure_sqlite_connection(
     dbapi_connection: Any,
     connection_record: Any,
@@ -178,6 +235,20 @@ def _configure_sqlite_connection(
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=FULL")
+    finally:
+        cursor.close()
+
+
+def _configure_read_only_sqlite_connection(
+    dbapi_connection: Any,
+    connection_record: Any,
+) -> None:
+    del connection_record
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA query_only=ON")
     finally:
         cursor.close()
 
@@ -212,6 +283,41 @@ def _create_sqlite_engine(path: Path) -> Engine:
     return engine
 
 
+def _create_read_only_sqlite_engine(path: Path) -> Engine:
+    query = {"mode": "ro", "uri": "true"}
+    url = URL.create(
+        "sqlite+pysqlite",
+        database=f"file:{os.fspath(path)}",
+        query=query,
+    )
+    creation_failed = False
+    engine: Engine | None = None
+    try:
+        engine = sqlalchemy_create_engine(
+            url,
+            pool_pre_ping=True,
+            pool_size=_POOL_SIZE,
+            max_overflow=_MAX_OVERFLOW,
+            pool_timeout=_POOL_TIMEOUT_SECONDS,
+            pool_recycle=_POOL_RECYCLE_SECONDS,
+            pool_use_lifo=True,
+            hide_parameters=True,
+            connect_args={
+                "check_same_thread": False,
+                "timeout": _SQLITE_BUSY_TIMEOUT_SECONDS,
+            },
+            execution_options={"schema_translate_map": {PLATFORM_SCHEMA: None}},
+        )
+        event.listen(engine, "connect", _configure_read_only_sqlite_connection)
+    except Exception:
+        if engine is not None:
+            engine.dispose()
+        creation_failed = True
+    if creation_failed or engine is None:
+        raise _configuration_error("could not initialize the read-only SQLite engine")
+    return engine
+
+
 def create_platform_engine(
     settings: RuntimeSettings,
     *,
@@ -236,5 +342,30 @@ def create_platform_engine(
         return _create_postgres_engine(
             _load_postgres_url(settings),
             application_name=selected_name,
+            read_only=False,
         )
     return _create_sqlite_engine(_validated_offline_database_path(settings))
+
+
+def create_platform_read_only_engine(
+    settings: RuntimeSettings,
+    *,
+    application_name: str | None = None,
+) -> Engine:
+    """Create a bounded verification engine that cannot mutate platform storage."""
+
+    if type(settings) is not RuntimeSettings:
+        raise _configuration_error("requires validated runtime settings")
+    selected_name = _validated_application_name(
+        f"aqa-{settings.service.value}" if application_name is None else application_name
+    )
+
+    if settings.database_url_file is not None:
+        if settings.offline_database_path is not None:
+            raise _configuration_error("cannot select PostgreSQL and SQLite together")
+        return _create_postgres_engine(
+            _load_postgres_url(settings),
+            application_name=selected_name,
+            read_only=True,
+        )
+    return _create_read_only_sqlite_engine(_validated_read_only_offline_database_path(settings))

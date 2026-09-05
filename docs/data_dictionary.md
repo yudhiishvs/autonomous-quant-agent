@@ -2,7 +2,11 @@
 
 > **PAPER TRADING — SIMULATED CAPITAL AND SIMULATED FILLS**
 
-This is the physical data contract implemented by `src/adaptive_trader/persistence.py` and the export contract implemented by `reporting.py` and `forward_reporting.py`. It intentionally uses the real SQLite names; it is not an aspirational schema. The database never stores Alpaca credentials or authorization headers.
+This document records two implemented physical contracts: the legacy SQLite schema owned by
+`src/adaptive_trader/persistence.py`, and the additive generic-platform `aqa` schema owned by
+`src/adaptive_trader/platform/storage/`. The export contract remains implemented by `reporting.py`
+and `forward_reporting.py`. Names below are physical names, not an aspirational schema. Neither
+database stores Alpaca credentials or authorization headers.
 
 ## Conventions
 
@@ -11,9 +15,94 @@ This is the physical data contract implemented by `src/adaptive_trader/persisten
 - IDs are opaque local identifiers. `broker_order_id` identifies an Alpaca paper object only. `account_id_hash` is a one-way identifier, never a credential.
 - JSON columns contain normalized, redacted evidence. A null metric means unavailable/not applicable and its payload or export carries a reason.
 - Decision receipts, risk actions, order/fill events, reconciliation findings, stream events, and halt events are append-only facts. Incident identity, message, and details are immutable; only its bounded `resolved_at` projection may be filled later. `broker_orders`, performance rows, and run end fields are bounded projections updated or upserted from those facts.
-- SQLite enables foreign keys, WAL where supported, and a busy timeout. `schema_info.schema_version` is checked on every open; an unsupported version is refused.
+- Legacy SQLite enables foreign keys, WAL where supported, and a busy timeout.
+  `schema_info.schema_version` is checked on every open; an unsupported version is refused.
 
-## Relationships and immutability
+## Generic platform PostgreSQL schema
+
+Alembic creates the `aqa` schema additively after the predecessor `market_data` schema. Revision
+`20260905_0002` creates the 25-table platform inventory, `20260905_0003` upgrades bar revision
+history without discarding events, and `20260905_0004` transfers managed ownership, normalizes
+privileges, enables audit row policies, and creates security-barrier safe views. Destructive
+downgrades of platform state are refused. PostgreSQL 16 is the operational target; isolated tests
+may map `aqa` to SQLite, where storage types preserve exact Decimal and UTC validation semantics.
+
+The physical platform inventory is:
+
+| Area | Tables | Current storage behavior |
+| --- | --- | --- |
+| Experiment and security identity | `aqa_experiments`, `aqa_experiment_symbols`, `aqa_security_metadata_events` | Append-only definitions and observations with explicit content or payload hashes. Repository workflows that populate these tables remain later work. |
+| Market data and readiness | `aqa_bar_identities`, `aqa_bar_events`, `aqa_bar_latest`, `aqa_data_gaps`, `aqa_symbol_watermarks`, `aqa_basket_watermarks`, `aqa_dataset_manifests` | The bar revision/latest/symbol-watermark transaction is implemented. Calendar-aware gap lifecycle, basket computation, aggregation, and dataset freezing remain Phase 3 work. |
+| Scheduling and decisions | `aqa_decision_slots`, `aqa_signal_envelopes`, `aqa_risk_latch_events`, `aqa_risk_decisions`, `aqa_execution_plans` | Physical constraints exist; the scheduler, signal, and risk repositories and services remain incomplete. |
+| Execution and reconciliation | `aqa_order_intents`, `aqa_broker_orders`, `aqa_order_events`, `aqa_fills`, `aqa_reconciliations`, `aqa_incidents` | Physical constraints exist; the generic execution repositories and services remain incomplete. |
+| Control and evidence | `aqa_jobs`, `aqa_job_attempts`, `aqa_outbox_events`, `aqa_audit_events` | The append-only audit repository and verifier are implemented. Job/outbox repositories and workers remain incomplete. |
+
+### Canonical bar revisions and symbol watermarks
+
+`aqa_bar_identities` has one row per
+`(provider, feed, adjustment, symbol, timeframe, start_at)` interval. `aqa_bar_events` retains every
+effective revision: revision 1 inserts, a payload matching the current effective normalized state
+is a duplicate without a new row, and changed normalized content appends revision N+1 with
+`correction_of_event_id` pointing to the prior event. A later payload may legitimately return to
+earlier values; uniqueness is by identity and revision, not by historical payload hash.
+`normalized_payload_hash` covers normalized
+bar semantics and optional aggregate `lineage_hash`; the separate `content_hash` also covers
+immutable receipt and source provenance. `aqa_bar_latest` is a version-fenced projection that must
+reference the terminal verified event.
+
+The market-data repository can update `aqa_symbol_watermarks` in the same serialized transaction
+as the event and latest projection when its caller presents a quality-approved eligibility claim.
+It permits only the next contiguous interval or a correction to the current terminal interval,
+binds the watermark to the effective `latest_bar_event_id` and `quality_hash`, and verifies the
+stored lineage, timestamps, hashes, and versions when reading. A failed event, projection, or
+watermark mutation rolls back the whole transaction. PostgreSQL uses transaction-scoped advisory
+locks and version fences; SQLite uses a shared `BEGIN IMMEDIATE` transaction coordinator. The
+calendar/gap service that decides eligibility and the active-basket watermark repository are not
+yet implemented.
+
+### Audit evidence and read views
+
+`aqa_audit_events` is append-only and unique by `(stream_id, sequence)`. Each event stores a
+canonical payload hash and an event hash over stream, sequence, previous hash, event type, actor,
+timestamp, and payload hash. The audit repository serializes a stream before deriving its next
+sequence, enforces a closed writer-to-stream/event-family contract, treats an identical retry as
+idempotent, and independently reconstructs payload, identity, hash, sequence, and previous-hash
+continuity during verification. `aqa audit verify` opens storage read-only. Supplying an expected
+terminal sequence and hash for one stream also detects deletion of its tail; without an external
+expected head, no self-contained append-only database can prove that its terminal rows were not
+removed.
+
+PostgreSQL writer reads are scoped through `aqa_collector_audit_events_v`,
+`aqa_scheduler_audit_events_v`, `aqa_strategy_audit_events_v`, and
+`aqa_execution_audit_events_v`. Row-level insert policies enforce the same actor, stream-prefix,
+and event-family boundaries. `aqa_control` and `aqa_readonly` receive the full safe
+`aqa_audit_events_v` and the terminal-head projection `aqa_audit_status_v`; ordinary writer roles
+do not receive the full audit view.
+
+### PostgreSQL authorization roles
+
+Cluster bootstrap creates seven non-login authorization roles and seven corresponding login
+principals. A login inherits exactly its matching authorization role; runtime grants attach to the
+non-login role.
+
+| Authorization role | Durable authority |
+| --- | --- |
+| `aqa_migrate` | Trusted deployment-only owner of the managed schemas, tables, views, and routines. Ordinary business-table DML is self-revoked while migration-version DML and ownership/grant authority are retained. Because ownership can grant privileges again, this role is a trusted deployment boundary, not a runtime sandbox, and no runtime service receives it. |
+| `aqa_collector` | Reads experiment/security and market-data state; writes bars, gaps, watermarks, dataset manifests, and actor-scoped audit events. It also retains the explicit predecessor-collector grants needed for a safe `market_data` cutover. |
+| `aqa_scheduler` | Reads readiness safe views; inserts/updates decision slots and writes actor-scoped audit events. |
+| `aqa_strategy` | Reads decision/data/security safe views; writes signal envelopes and actor-scoped audit events. |
+| `aqa_execution` | Reads approved platform state; writes risk, latch, plan, order, fill, reconciliation, incident, and actor-scoped audit state, without DDL authority. |
+| `aqa_control` | Reads the full safe-view set; writes bounded jobs/outbox, job attempts, halt latch events, and control-scoped audit events, without order/fill writes. |
+| `aqa_readonly` | Selects only explicit security-barrier safe views, including the full audit and audit-status views. It has no table DML or schema authority. |
+
+The bootstrap and migration normalize direct privileges held by both authorization and login roles,
+remove unsafe `public` schema/default access, and reject unexpected role attributes or
+memberships. Fresh and governed migrations run through `aqa_migrate_login`. A recognized
+pre-governance database uses its validated sole legacy owner only through the ownership-transfer
+revision, then revokes that temporary membership and reconnects through the migration login.
+Service command and Compose adoption of runtime credentials remains later work.
+
+## Legacy SQLite relationships and immutability
 
 ```mermaid
 erDiagram
@@ -34,7 +123,7 @@ erDiagram
 
 `decision_receipts.decision_id` is unique and insertion rejects replacement. Later execution knowledge is written to linked order, fill, reconciliation, incident, performance, or stream records; it does not rewrite the receipt. A `rebalance_decisions` row is a mutable scheduler projection (claimed/completed status) and is not the immutable receipt itself.
 
-## Physical SQLite tables
+## Physical legacy SQLite tables
 
 The database contains exactly the following 28 tables.
 

@@ -56,12 +56,12 @@ The Phase 0 current/target matrix is:
 | Package and commands | Typed `adaptive_trader` package, generic canonical/configuration boundary, two legacy scripts, and both new aliases | Remaining platform modules and the composed operational commands are absent | Preserve every legacy import and command | Add each nonempty platform boundary and remaining CLI command with its owning service | New modules must not collapse service authority or expose broker objects |
 | Configuration and secrets | Strict legacy/collector settings, immutable experiment/profile composition, broker-free static validation, owner-private secret loading, pure service-scoped runtime composition, and local infrastructure-secret bootstrap | Current collector secrets remain direct `APA_*` values; target service commands and least-privilege mounts are absent | Reuse validation patterns only | Adopt file-backed runtime settings in service commands without expanding static-profile authority | Reject unknown fields, unsafe files, generic SDK variables, out-of-scope references, secret serialization, and unsafe bootstrap state |
 | Market data | Tested REST/WebSocket collector, normalization, overlap reconciliation, leases, and shutdown | Fixed 29-symbol universe, predecessor schema, checkpoint is not contiguous readiness | Adapt proven transport and lifecycle behavior behind generic contracts | Add canonical revisions, calendars, gaps, aggregation, basket watermarks, and datasets | Collector remains data-only, fixed-host, bounded, and unable to import trading code |
-| Persistence | SQLite legacy evidence plus PostgreSQL collector migration and transactions | No 25-table `aqa_*` schema, service roles, unified repositories, or audit chain | Preserve legacy/collector state and additive migration history | Add PostgreSQL 16 operational schema, grants, repositories, and SQLite test compatibility | Least-privilege roles, transactional invariants, append-only history, and tamper detection |
+| Persistence | SQLite legacy evidence; predecessor PostgreSQL collector; additive 25-table `aqa` schema; fixed PostgreSQL roles/grants/safe views; atomic bar/latest/symbol-watermark repository; append-only audit repository/verifier | Remaining atomic repositories, service credential adoption, basket readiness, and final current-revision PostgreSQL 16/published evidence are incomplete | Preserve legacy/collector state and additive migration history | Complete later-phase repositories and service adoption without widening grants | Least-privilege roles, transactional invariants, append-only history, and tamper detection |
 | Scheduling and signals | Legacy cycle orchestration and strategy decisions | No durable slots, leases, registered proposal contract, or signed envelope | Characterize only compatibility-facing behavior | Add deterministic slots, recovery, entry points, built-ins, envelopes, and default-deny approval | Strategy code receives no broker credential or execution authority |
 | Risk and execution | Tested long-only risk, paper gates, simulated broker, order state, and reconciliation | Not the required signed/short-aware contract or exact paper gates | Preserve regression path; reuse only isolated invariants | Add signed statistics, constraints, latches, planning, fake broker, paper adapter, and recovery | Risk cannot be bypassed; intent precedes effect; ambiguity and stale state fail closed |
 | Jobs and control plane | No target job/outbox or private API; dashboard reads local state | No bounded remote-control surface or API-only presentation boundary | Retain Streamlit presentation where practical | Add durable jobs/outbox, authenticated allowlisted API, and API-backed dashboard | API has no trade route or broker import; dashboard has no database authority |
-| Observability and operations | Existing logs, reports, health checks, Compose, and CI | No unified redaction, bounded metrics, audit verification, separated services, or full scans | Keep useful checks and compatibility commands | Add structured redaction, metrics, audit, offline-first Compose, SBOM, scans, and recovery proof | No secret/high-cardinality leakage; nonroot services receive only required mounts and roles |
-| Verification and engineering memory | 375-test offline baseline, a prior PG15 observation, backtest/replay hashes, CI, and design README | The earlier PG15 invocation was not retained; PG16 runtime is unavailable locally; target vertical slice and exact public docs are absent | Preserve reproducible baselines as regression gates; keep the PG15 observation as context only | Add risk-specific suites, socket denial, deterministic demo, benchmark, runbooks, and traceability | Evidence must be credential-free, side-effect-free, reproducible, and explicit about gaps |
+| Observability and operations | Existing logs, reports, health checks, Compose, CI, and generic append-only audit verification | No unified service logging/redaction, bounded metrics, complete audit emission, separated services, or full scans | Keep useful checks and compatibility commands | Add structured redaction, metrics/emission wiring, offline-first Compose, SBOM, scans, and recovery proof | No secret/high-cardinality leakage; nonroot services receive only required mounts and roles |
+| Verification and engineering memory | 375-test offline baseline, a prior PG15 observation, backtest/replay hashes, CI, and design README | The earlier PG15 invocation was not retained; final current-revision PG16 and published evidence is pending; target vertical slice and exact public docs are absent | Preserve reproducible baselines as regression gates; keep the PG15 observation as context only | Add risk-specific suites, socket denial, deterministic demo, benchmark, runbooks, and traceability | Evidence must be credential-free, side-effect-free, reproducible, and explicit about gaps |
 
 The generic `adaptive_trader.platform` package now contains canonical serialization, hashing,
 universe roles, strict experiment/profile loading, immutable `ExperimentSpec`/`PlatformConfig`
@@ -69,11 +69,15 @@ composition, broker-free static CLI validation through both new aliases, descrip
 owner-private secret loading, opaque secret-file references, and strict `RuntimeSettings` composed
 from an explicitly injected environment and exact service/mode authority matrix. The exact
 experiment and all three profiles are present. Local infrastructure-secret bootstrap is also
-implemented. The platform database engine, exact 25-table SQLAlchemy metadata, and additive
-Alembic revision are now implemented locally with SQLite and offline PostgreSQL-DDL tests. Service
-command adoption, service roles, the complete atomic repository set, aggregation, basket
+implemented. The platform database engine, exact 25-table SQLAlchemy metadata, additive schema/bar
+history/authorization migrations, fixed PostgreSQL role and safe-view matrix, atomic
+bar/latest/eligible-symbol-watermark repository, and append-only audit repository/read-only CLI
+verifier are implemented. The migration role is a trusted deployment-only schema owner with
+ordinary business DML self-revoked but ownership/grant authority retained; no runtime service
+receives it. Service command adoption, the remaining atomic repositories, aggregation, basket
 watermarks, scheduler, jobs/outbox, private API, API-backed dashboard, offline vertical slice,
-PostgreSQL restore proof, and the complete delivery/security harness remain incomplete.
+PostgreSQL restore proof, and the complete delivery/security harness remain incomplete. Final
+current-revision PostgreSQL 16 and published-CI evidence for Phase 2 is pending.
 
 ## 4. Requirements being addressed
 
@@ -247,7 +251,7 @@ raw paths/URLs/code.
 
 | Owner | State it may mutate | State it must not mutate |
 | --- | --- | --- |
-| migration process | schema and grants | runtime business state |
+| migration process | Trusted deployment-only schema ownership, versioned DDL, and grants; its ordinary business DML ACL is self-revoked | Ordinary runtime business-state mutation, long-running runtime work, service assignment, provider/broker credentials |
 | collector | experiments/security reads; bars, gaps, watermarks, datasets, audit writes | risk, control, orders |
 | scheduler | slots and audit | broker, signal internals, orders |
 | strategy | signals and audit | risk, latches, orders, schema |
@@ -266,8 +270,9 @@ state.
 - Add immutable public `SignalProvider`, `DecisionContext`, `SignalEnvelope`, experiment, market
   data, risk, and execution contracts under the platform namespace.
 - Add explicit schema-versioned YAML profiles and experiment configuration.
-- Add 25 `aqa_*` tables listed in `docs/requirements.md`; migration is additive and does not
-  destructively downgrade core state.
+- The additive migrations now create all 25 `aqa_*` tables listed in `docs/requirements.md`,
+  preserve/upgrade bar revision history, apply the fixed role/view boundary, and refuse destructive
+  downgrade of core state.
 - Add the exact private FastAPI route allowlist from `REQ-API-002`. Only health is anonymous;
   mutations create jobs or latch events, never broker calls.
 - Add deterministic artifact, evidence, audit, slot, signal, decision, plan, and order identities.
@@ -483,8 +488,11 @@ commit count is planned.
   and current/target security architecture are in place. Later service command consumption,
   process mounts, and feature-specific commands belong to their implementation phases.
 - [ ] `PARTIALLY_IMPLEMENTED` — Phase 2 has the redacted database-engine boundary, exact 25-table
-  metadata, additive Alembic revision, SQLite compatibility, and guarded PostgreSQL 16 migration
-  tests. Service roles, the full atomic repository set, and published PostgreSQL evidence remain.
+  metadata, additive schema/bar-history/authorization migrations, SQLite compatibility, fixed
+  PostgreSQL authorization/login roles with scoped grants and safe views, the atomic
+  bar/latest/eligible-symbol-watermark repository, and the append-only audit repository/read-only
+  verifier. The remaining atomic repositories and final current-revision PostgreSQL 16/published
+  evidence remain incomplete.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
 - [ ] `NOT_IMPLEMENTED` — Phase 5 signed risk and latches.
@@ -505,6 +513,8 @@ commit count is planned.
 | Treat experiment market-data provider as the intended external series and runtime source as separate provenance. | Offline fixture bars must remain labeled `fixture` and non-promotable; composed configuration now binds definition and adapter identity and requires Alpaca/IEX/raw for external modes, while bar/dataset provenance remains Phase 3 work. | PARTIALLY_IMPLEMENTED |
 | Retain Python, `uv`, PostgreSQL/SQLite, Typer, and Streamlit; add the required FastAPI boundary. | Preserves the implemented stack while adding the specified private API; FastAPI is not currently installed. | PARTIALLY_IMPLEMENTED |
 | Use PostgreSQL jobs/outbox, not a message broker. | Current workload needs transactional durability more than another distributed dependency. | NOT_IMPLEMENTED |
+| Treat `aqa_migrate` as a trusted deployment-only schema owner, not a runtime sandbox. | Schema ownership and grant authority are required for governed migrations and cannot be neutralized by self-revoking DML; ordinary business DML is still explicitly revoked and no runtime service receives the role. | PARTIALLY_IMPLEMENTED pending final Phase 2 evidence |
+| Expose full audit reads only to control/read-only verification paths and scope ordinary writer reads by actor/stream. | A writer must verify its own chain without gaining visibility into unrelated service evidence; row policies and security-barrier views align database and domain writer authority. | PARTIALLY_IMPLEMENTED pending final Phase 2 evidence |
 | Move dashboard reads behind the API. | Removes database authority from presentation code. | NOT_IMPLEMENTED |
 | Use only file-backed secrets in new services. | The reusable loader prevents unsafe file acceptance and ordinary serialization, while runtime composition selects opaque references through an exact service/mode matrix; service command adoption and mounts remain. | PARTIALLY_IMPLEMENTED |
 | Keep paper submission unreachable by default. | Current legacy configuration disables submission; the target adds its independent default-deny verifier, and this program performs no connection. | PARTIALLY_IMPLEMENTED |
@@ -526,10 +536,10 @@ commit count is planned.
   new platform.
 - Current collector secrets are direct `APA_*` environment values, while the new platform permits
   only file-backed `AQA_*_FILE` interfaces.
-- The existing migration uses schema `market_data`; CI used PostgreSQL 15 at program start and is
-  now configured for a digest-pinned PostgreSQL 16 service with a runtime major assertion. The
-  target still needs additive `aqa_*` tables, roles, and an upgrade path that does not discard
-  collector history.
+- The predecessor migration uses schema `market_data`; CI used PostgreSQL 15 at program start and
+  is now configured for a digest-pinned PostgreSQL 16 service with a runtime major assertion. The
+  additive `aqa` schema, roles, and validated ownership transition now preserve predecessor
+  collector history; final evidence for the current Phase 2 revisions is still pending.
 - The current dashboard reads SQLite/artifacts directly, conflicting with the required API-only
   boundary, and Compose publishes its port on all host interfaces rather than loopback only.
 - An earlier local Python 3.14 environment exposed a NumPy-stub parsing mismatch while runtime and
@@ -846,16 +856,20 @@ Phases 0 and 1 are implemented with recorded evidence: the generic project/domai
 canonical identity/time/numeric primitives, universe, experiment, profiles, static validation,
 secret-file and service-scoped runtime settings, local bootstrap, initial security architecture,
 and STRIDE register. Phase 2 is in progress with a redacted platform database engine, exact
-25-table metadata, additive Alembic migration, and guarded fresh/prior-state PostgreSQL tests. The existing
-collector and legacy regression suite provide reusable code and characterization, but they do not
-satisfy the complete generic platform contract. Service command/mount integration and remaining
-feature commands are assigned to their dependent later phases; the incomplete parts of Phases
+25-table metadata, additive schema/bar-history/authorization migrations, a fixed PostgreSQL
+role/grant/safe-view boundary, an atomic bar/latest/eligible-symbol-watermark repository, and an
+append-only audit repository with read-only CLI verification. The existing collector and legacy
+regression suite provide reusable code and characterization, but they do not satisfy the complete
+generic platform contract. The remaining Phase 2 repositories, service command/mount integration,
+and feature commands are assigned to their dependent later phases; the incomplete parts of Phases
 2–10 remain as listed in the progress checklist.
-The new platform migration has not yet run in published CI. Target container runtime, image scan, SBOM, clean-package install, twice-run
-demo, and backup/restore evidence remain unavailable until their implementation exists and the
-required services are available. GitHub Actions run `33974704565` passed for pushed commit
-`d214e3a`; that run validates the digest-pinned PostgreSQL 16 and image boundaries plus all
-published Phase 1 foundations. The uncommitted Phase 2 schema remains locally validated only.
+The current Phase 2 migration/role/repository changes have not yet completed their final
+current-revision PostgreSQL 16 and published-CI verification. Target container runtime, image scan,
+SBOM, clean-package install, twice-run demo, and backup/restore evidence remain unavailable until
+their implementation exists and the required services are available. GitHub Actions run
+`33974704565` passed for pushed commit `d214e3a`; that run validates the digest-pinned PostgreSQL 16
+and image boundaries plus all published Phase 1 foundations. The current Phase 2 implementation is
+still an uncommitted worktree candidate.
 Every credentialed external adapter remains unvalidated;
 credentialed external validation is intentionally prohibited in this program.
 

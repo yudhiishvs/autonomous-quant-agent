@@ -12,6 +12,7 @@ from typing import Any, cast
 import pytest
 from sqlalchemy import URL, insert, select
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 import adaptive_trader.platform.storage.engine as storage_engine
 from adaptive_trader.platform import (
@@ -20,7 +21,10 @@ from adaptive_trader.platform import (
     RuntimeSettingsError,
     load_runtime_settings,
 )
-from adaptive_trader.platform.storage import create_platform_engine
+from adaptive_trader.platform.storage import (
+    create_platform_engine,
+    create_platform_read_only_engine,
+)
 from adaptive_trader.platform.storage.tables import aqa_experiments, metadata
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -64,6 +68,123 @@ def test_factory_accepts_only_validated_runtime_settings() -> None:
     with pytest.raises(RuntimeSettingsError, match="validated runtime settings") as captured:
         create_platform_engine(cast(RuntimeSettings, SENTINEL))
     assert SENTINEL not in str(captured.value)
+
+    read_signature = inspect.signature(create_platform_read_only_engine)
+    assert tuple(read_signature.parameters) == ("settings", "application_name")
+    with pytest.raises(RuntimeSettingsError, match="validated runtime settings") as captured:
+        create_platform_read_only_engine(cast(RuntimeSettings, SENTINEL))
+    assert SENTINEL not in str(captured.value)
+
+
+def test_read_only_offline_factory_does_not_create_a_missing_path(tmp_path: Path) -> None:
+    settings = _offline_settings(tmp_path)
+    database_path = settings.offline_database_path
+    assert database_path is not None
+    assert not database_path.parent.exists()
+
+    with pytest.raises(RuntimeSettingsError, match="read-only"):
+        create_platform_read_only_engine(settings)
+
+    assert not database_path.parent.exists()
+    assert not database_path.exists()
+
+
+def test_read_only_offline_factory_is_observational_and_enforces_query_only(
+    tmp_path: Path,
+) -> None:
+    settings = _offline_settings(tmp_path)
+    database_path = settings.offline_database_path
+    assert database_path is not None
+    writer = create_platform_engine(settings)
+    try:
+        metadata.create_all(writer)
+    finally:
+        writer.dispose()
+    before_bytes = database_path.read_bytes()
+    before_stat = database_path.stat()
+    wal_path = database_path.with_name(database_path.name + "-wal")
+    before_sidecars = tuple(database_path.parent.glob(database_path.name + "-*"))
+    assert before_sidecars == ()
+
+    reader = create_platform_read_only_engine(settings)
+    try:
+        assert reader.url.query == {"mode": "ro", "uri": "true"}
+        with reader.connect() as connection:
+            assert connection.exec_driver_sql("PRAGMA query_only").scalar_one() == 1
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 5_000
+            assert connection.scalar(select(aqa_experiments.c.experiment_hash)) is None
+            with pytest.raises(OperationalError):
+                connection.exec_driver_sql("CREATE TABLE forbidden_write (id INTEGER)")
+    finally:
+        reader.dispose()
+
+    after_stat = database_path.stat()
+    assert database_path.read_bytes() == before_bytes
+    assert after_stat.st_mtime_ns == before_stat.st_mtime_ns
+    sidecars = tuple(sorted(database_path.parent.glob(database_path.name + "-*")))
+    assert sidecars == (
+        database_path.with_name(database_path.name + "-shm"),
+        wal_path,
+    )
+    assert wal_path.read_bytes() == b""
+
+
+def test_read_only_offline_factory_observes_an_active_wal_without_mutating_it(
+    tmp_path: Path,
+) -> None:
+    settings = _offline_settings(tmp_path)
+    database_path = settings.offline_database_path
+    assert database_path is not None
+    writer = create_platform_engine(settings)
+    try:
+        with writer.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE observation (value TEXT NOT NULL)")
+            connection.exec_driver_sql("INSERT INTO observation (value) VALUES ('committed')")
+        wal_path = database_path.with_name(database_path.name + "-wal")
+        assert wal_path.is_file()
+        before_wal = wal_path.read_bytes()
+
+        reader = create_platform_read_only_engine(settings)
+        try:
+            assert reader.url.query == {"mode": "ro", "uri": "true"}
+            with reader.connect() as connection:
+                assert (
+                    connection.exec_driver_sql("SELECT value FROM observation").scalar_one()
+                    == "committed"
+                )
+                assert connection.exec_driver_sql("PRAGMA query_only").scalar_one() == 1
+        finally:
+            reader.dispose()
+
+        assert wal_path.read_bytes() == before_wal
+    finally:
+        writer.dispose()
+
+
+def test_read_only_offline_factory_does_not_assume_database_is_immutable(
+    tmp_path: Path,
+) -> None:
+    writer_settings = _offline_settings(tmp_path)
+    database_path = writer_settings.offline_database_path
+    assert database_path is not None
+    writer = create_platform_engine(writer_settings)
+    try:
+        with writer.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE evidence (value INTEGER NOT NULL)")
+
+        reader = create_platform_read_only_engine(writer_settings)
+        try:
+            # Constructing the reader before a writer starts must not freeze an obsolete
+            # sidecar-free view of the database.
+            with writer.begin() as connection:
+                connection.exec_driver_sql("INSERT INTO evidence VALUES (1)")
+
+            with reader.connect() as connection:
+                assert connection.exec_driver_sql("SELECT value FROM evidence").scalar_one() == 1
+        finally:
+            reader.dispose()
+    finally:
+        writer.dispose()
 
 
 def test_offline_factory_uses_only_selected_absolute_path_and_sqlite_pragmas(
@@ -202,6 +323,39 @@ def test_postgres_engine_has_bounded_pool_and_connection_settings(
             ),
         },
     }
+
+
+def test_postgres_read_only_engine_enforces_server_side_read_only_transactions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _database_settings(
+        tmp_path,
+        f"postgresql://service:{SENTINEL}@localhost/platform",
+    )
+    captured: dict[str, Any] = {}
+    returned = cast(Engine, object())
+
+    def capture_create_engine(url: URL, **kwargs: Any) -> Engine:
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return returned
+
+    monkeypatch.setattr(storage_engine, "sqlalchemy_create_engine", capture_create_engine)
+
+    selected = create_platform_read_only_engine(
+        settings,
+        application_name="aqa.audit-verifier",
+    )
+
+    assert selected is returned
+    kwargs = cast(dict[str, Any], captured["kwargs"])
+    connect_args = cast(dict[str, object], kwargs["connect_args"])
+    assert connect_args["options"] == (
+        "-c timezone=UTC -c statement_timeout=20000 -c lock_timeout=5000 "
+        "-c idle_in_transaction_session_timeout=30000 "
+        "-c default_transaction_read_only=on"
+    )
 
 
 @pytest.mark.parametrize(

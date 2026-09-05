@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
@@ -179,39 +180,158 @@ def test_status_is_database_only_and_never_loads_alpaca_credentials(
     assert "password" not in result.stdout
 
 
-def test_migrate_uses_only_the_schema_owner_database_url(
+def test_migrate_uses_the_bounded_shared_runner(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: list[tuple[str, str]] = []
-    migration_url = (
-        "postgresql+psycopg://owner:password@database.example.invalid/market_data"
+    calls: list[tuple[str, Path]] = []
+    database_url = (
+        "postgresql+psycopg://legacy-owner:password@database.example.invalid/market_data"
         "?sslmode=verify-full"
     )
-    monkeypatch.setattr(
-        collector_cli,
-        "migration_database_url_from_environment",
-        lambda: migration_url,
-    )
-    monkeypatch.setattr(
-        collector_cli,
-        "upgrade_database",
-        lambda url: calls.append(("upgrade", url)),
-    )
-    monkeypatch.setattr(
-        collector_cli,
-        "require_database_at_head",
-        lambda url: calls.append(("verify", url)),
-    )
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(f"{database_url}\n", encoding="utf-8")
+    database_url_file.chmod(0o600)
+    application_root = tmp_path / "application"
+
+    def migrate(
+        database_secret: object,
+        *,
+        application_root: Path,
+        bootstrap_admin_database_url: object | None,
+    ) -> None:
+        assert str(database_secret) == "<redacted>"
+        assert bootstrap_admin_database_url is None
+        calls.append(("migrate", application_root))
+
+    monkeypatch.setattr(collector_cli, "migrate_platform_database", migrate)
 
     def forbid_runtime_environment() -> None:
         raise AssertionError("migrate must not load the runtime database URL")
 
     monkeypatch.setattr(collector_cli, "_environment", forbid_runtime_environment)
 
-    result = CliRunner().invoke(collector_cli.app, ["migrate"])
+    result = CliRunner().invoke(
+        collector_cli.app,
+        [
+            "migrate",
+            "--database-url-file",
+            str(database_url_file),
+            "--application-root",
+            str(application_root),
+        ],
+    )
 
     assert result.exit_code == 0
-    assert calls == [("upgrade", migration_url), ("verify", migration_url)]
+    assert calls == [("migrate", application_root)]
+    assert database_url not in result.output
+
+
+def test_migrate_defaults_to_the_absolute_current_application_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(
+        "postgresql://owner:password@127.0.0.1:5432/collector_test\n",
+        encoding="utf-8",
+    )
+    database_url_file.chmod(0o600)
+    observed_roots: list[Path] = []
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        collector_cli,
+        "migrate_platform_database",
+        lambda _secret, *, application_root, bootstrap_admin_database_url: (
+            observed_roots.append(application_root)
+            if bootstrap_admin_database_url is None
+            else None
+        ),
+    )
+
+    result = CliRunner().invoke(
+        collector_cli.app,
+        ["migrate", "--database-url-file", str(database_url_file)],
+    )
+
+    assert result.exit_code == 0
+    assert observed_roots == [tmp_path]
+    assert observed_roots[0].is_absolute()
+
+
+def test_migrate_passes_a_distinct_redacted_bootstrap_administrator(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy_url = "postgresql://legacy:legacy-value@127.0.0.1:5432/collector_test"
+    admin_url = "postgresql://admin:admin-value@127.0.0.1:5432/collector_test"
+    legacy_file = tmp_path / "legacy-url"
+    admin_file = tmp_path / "admin-url"
+    for path, value in ((legacy_file, legacy_url), (admin_file, admin_url)):
+        path.write_text(f"{value}\n", encoding="utf-8")
+        path.chmod(0o600)
+    captured: list[tuple[object, object | None]] = []
+
+    def capture(
+        database_secret: object,
+        *,
+        application_root: Path,
+        bootstrap_admin_database_url: object | None,
+    ) -> None:
+        assert application_root == tmp_path
+        captured.append((database_secret, bootstrap_admin_database_url))
+
+    monkeypatch.setattr(collector_cli, "migrate_platform_database", capture)
+    result = CliRunner().invoke(
+        collector_cli.app,
+        [
+            "migrate",
+            "--database-url-file",
+            str(legacy_file),
+            "--bootstrap-admin-database-url-file",
+            str(admin_file),
+            "--application-root",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(captured) == 1
+    assert captured[0][0] is not captured[0][1]
+    assert str(captured[0][0]) == str(captured[0][1]) == "<redacted>"
+    assert legacy_url not in result.output
+    assert admin_url not in result.output
+
+
+def test_migrate_requires_an_owner_private_database_url_file() -> None:
+    result = CliRunner().invoke(collector_cli.app, ["migrate"])
+
+    assert result.exit_code == 2
+    assert "--database-url-file" in result.output
+
+
+def test_migrate_redacts_runner_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sentinel = "postgresql://owner:private-value@127.0.0.1:5432/collector_test"
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(f"{sentinel}\n", encoding="utf-8")
+    database_url_file.chmod(0o600)
+    monkeypatch.setattr(
+        collector_cli,
+        "migrate_platform_database",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError(sentinel)),
+    )
+
+    result = CliRunner().invoke(
+        collector_cli.app,
+        ["migrate", "--database-url-file", str(database_url_file)],
+    )
+
+    assert result.exit_code == 1
+    assert "Database migration failed (RuntimeError)" in result.output
+    assert sentinel not in result.output
 
 
 @pytest.mark.parametrize(

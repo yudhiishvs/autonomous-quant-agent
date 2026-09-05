@@ -137,7 +137,7 @@ def test_every_financial_numeric_column_has_a_nonfinite_database_guard() -> None
         (aqa_experiments, ("experiment_id", "experiment_version")),
         (
             aqa_decision_slots,
-            ("experiment_hash", "source_bar_end", "decision_type"),
+            ("experiment_hash", "source_interval_end", "decision_type"),
         ),
         (aqa_signal_envelopes, ("signal_id",)),
         (aqa_signal_envelopes, ("content_hash",)),
@@ -150,6 +150,28 @@ def test_every_financial_numeric_column_has_a_nonfinite_database_guard() -> None
 )
 def test_normative_uniqueness_contracts(table: Table, columns: tuple[str, ...]) -> None:
     assert columns in _unique_column_sets(table)
+
+
+def test_bar_history_allows_a_prior_payload_to_become_effective_again() -> None:
+    """Idempotency applies to the latest revision, not all historical payloads."""
+
+    assert ("bar_identity_id", "content_hash") not in _unique_column_sets(aqa_bar_events)
+    assert ("bar_identity_id", "normalized_payload_hash") not in _unique_column_sets(aqa_bar_events)
+    assert aqa_bar_events.c.normalized_payload_hash.nullable is False
+    assert aqa_bar_events.c.lineage_hash.nullable is True
+    constraints = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in aqa_bar_events.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert (
+        constraints["ck_aqa_bar_events_event_hash_domain_separation"]
+        == "content_hash <> normalized_payload_hash"
+    )
+    assert (
+        constraints["ck_aqa_bar_events_lineage_hash_sha256_length"]
+        == "lineage_hash IS NULL OR length(lineage_hash) = 64"
+    )
 
 
 def test_metadata_creates_cleanly_on_sqlite_without_postgresql_ddl() -> None:

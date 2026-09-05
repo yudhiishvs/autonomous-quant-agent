@@ -15,6 +15,7 @@ from alembic.script import ScriptDirectory
 
 _REVISION_MODULE = "migrations.versions.20260905_0002_platform_foundation"
 _REVISION = "20260905_0002"
+_HEAD_REVISION = "20260905_0006"
 _PRIOR_REVISION = "20260903_0001"
 _EXPECTED_TABLES = frozenset(
     {
@@ -66,7 +67,7 @@ def test_platform_revision_is_the_linear_head() -> None:
     head = revisions.get_current_head()
     migration = revisions.get_revision(_REVISION)
 
-    assert head == _REVISION
+    assert head == _HEAD_REVISION
     assert migration is not None
     assert migration.down_revision == _PRIOR_REVISION
 
