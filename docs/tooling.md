@@ -28,6 +28,7 @@ its `install` target uses pip and it does not yet provide the complete harness r
 | Lint | `uv run --no-sync ruff check .` |
 | Type check | `uv run --no-sync mypy src` |
 | Offline tests | `uv run --no-sync pytest -q` |
+| Local infrastructure-secret bootstrap | `uv run --no-sync aqa secrets bootstrap-local` |
 | Branch coverage | `uv run --no-sync pytest --cov=adaptive_trader --cov-branch --cov-report=term-missing --cov-report=xml` |
 | Synthetic regression | `uv run --no-sync python -m adaptive_trader.cli backtest --config configs/backtest.yaml --synthetic` |
 | Replay regression | `uv run --no-sync python -m adaptive_trader.cli replay --config configs/replay.yaml` |

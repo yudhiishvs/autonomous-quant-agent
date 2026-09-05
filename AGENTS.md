@@ -54,7 +54,7 @@ Use only these implementation-status labels:
 | Unit/component offline tests | `uv run --no-sync pytest -q -m "not integration"` |
 | Offline suite (PostgreSQL skips unless guarded below) | `uv run --no-sync pytest -q` |
 | PostgreSQL integration | `APA_TEST_POSTGRES_URL=postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE=YES uv run --no-sync pytest -q -m postgres` |
-| Security checks | `uv run --no-sync pytest -q tests/safety tests/architecture tests/unit/test_platform_experiment.py tests/unit/test_platform_profiles.py tests/unit/test_platform_runtime_settings.py tests/unit/test_platform_security.py tests/test_config_safety.py tests/test_live_safety_matrix.py tests/test_collection_credentials.py tests/test_collection_runtime.py` |
+| Security checks | `uv run --no-sync pytest -q tests/safety tests/architecture tests/unit/test_platform_experiment.py tests/unit/test_platform_profiles.py tests/unit/test_platform_runtime_settings.py tests/unit/test_platform_secret_bootstrap.py tests/unit/test_platform_security.py tests/test_config_safety.py tests/test_live_safety_matrix.py tests/test_collection_credentials.py tests/test_collection_runtime.py` |
 | Synthetic regression | `uv run --no-sync python -m adaptive_trader.cli backtest --config configs/backtest.yaml --synthetic` |
 | Replay regression | `uv run --no-sync python -m adaptive_trader.cli replay --config configs/replay.yaml` |
 | Compose validation | `docker compose --env-file .env.example -f docker-compose.yml config --quiet` |
@@ -121,7 +121,9 @@ one-command local full harness and benchmark command are `NOT_IMPLEMENTED`; do n
 - Persist order intent before any broker submission; ambiguity blocks retry and new exposure.
 - Preserve append-only evidence, fencing tokens, idempotency keys, and fail-closed behavior.
 - Use parameterized SQL and redact connection URLs and secret-bearing errors.
-- New platform secret values enter process memory only through `load_secret_file()`.
+- Runtime service secret values enter process memory only through `load_secret_file()`; the local
+  bootstrap is the narrow exception that generates infrastructure values solely for owner-private
+  file publication and never returns or prints them.
 - No ordinary verification command may contact Alpaca or submit an order.
 - Follow `SECURITY.md` and `docs/security-model.md` for reporting and residual risks.
 

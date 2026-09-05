@@ -28,15 +28,20 @@ from adaptive_trader.platform.config import (
 )
 from adaptive_trader.platform.hashing import sha256_hex
 from adaptive_trader.platform.security import (
+    LOCAL_BOOTSTRAP_FILENAMES,
+    LocalSecretBootstrapError,
+    LocalSecretBootstrapResult,
     RedactedSecret,
     SecretFileError,
     SecretFileReference,
     SecretFileVariable,
+    bootstrap_local_secrets,
     load_secret_file,
 )
 from adaptive_trader.platform.universe import SymbolRole, UniverseSpec
 
 __all__ = [
+    "LOCAL_BOOTSTRAP_FILENAMES",
     "BrokerAdapter",
     "CanonicalizationError",
     "ExecutionMode",
@@ -45,6 +50,8 @@ __all__ = [
     "ExperimentDefinition",
     "ExperimentHashMismatchError",
     "ExperimentSpec",
+    "LocalSecretBootstrapError",
+    "LocalSecretBootstrapResult",
     "MarketDataAdapter",
     "MarketDataSpec",
     "PaperOrderEnablement",
@@ -64,6 +71,7 @@ __all__ = [
     "StoragePolicySpec",
     "SymbolRole",
     "UniverseSpec",
+    "bootstrap_local_secrets",
     "canonical_json_bytes",
     "load_experiment",
     "load_platform_config",

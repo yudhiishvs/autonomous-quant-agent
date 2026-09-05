@@ -1,4 +1,4 @@
-"""Broker-free command line for validating static platform configuration."""
+"""Broker-free command line for validating and operating the platform."""
 
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ from adaptive_trader.platform.config import (
     ExperimentConfigError,
     PlatformConfig,
     load_platform_config,
+)
+from adaptive_trader.platform.security import (
+    LocalSecretBootstrapError,
+    LocalSecretBootstrapResult,
+    bootstrap_local_secrets,
 )
 
 DEFAULT_CONFIG_ROOT = Path("configs")
@@ -34,7 +39,16 @@ config_app = typer.Typer(
     rich_markup_mode=None,
     pretty_exceptions_enable=False,
 )
+secrets_app = typer.Typer(
+    name="secrets",
+    help="Manage local infrastructure secret files.",
+    no_args_is_help=True,
+    add_completion=False,
+    rich_markup_mode=None,
+    pretty_exceptions_enable=False,
+)
 app.add_typer(config_app, name="config")
+app.add_typer(secrets_app, name="secrets")
 
 
 def _config_root(path: Path) -> Path:
@@ -97,6 +111,22 @@ def _validate_or_exit(
     _emit_success(config, check=check, json_output=json_output)
 
 
+def _emit_bootstrap_result(result: LocalSecretBootstrapResult, *, json_output: bool) -> None:
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {"created": result.created, "skipped": result.skipped, "status": "ok"},
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        return
+    for path in result.created:
+        typer.echo(f"created: {path}")
+    for path in result.skipped:
+        typer.echo(f"skipped: {path}")
+
+
 @app.command("doctor")
 def doctor(
     profile: Annotated[
@@ -145,6 +175,33 @@ def validate_config(
         check="config",
         json_output=json_output,
     )
+
+
+@secrets_app.command("bootstrap-local")
+def bootstrap_local(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit stable machine-readable output."),
+    ] = False,
+) -> None:
+    """Create missing local database passwords and an operator token."""
+
+    try:
+        result = bootstrap_local_secrets(Path.cwd())
+    except (LocalSecretBootstrapError, OSError):
+        if json_output:
+            typer.echo(
+                json.dumps(
+                    {"error": "local secret bootstrap failed", "status": "error"},
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                err=True,
+            )
+        else:
+            typer.echo("secrets bootstrap-local: error: local secret bootstrap failed", err=True)
+        raise typer.Exit(code=2) from None
+    _emit_bootstrap_result(result, json_output=json_output)
 
 
 def main() -> None:
