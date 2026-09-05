@@ -3,6 +3,7 @@
 !/.dockerignore
 !/.editorconfig
 !/.gitignore
+!/.python-version
 !/.github/
 !/.github/**
 !/.agents/

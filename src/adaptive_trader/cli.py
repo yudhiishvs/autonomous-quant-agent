@@ -19,7 +19,7 @@ import sqlite3
 import sys
 import threading
 import time as time_module
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -605,9 +605,13 @@ def _construct_supported(factory: Callable[..., T], **values: Any) -> T:
     return factory(**supplied)
 
 
+async def _resolve_awaitable(value: Awaitable[T]) -> T:
+    return await value
+
+
 def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
-        return asyncio.run(value)
+        return asyncio.run(_resolve_awaitable(value))
     return value
 
 

@@ -34,6 +34,8 @@ of the target generic platform.
 | `coding-standards.md` | Python, persistence, error, concurrency, and public-contract conventions |
 | `testing-strategy.md` | Test categories, network rules, PostgreSQL safety, and commands |
 | `security-model.md` | Current assets, trust zones, controls, and residual risks |
+| `security_architecture.md` | Current/target capability separation and target service controls |
+| `threat_model.md` | STRIDE threat register, residual risk, and test traceability |
 | `dependency-policy.md` | Dependency admission, locking, review, and removal policy |
 | `code-review.md` | Finding severities and adversarial review procedure |
 | `performance.md` | Measured-workflow policy and current sensitive paths |

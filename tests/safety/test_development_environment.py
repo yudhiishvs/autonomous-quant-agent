@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -86,3 +87,12 @@ indent_style = tab
 trim_trailing_whitespace = false
 """
     )
+
+
+def test_python_tools_target_the_supported_language_floor(project_root: Path) -> None:
+    configuration = tomllib.loads((project_root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert (project_root / ".python-version").read_text(encoding="utf-8") == "3.11\n"
+    assert configuration["project"]["requires-python"] == ">=3.11"
+    assert configuration["tool"]["mypy"]["python_version"] == "3.11"
+    assert configuration["tool"]["ruff"]["target-version"] == "py311"

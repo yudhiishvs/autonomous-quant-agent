@@ -95,12 +95,15 @@ reconciliation are the active recovery mechanism.
 
 | Module | Responsibility and owned state | Public interface | Allowed dependencies | Forbidden direction / failure behavior |
 | --- | --- | --- | --- | --- |
+| `platform.constants` | Owns fixed representation limits shared by pure platform values; no mutable state | Signed-integer, SHA-256, deterministic-ID, and Decimal bounds | Standard-library typing only | No experiment, provider, persistence, configuration, environment, or broker knowledge |
+| `platform.errors` | Defines stable exception identities without importing implementation modules; no mutable state | Canonicalization, domain, configuration, runtime-settings, secret-file, and bootstrap errors | Standard library only | Must not render rejected values, secret paths, credentials, provider payloads, or operating-system exception detail |
 | `platform.canonical` | Converts a closed and explicitly bounded set of scalar/container values into deterministic UTF-8 JSON bytes; owns no mutable state | `CanonicalizationError` and `canonical_json_bytes()` | Standard-library JSON, UTC datetime, Decimal, and Enum types | No provider, persistence, environment, filesystem, or secret dependency; unsupported, nonfinite, naive-time, unordered, cyclic, subclassed-wrapper, oversized, or invalid-UTF-8 input fails with structural context and without rendering values |
 | `platform.hashing` | Derives content hashes from canonical bytes; owns no mutable state | `sha256_hex()` | `platform.canonical` and standard-library SHA-256 | No alternate serializer or implicit coercion; canonicalization failure prevents a hash result |
+| `platform.domain` | Owns foundational frozen deterministic IDs and exact UTC/Decimal boundary functions; no mutable state | `DeterministicId`, `DecimalRounding`, `require_utc_instant()`, `require_finite_decimal()`, and `quantize_decimal()` | Constants, stable errors, canonical hashing, and standard-library immutable value types | No flagship symbols, provider, persistence, environment, filesystem, plugin, or broker dependency; unsafe labels, noncanonical IDs, naive/non-UTC time, coerced/nonfinite/oversized numbers, and implicit rounding fail closed |
 | `platform.universe` | Owns immutable generic symbol roles and derives deterministic collection/order allowlists | `SymbolRole` and `UniverseSpec` | Pydantic and standard-library validation | No flagship literals, provider, persistence, environment, broker, or alias authority; invalid, duplicate, overlapping, or empty active membership fails closed |
-| `platform.config` | Loads bounded no-symlink experiment/profile YAML, verifies the mandatory profile pin, enforces mode authority, and composes immutable service-scoped startup settings from an explicitly injected environment mapping | `ExperimentDefinition`, `PlatformProfile`, `ExperimentSpec`, `PlatformConfig`, `RuntimeService`, `RuntimeSettings`, and loaders | Canonical/hash/universe/security primitives, Pydantic, PyYAML, URL parsing, and POSIX file operations | No ambient environment, secret-value, client, database, plugin, or network authority; malformed paths/YAML/types/hashes/mode/service combinations fail with safe context-free errors |
-| `platform.cli` | Exposes broker-free static `doctor` and `config validate` commands through the new aliases; owns no state | Typer `app` and `main()` | `platform.config`, JSON, paths, and Typer | No environment, secret, provider, broker, persistence, dynamic-import, network, or write authority; invalid configuration exits nonzero without constructing a client |
-| `platform.security` | Validates opaque secret-file references and loads one explicitly sourced secret into an immutable redacted value only at an authorized adapter boundary | `SecretFileVariable`, `SecretFileReference`, `SecretFileError`, `RedactedSecret`, and `load_secret_file()` | POSIX descriptor-relative file APIs, paths/stat, and Pydantic serialization hooks | No environment lookup, persistence, provider/broker/client, dynamic import, or network authority; unsafe type/path/owner/mode/size/content fails without exposing the path, value, or operating-system exception |
+| `platform.config` | Loads bounded no-symlink experiment/profile YAML, requires the experiment hash pin during composed profile loading, enforces mode authority, and composes immutable service-scoped startup settings from an explicitly injected environment mapping | `ExperimentDefinition`, `PlatformProfile`, `ExperimentSpec`, `PlatformConfig`, `RuntimeService`, `RuntimeSettings`, and loaders | Canonical/hash/universe/security primitives, Pydantic, PyYAML, URL parsing, and POSIX file operations | No ambient environment, secret-value, client, database, plugin, or network authority; malformed paths/YAML/types/hashes/mode/service combinations fail with safe context-free errors |
+| `platform.cli` | Exposes broker-free static validation and local infrastructure-secret bootstrap through the new aliases; owns no durable state | Typer `app` and `main()` | `platform.config`, `platform.security`, JSON, paths, and Typer | Doctor/config commands have no write authority; bootstrap writes only the fixed `secrets/` inventory beneath the current working directory and is documented for repository-root use; no provider, broker, database, dynamic-import, or network authority; failures exit nonzero without sensitive context |
+| `platform.security` | Validates opaque secret-file references, loads one explicitly sourced secret into an immutable redacted value at an authorized adapter boundary, and creates the fixed local infrastructure-secret inventory | `SecretFileVariable`, `SecretFileReference`, `SecretFileError`, `RedactedSecret`, `load_secret_file()`, and `bootstrap_local_secrets()` | POSIX descriptor-relative file APIs, paths/stat, cryptographic randomness, and Pydantic serialization hooks | No environment lookup, provider/broker/client, dynamic import, or network authority; bootstrap serializes concurrent writers, never overwrites, never creates Alpaca keys, and unsafe type/path/owner/mode/size/content fails without exposing the path, value, or operating-system exception |
 
 ## Current data flows
 
@@ -143,6 +146,9 @@ reconciliation are the active recovery mechanism.
 ## External interfaces and credentials
 
 - `adaptive-portfolio-agent` is the legacy console entry point.
+- `aqa` and `autonomous-quant-agent` expose the current platform commands, including
+  `secrets bootstrap-local`; `scripts/bootstrap_local.py` is a fixed convenience entry point for
+  that same command.
 - `adaptive-market-data` and `python -m adaptive_trader.collection` are collector entry points.
 - `app.py` starts the current Streamlit dashboard; it reads legacy SQLite directly.
 - The optional `legacy-yahoo` extra supports the public compatibility-only
@@ -189,7 +195,9 @@ before exposure can increase.
   socket denial remains target work.
 - Real-money clients and endpoints are unsupported and prohibited.
 
-See `docs/security-model.md` for threats, controls, and residual risk.
+See `docs/security-model.md` for implemented controls, `docs/security_architecture.md` for the
+current/target capability boundary, and `docs/threat_model.md` for the STRIDE register and test
+traceability.
 
 ## Observability and deployment topology
 
@@ -236,9 +244,9 @@ remains disabled and authorization defaults deny.
 
 Canonical serialization, hashing, universe/configuration, broker-free profile validation,
 service-scoped runtime settings, opaque secret-file references, and the owner-private secret-file
-primitive are implemented target-package boundaries. No service command consumes the runtime
-settings or secret loader yet. Bootstrap, the remaining platform tree, services, tables, signed
-contracts, scheduler, jobs, API, artifact store, and deterministic vertical slice are
+primitive and local infrastructure-secret bootstrap are implemented target-package boundaries. No
+service command consumes the runtime settings or secret loader yet. The remaining platform tree,
+services, tables, signed contracts, scheduler, jobs, API, artifact store, and deterministic slice are
 `NOT_IMPLEMENTED`. Their ordered work and acceptance evidence live in
 `docs/execution-plans/platform-core.md`.
 
@@ -271,8 +279,9 @@ contracts, scheduler, jobs, API, artifact store, and deterministic vertical slic
   trigger; a database owner can alter it without runtime detection.
 - Compose does not provision PostgreSQL or enforce a general outbound firewall.
 - Platform runtime settings and per-service secret-reference selection are implemented as pure
-  startup composition, but local secret bootstrap, service command integration, and least-privilege
-  mounts are not; the low-level loader currently has no service consumer.
+  startup composition and local infrastructure-secret bootstrap is implemented, but service command
+  integration and least-privilege mounts are not; the low-level loader currently has no service
+  consumer. Bootstrap is POSIX-only and relies on host filesystem ownership and advisory locks.
 - The generic platform remains `PARTIALLY_IMPLEMENTED`, and its paper authorization path is
   `NOT_IMPLEMENTED`; the current legacy paper adapter must not be presented as target-platform
   validation.

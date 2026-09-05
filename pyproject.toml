@@ -87,9 +87,7 @@ exclude_also = [
 ]
 
 [tool.mypy]
-# NumPy 2.5's installed stubs use Python 3.12+ type-alias syntax. Runtime
-# compatibility remains Python 3.11 and is enforced by Ruff's py311 target.
-python_version = "3.14"
+python_version = "3.11"
 check_untyped_defs = true
 disallow_untyped_defs = true
 ignore_missing_imports = true
