@@ -477,9 +477,8 @@ commit count is planned.
   process/thread serialization, atomic no-overwrite publication, safe reruns, and path-only output;
   it has no Alpaca credential, client, network, or order authority.
 - [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene, canonical/configuration boundaries,
-  profiles, static doctor, aliases, secret/runtime composition, and platform-package Python 3.11
-  typing are in place; full-source Python 3.11 typing, service command integration, mount isolation,
-  and the remaining commands remain.
+  profiles, static doctor, aliases, secret/runtime composition, and full-source Python 3.11 typing
+  are in place; service command integration, mount isolation, and the remaining commands remain.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -527,9 +526,10 @@ commit count is planned.
   history.
 - The current dashboard reads SQLite/artifacts directly, conflicting with the required API-only
   boundary, and Compose publishes its port on all host interfaces rather than loopback only.
-- The current project virtual environment is Python 3.14.3 and mypy currently targets 3.14 because
-  installed NumPy stubs use newer syntax; runtime and CI are Python 3.11. Phase 1 must resolve this
-  honestly without fake typing.
+- An earlier local Python 3.14 environment exposed a NumPy-stub parsing mismatch while runtime and
+  CI remained Python 3.11. The locked Python 3.11 environment now resolves compatible NumPy stubs,
+  and `.python-version` plus Mypy target the declared Python 3.11 package floor without adding
+  suppressions or weakening checks.
 - The ordinary pytest command previously depended on the caller to clear ambient Alpaca variables.
   The engineering-standards boundary moves that denial into test bootstrap and retains per-test
   cleanup; universal process-level socket denial is still separate target work.
@@ -781,6 +781,19 @@ Local infrastructure-secret bootstrap candidate evidence on 2026-09-05:
 | `docker compose --env-file .env.example -f docker-compose.yml config --quiet` and `git diff --check` | PASS. |
 | Independent concurrency and security re-review | PASS after adding root-level process locking, unconditional descriptor cleanup, deterministic lock-contention proof, and interrupt recovery; no remaining blocking finding for local macOS/Linux filesystems. |
 
+Python 3.11 type-boundary candidate evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv sync --locked --extra dev --extra dashboard` and `uv lock --check` | PASS — all 105 locked packages resolved, the local package rebuilt, and the lockfile remained unchanged. |
+| `uv run --no-sync python --version` | PASS — Python 3.11.15 selected with the tracked `.python-version`. |
+| `.venv/bin/mypy --no-incremental src` | PASS — 51 source files checked with the configured Python 3.11 language target. |
+| Focused Alpaca-adapter, CLI, paper-safety, persistence, and development-environment tests | PASS — 152 tests and one upstream WebSocket deprecation warning. |
+| `.venv/bin/pytest -q` | PASS — 932 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 64.92 seconds. |
+| Ruff format/lint, Compose configuration, and `git diff --check` | PASS. |
+| Synthetic backtest and deterministic replay | PASS — after the awaitable wrappers changed, the synthetic backtest completed across all six legacy portfolios; replay processed nine events, one cycle, and three fake-broker submissions. |
+| Independent typing/code review | PASS — the coroutine wrappers preserve synchronous boundary behavior and accept general awaitables without casts, new suppressions, or weakened checks; no blocking finding remained. |
+
 No real credential file was read, no external data or broker connection was made, and no Alpaca
 paper or real-money order was submitted during this baseline.
 
@@ -799,7 +812,8 @@ Fresh PostgreSQL 16, target container runtime, image scan, SBOM, clean-package i
 demo, and backup/restore evidence remain unavailable until their implementation exists and the
 required services are available. GitHub Actions run `33967897130` passed for pushed commit
 `0cc83f8`; that run validates the existing PostgreSQL 15 and image boundaries plus the current
-runtime-settings and secret-file primitives. The local-bootstrap candidate has not been pushed yet.
+runtime-settings and secret-file primitives. Bootstrap commit `64f8f6d` is pushed, and its GitHub
+Actions run `33972146651` was still in progress when this type-boundary candidate was prepared.
 The target PostgreSQL 16 platform and every external adapter remain unvalidated;
 credentialed external validation is intentionally prohibited in this program.
 

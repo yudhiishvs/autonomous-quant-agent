@@ -90,6 +90,10 @@ def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
 
 
+async def _await_handler_result(value: Awaitable[None]) -> None:
+    await value
+
+
 def _never_stop() -> bool:
     return False
 
@@ -641,7 +645,7 @@ class AlpacaLiveBarSource:
                 raise AlpacaDataSourceError("Alpaca streamed data for an unrequested symbol")
             result = handler(observation)
             if inspect.isawaitable(result):
-                asyncio.run(result)
+                asyncio.run(_await_handler_result(result))
         except AlpacaDataSourceError:
             raise
         except Exception as exc:

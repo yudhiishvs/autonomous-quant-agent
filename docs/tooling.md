@@ -56,9 +56,9 @@ commands, but it must not replace or weaken them.
 ## Tool selection
 
 - Ruff is the sole formatter/primary linter; do not add a competing formatter.
-- Mypy is the sole type checker. Its current configured language level is 3.14 because of a
-  documented installed NumPy-stub parsing constraint, while runtime compatibility and CI
-  remain Python 3.11. Resolving that mismatch without suppression is planned work.
+- Mypy is the sole type checker and targets Python 3.11, matching the package floor, Ruff, Docker,
+  and CI. `.python-version` makes Python 3.11 the default interpreter family for clean local uv
+  environments, and the locked Python 3.11 dependency set is the canonical static-analysis path.
 - Pytest is the sole test runner. Use plugins only for distinct needs such as coverage or
   async behavior.
 - Alembic owns PostgreSQL schema evolution; `metadata.create_all` is not an operational
