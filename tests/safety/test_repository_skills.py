@@ -97,7 +97,9 @@ REQUIRED_AUTHORITY_PATHS = {
         "docs/incident_response.md",
         "docs/live_paper_runbook.md",
         "docs/market_data_runbook.md",
+        "docs/security_architecture.md",
         "docs/security-model.md",
+        "docs/threat_model.md",
     },
     "skeptical-code-review": {
         "ARCHITECTURE.md",

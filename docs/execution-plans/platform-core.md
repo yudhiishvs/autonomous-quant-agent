@@ -54,7 +54,7 @@ The Phase 0 current/target matrix is:
 | Subsystem | Current evidence | Current limitations | Reuse plan | New work | Security implications |
 | --- | --- | --- | --- | --- | --- |
 | Package and commands | Typed `adaptive_trader` package, generic canonical/configuration boundary, two legacy scripts, and both new aliases | Remaining platform modules and the composed operational commands are absent | Preserve every legacy import and command | Add each nonempty platform boundary and remaining CLI command with its owning service | New modules must not collapse service authority or expose broker objects |
-| Configuration and secrets | Strict legacy/collector settings, immutable experiment/profile composition, broker-free static validation, owner-private secret loading, and pure service-scoped runtime composition | Current collector secrets remain direct `APA_*` values; target service commands, least-privilege mounts, and bootstrap are absent | Reuse validation patterns only | Adopt file-backed runtime settings in service commands and add secret bootstrap without expanding static-profile authority | Reject unknown fields, unsafe files, generic SDK variables, out-of-scope references, and secret serialization |
+| Configuration and secrets | Strict legacy/collector settings, immutable experiment/profile composition, broker-free static validation, owner-private secret loading, pure service-scoped runtime composition, and local infrastructure-secret bootstrap | Current collector secrets remain direct `APA_*` values; target service commands and least-privilege mounts are absent | Reuse validation patterns only | Adopt file-backed runtime settings in service commands without expanding static-profile authority | Reject unknown fields, unsafe files, generic SDK variables, out-of-scope references, secret serialization, and unsafe bootstrap state |
 | Market data | Tested REST/WebSocket collector, normalization, overlap reconciliation, leases, and shutdown | Fixed 29-symbol universe, predecessor schema, checkpoint is not contiguous readiness | Adapt proven transport and lifecycle behavior behind generic contracts | Add canonical revisions, calendars, gaps, aggregation, basket watermarks, and datasets | Collector remains data-only, fixed-host, bounded, and unable to import trading code |
 | Persistence | SQLite legacy evidence plus PostgreSQL collector migration and transactions | No 25-table `aqa_*` schema, service roles, unified repositories, or audit chain | Preserve legacy/collector state and additive migration history | Add PostgreSQL 16 operational schema, grants, repositories, and SQLite test compatibility | Least-privilege roles, transactional invariants, append-only history, and tamper detection |
 | Scheduling and signals | Legacy cycle orchestration and strategy decisions | No durable slots, leases, registered proposal contract, or signed envelope | Characterize only compatibility-facing behavior | Add deterministic slots, recovery, entry points, built-ins, envelopes, and default-deny approval | Strategy code receives no broker credential or execution authority |
@@ -68,7 +68,8 @@ universe roles, strict experiment/profile loading, immutable `ExperimentSpec`/`P
 composition, broker-free static CLI validation through both new aliases, descriptor-relative
 owner-private secret loading, opaque secret-file references, and strict `RuntimeSettings` composed
 from an explicitly injected environment and exact service/mode authority matrix. The exact
-experiment and all three profiles are present. Service command adoption, local bootstrap, signed
+experiment and all three profiles are present. Local infrastructure-secret bootstrap is also
+implemented. Service command adoption, signed
 domain contracts, the complete `aqa_*` schema and roles, aggregation, basket watermarks, scheduler,
 jobs/outbox, private API, API-backed dashboard, unified audit chain, offline vertical slice, PG16
 restore proof, and the complete delivery/security harness remain absent.
@@ -471,9 +472,15 @@ commit count is planned.
   injected environment, enforce the exact six nonsecret defaults and seven file-reference names,
   reject generic Alpaca variables, confine paths, and select only mode-compatible service secrets
   without loading values or constructing clients.
-- [ ] `PARTIALLY_IMPLEMENTED` — Phase 1 repository hygiene, canonical/configuration boundaries,
-  profiles, static doctor, aliases, secret/runtime composition, and Python 3.11 typing are in place;
-  bootstrap, service command integration, mount isolation, and the remaining commands remain.
+- [x] `IMPLEMENTED_AND_VERIFIED` — local POSIX bootstrap creates the fixed eight database-role
+  passwords and operator token with cryptographic randomness, exact owner-only modes,
+  process/thread serialization, atomic no-overwrite publication, safe reruns, and path-only output;
+  it has no Alpaca credential, client, network, or order authority.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 1 project/domain skeleton, canonical identity/time/numeric
+  boundaries, experiment and profile configuration, static doctor and aliases, secret-file/runtime
+  composition, local bootstrap, repository hygiene, Python 3.11 typing, initial STRIDE register,
+  and current/target security architecture are in place. Later service command consumption,
+  process mounts, and feature-specific commands belong to their implementation phases.
 - [ ] `NOT_IMPLEMENTED` — Phase 2 platform persistence and audit chain.
 - [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
 - [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
@@ -516,14 +523,16 @@ commit count is planned.
   new platform.
 - Current collector secrets are direct `APA_*` environment values, while the new platform permits
   only file-backed `AQA_*_FILE` interfaces.
-- The existing migration uses schema `market_data` and PostgreSQL 15 CI. The target needs additive
-  `aqa_*` tables, roles, PostgreSQL 16 tests, and an upgrade path that does not discard collector
-  history.
+- The existing migration uses schema `market_data`; CI used PostgreSQL 15 at program start and is
+  now configured for a digest-pinned PostgreSQL 16 service with a runtime major assertion. The
+  target still needs additive `aqa_*` tables, roles, and an upgrade path that does not discard
+  collector history.
 - The current dashboard reads SQLite/artifacts directly, conflicting with the required API-only
   boundary, and Compose publishes its port on all host interfaces rather than loopback only.
-- The current project virtual environment is Python 3.14.3 and mypy currently targets 3.14 because
-  installed NumPy stubs use newer syntax; runtime and CI are Python 3.11. Phase 1 must resolve this
-  honestly without fake typing.
+- An earlier local Python 3.14 environment exposed a NumPy-stub parsing mismatch while runtime and
+  CI remained Python 3.11. The locked Python 3.11 environment now resolves compatible NumPy stubs,
+  and `.python-version` plus Mypy target the declared Python 3.11 package floor without adding
+  suppressions or weakening checks.
 - The ordinary pytest command previously depended on the caller to clear ambient Alpaca variables.
   The engineering-standards boundary moves that denial into test bootstrap and retains per-test
   cleanup; universal process-level socket denial is still separate target work.
@@ -592,6 +601,7 @@ Approved natural-change evidence:
 | Immutable universe and experiment configuration | `4eec0bfff423bf7130d30a75d674b4320dbea013`; 12 files; 1,927 insertions and 34 deletions | Author and committer timestamps are 2026-09-04 08:20:48 -0400; configured identity was used and no trailer was added. Independent design and security re-reviews found no remaining issue after hostile-YAML, numeric, path, session, and provenance corrections. The commit was fast-forward pushed, and GitHub Actions run `33872331527` passed at 2026-09-04 12:31:10 UTC. |
 | Repository workflow-skill validator correction | `0804b6f1e110fc028d0d15ba06c3fecc9b15674b`; three files; 385 insertions and 122 deletions | Author and committer timestamps are 2026-09-04 08:48:04 -0400; configured identity was used and no trailer was added. Adversarial re-review found no remaining high or medium issue after URI, tracked-inventory, multiline HTML, reference-link, path, and symlink corrections. The commit was fast-forward pushed, and GitHub Actions run `33874642483` passed at 2026-09-04 12:58:27 UTC. |
 | Platform profiles and broker-free static validation | `3b8a99560f7278b62a18738926987b9ec4487fca`; 16 files; 1,386 insertions and 72 deletions | Author and committer timestamps are 2026-09-04 10:14:50 -0400; configured identity was used and no trailer was added. Independent design, security, and final-diff reviews found no remaining high or medium issue after profile-extension identity, provider provenance, mode authority, canonical-path, and root-symlink corrections. The commit was fast-forward pushed, and GitHub Actions run `33882660354` passed at 2026-09-04 14:24:40 UTC. |
+| Platform domain foundations | `f28bc9156da17778a0170d89727038e0f0c9a563`; ten files; 598 insertions and 30 deletions | The maintainer authorized uninterrupted continuation on the feature branch. The configured identity and a `type: description` subject were used with no trailer. Independent review found no remaining blocker, high, or medium issue after semantic-UTC normalization, generic test inputs, early ID-prefix validation, embedded-symbol checks, and precise requirement wording. Publication and remote CI are recorded only after they occur. |
 
 The exact five-file candidate was overlaid on a disposable archive of `89a00dd` and checked on
 2026-09-03. The existing locked virtual environment was reused; no later worktree file was copied:
@@ -761,6 +771,55 @@ Runtime-settings and opaque-reference candidate evidence on 2026-09-04:
 | Local application and collector image builds | NOT RUN — Docker CLI was present, but the local daemon was unavailable; remote CI remains the applicable image-build evidence. |
 | Three independent security, API/maintainability, and final-diff reviews | PASS after correcting public construction guardrails, concurrent-file identity checks, Pydantic revalidation and schema modes, and filesystem-derived path limits; no confirmed high or medium source/test finding remains. |
 
+Local infrastructure-secret bootstrap candidate evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv sync --locked --extra dev --extra dashboard` and `uv lock --check` | PASS — all 105 locked packages resolved, 90 packages checked, and the lockfile remained unchanged. |
+| Whole-worktree Ruff format/lint and `mypy src` | PASS — 144 files formatted, lint clean, and 51 source files type-checked. |
+| Focused bootstrap repetition | PASS — all 45 bootstrap tests passed in ten consecutive runs after deterministic contention, interrupt-recovery, and interrupted-cleanup coverage was added. |
+| Exact documented security-test selection | PASS — 594 tests and one upstream WebSocket deprecation warning. |
+| `uv run --no-sync pytest -q` | PASS — 931 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 66.26 seconds. |
+| Focused platform branch coverage with `--cov-fail-under=85` | PASS — 522 tests and 88.92 percent branch-aware coverage for `adaptive_trader.platform`. |
+| Synthetic backtest and deterministic replay | PASS — the synthetic backtest completed across all six legacy portfolios; replay processed nine events, one cycle, and three fake-broker submissions. |
+| `docker compose --env-file .env.example -f docker-compose.yml config --quiet` and `git diff --check` | PASS. |
+| Independent concurrency and security re-review | PASS after adding root-level process locking, unconditional descriptor cleanup, deterministic lock-contention proof, and interrupt recovery; no remaining blocking finding for local macOS/Linux filesystems. |
+
+Python 3.11 type-boundary candidate evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| `uv sync --locked --extra dev --extra dashboard` and `uv lock --check` | PASS — all 105 locked packages resolved, the local package rebuilt, and the lockfile remained unchanged. |
+| `uv run --no-sync python --version` | PASS — Python 3.11.15 selected with the tracked `.python-version`. |
+| `.venv/bin/mypy --no-incremental src` | PASS — 51 source files checked with the configured Python 3.11 language target. |
+| Focused Alpaca-adapter, CLI, paper-safety, persistence, and development-environment tests | PASS — 152 tests and one upstream WebSocket deprecation warning. |
+| `.venv/bin/pytest -q` | PASS — 932 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 64.92 seconds. |
+| Ruff format/lint, Compose configuration, and `git diff --check` | PASS. |
+| Synthetic backtest and deterministic replay | PASS — after the awaitable wrappers changed, the synthetic backtest completed across all six legacy portfolios; replay processed nine events, one cycle, and three fake-broker submissions. |
+| Independent typing/code review | PASS — the coroutine wrappers preserve synchronous boundary behavior and accept general awaitables without casts, new suppressions, or weakened checks; no blocking finding remained. |
+
+Platform domain and initial security-documentation evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| Whole-worktree Ruff format and lint checks | PASS — 152 files already formatted and lint clean. |
+| `.venv/bin/mypy --no-incremental src` | PASS — 54 source files checked with Python 3.11. |
+| Focused domain/configuration architecture and domain behavior selection | PASS — 54 tests after semantic-UTC, deterministic-ID, Decimal-quantization, exception-compatibility, dependency, and experiment-independence corrections. |
+| Focused security-documentation and repository-authority selection | PASS — 34 tests covering the required STRIDE inventories/fields, exact runtime secret interfaces, authority registration, and repository-local skill contracts. |
+| `.venv/bin/pytest -q` | PASS — 987 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 64.94 seconds. |
+| Synthetic backtest, deterministic replay, and Compose configuration | PASS — the backtest completed all six deterministic portfolios; replay processed nine events, one cycle, and three fake-broker submissions; Compose rendered without starting services. |
+| Independent domain and security-documentation reviews | PASS after correcting semantic UTC handling, generic fixture inputs, validation precedence, embedded experiment-literal detection, current/target redaction scope, exact secret interfaces, process denials, dashboard authority wording, artifact-code threats, and evidence-status reconciliation. Re-review found no remaining blocker, high, or medium issue. |
+
+PostgreSQL 16 CI candidate evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| `docker buildx imagetools inspect postgres:16` | PASS — Docker Hub reported official OCI index `sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94`, version 16.15, with a Linux AMD64 manifest. |
+| Focused CI-contract and static-safety tests | PASS — nine tests locally; the broader safety selection passed 46 tests in the independent implementation run. |
+| Whole-worktree Ruff format/lint and full-source Mypy | PASS — 153 files formatted, lint clean, and 54 source files type-checked. |
+| Local PostgreSQL 16 service execution | NOT RUN — the local Docker daemon remains unavailable; the workflow itself asserts the runtime server major before migration. |
+| Independent CI security and maintainability review | PASS after current-state documentation was corrected; the digest, GitHub service-container context, quoted shell boundary, validation ordering, and credential-free behavior were verified with no blocker or high finding. |
+
 No real credential file was read, no external data or broker connection was made, and no Alpaca
 paper or real-money order was submitted during this baseline.
 
@@ -768,17 +827,20 @@ paper or real-money order was submitted during this baseline.
 
 Current outcome: `PARTIALLY_IMPLEMENTED`.
 
-Phase 0 and the Phase 1 canonical, universe, experiment, profile, static-validation, secret-file,
-and service-scoped runtime-setting boundaries are implemented with recorded evidence. The existing
+Phases 0 and 1 are implemented with recorded evidence: the generic project/domain boundary,
+canonical identity/time/numeric primitives, universe, experiment, profiles, static validation,
+secret-file and service-scoped runtime settings, local bootstrap, initial security architecture,
+and STRIDE register. The existing
 collector and legacy regression suite provide reusable code and characterization, but they do not
-satisfy the complete generic platform contract. Phase 1 bootstrap, service command/mount
-integration, and remaining command composition plus Phases 2–10 remain as listed in the progress
-checklist.
+satisfy the complete generic platform contract. Service command/mount integration and remaining
+feature commands are assigned to their dependent later phases; Phases 2–10 remain as listed in the
+progress checklist.
 Fresh PostgreSQL 16, target container runtime, image scan, SBOM, clean-package install, twice-run
 demo, and backup/restore evidence remain unavailable until their implementation exists and the
-required services are available. GitHub Actions run `33888970372` passed for pushed commit
-`aab1ab5`; that run validates the existing PostgreSQL 15 and image boundaries plus the secret-file
-primitive. The current runtime-settings candidate has local evidence above but no remote run yet.
+required services are available. GitHub Actions run `33972693704` passed for pushed commit
+`ba1a3ca`; that run validates the existing PostgreSQL 15 and image boundaries plus the Phase 1
+configuration, secret, bootstrap, and Python 3.11 foundations. Domain commit `f28bc91` remains
+local until the reviewed Phase 1 boundary is published.
 The target PostgreSQL 16 platform and every external adapter remain unvalidated;
 credentialed external validation is intentionally prohibited in this program.
 

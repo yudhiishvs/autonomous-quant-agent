@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:15@sha256:f30e3de0ac9cc938dac627ef2231099867c694b5f949fadb924c8c977428c399
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
         env:
           POSTGRES_USER: collector_test
           POSTGRES_PASSWORD: collector_test
@@ -83,6 +83,17 @@ jobs:
 
       - name: Run type checking
         run: uv run --no-sync mypy src
+
+      - name: Verify PostgreSQL server major version
+        shell: bash
+        run: |
+          actual_major="$(
+            docker exec "${{ job.services.postgres.id }}" \
+              psql --username=collector_test --dbname=collector_test \
+              --tuples-only --no-align \
+              --command="SELECT current_setting('server_version_num')::integer / 10000"
+          )"
+          test "${actual_major}" = "16"
 
       - name: Validate PostgreSQL migrations
         run: uv run --no-sync alembic upgrade head

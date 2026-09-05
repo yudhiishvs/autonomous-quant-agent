@@ -61,7 +61,7 @@ the dependency direction in `../ARCHITECTURE.md` when added.
 
 | Boundary | Untrusted input | Current transport and control |
 | --- | --- | --- |
-| Configuration and environment | YAML values, paths, mode flags, URLs, and credential-file presence | Strict YAML parsing, explicit injected-environment snapshots, exact service/secret scopes, opaque file references, and the owner-private loader are implemented; service commands, bootstrap, and container mounts are not |
+| Configuration and environment | YAML values, paths, mode flags, URLs, and credential-file presence | Strict YAML parsing, explicit injected-environment snapshots, exact service/secret scopes, opaque file references, the owner-private loader, and local infrastructure-secret bootstrap are implemented; service commands and container mounts are not |
 | Standalone collector Alpaca data | REST pages, stream frames, timestamps, symbols, numeric values, rate-limit metadata, disconnects, and error categories | Direct HTTPS/WSS to fixed official data hosts using the collector data-key namespace, certificate/hostname verification, explicit timeouts, bounds, and shared canonical validation |
 | Legacy Alpaca market data | Historical/stream SDK responses, account-scoped feed access, timestamps, bars, disconnects, and SDK exceptions | Locked `alpaca-py` clients using the legacy paper credential object/namespace; feed allowlist, bounded reconnects, completed-bar checks, durable bar storage, and redacted errors; it is not process-credential-isolated from legacy paper execution |
 | Legacy Yahoo compatibility | Configured tickers/date bounds and yfinance responses | Optional `legacy-yahoo` dependency; normalization/empty-series validation applies, but fixed-host and explicit transport-timeout controls are not implemented |
@@ -92,6 +92,10 @@ not an egress firewall.
 - Platform runtime composition accepts only an explicitly injected mapping, rejects generic Alpaca
   credential variables by presence, validates six nonsecret settings, and selects opaque
   secret-file references from an exact service/mode matrix without reading their contents.
+- Local bootstrap creates only eight database-role passwords and one operator token beneath a
+  current-user-owned application root. It serializes threads and processes, publishes owner-only
+  files without replacement, preserves valid existing files, rejects unsafe or unresolved state,
+  and emits only relative file names. It never reads or creates Alpaca credentials.
 - Legacy broker construction fixes `paper=True`; static tests reject live endpoints,
   generic credential names, and alternate live broker classes.
 - Durable intent precedes submission; deterministic client IDs and reconciliation contain
@@ -118,6 +122,13 @@ path; loading still requires an explicit call at the future adapter boundary. Ne
 inspects ambient process state, persists a value, or creates a client. No runtime service command
 consumes the loader yet. Installed in-process Python remains trusted; process and mount isolation,
 not object-construction tricks, is the credential security boundary.
+
+When run from the repository root as documented, the POSIX-only
+`aqa secrets bootstrap-local` command writes generated local infrastructure secrets to the ignored
+`secrets/` directory beneath that current working directory. Those values intentionally persist on
+disk for later database and API startup; they are never returned through the secret loader,
+configuration models, or CLI output during bootstrap. Existing files are validated but never
+overwritten.
 
 PostgreSQL should be private and encrypted in transit; backups and encryption at rest are
 operator/provider responsibilities. SQLite, runtime logs, downloaded data, and outputs are
@@ -164,9 +175,12 @@ submission disabled, no default path submits.
 - Every tracked platform profile disables submission. Static `aqa doctor` and
   `aqa config validate` use a mandatory experiment hash pin and reject symlinked configuration
   paths, invalid mode/adapter/provider combinations, and reserved profile-name mismatches without
-  reading credentials or constructing external clients. Legacy paper operation additionally
-  requires an explicit command, exact acknowledgement, paper account verification, fresh state,
-  open session, risk approval, and clean reconciliation.
+  reading credentials or constructing external clients. `aqa secrets bootstrap-local` is the only
+  current platform command with write authority and confines that authority to the fixed `secrets/`
+  inventory beneath the current working directory; the directory is ignored when invoked from the
+  repository root as documented. Legacy paper operation additionally requires an explicit command,
+  exact acknowledgement, paper account verification, fresh state, open session, risk approval, and
+  clean reconciliation.
 - Current logs and durable events support local diagnosis with redaction. Credential rotation,
   incident containment, and reporting follow `../SECURITY.md` and the existing runbooks.
 - Database access policy, TLS, backup retention, encryption at rest, host firewalling, and process
@@ -178,8 +192,13 @@ submission disabled, no default path submits.
 
 - Credential-based Alpaca behavior and hosted database operation have not been validated.
 - Legacy environment-variable secrets remain visible to their processes. Platform runtime settings
-  select service-scoped opaque references, but service command integration, least-privilege mounts,
-  local bootstrap, and full sentinel integration are `NOT_IMPLEMENTED`.
+  select service-scoped opaque references and local infrastructure bootstrap is available, but
+  service command integration, least-privilege mounts, and full sentinel integration are
+  `NOT_IMPLEMENTED`.
+- Bootstrap is supported on local macOS/Linux filesystems with the required descriptor-relative
+  operations and advisory `flock` semantics. Reported API or lock failures fail closed; ineffective
+  or node-local locking on other filesystems cannot be detected, and host-level compromise remains
+  outside this boundary.
 - The current dashboard reads SQLite directly rather than through an authenticated API.
 - The local dashboard launcher removes legacy paper variables but can inherit data-provider and
   database variables from its parent environment; code does not consume them, but least-privilege

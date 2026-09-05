@@ -28,6 +28,7 @@ its `install` target uses pip and it does not yet provide the complete harness r
 | Lint | `uv run --no-sync ruff check .` |
 | Type check | `uv run --no-sync mypy src` |
 | Offline tests | `uv run --no-sync pytest -q` |
+| Local infrastructure-secret bootstrap | `uv run --no-sync aqa secrets bootstrap-local` |
 | Branch coverage | `uv run --no-sync pytest --cov=adaptive_trader --cov-branch --cov-report=term-missing --cov-report=xml` |
 | Synthetic regression | `uv run --no-sync python -m adaptive_trader.cli backtest --config configs/backtest.yaml --synthetic` |
 | Replay regression | `uv run --no-sync python -m adaptive_trader.cli replay --config configs/replay.yaml` |
@@ -55,9 +56,9 @@ commands, but it must not replace or weaken them.
 ## Tool selection
 
 - Ruff is the sole formatter/primary linter; do not add a competing formatter.
-- Mypy is the sole type checker. Its current configured language level is 3.14 because of a
-  documented installed NumPy-stub parsing constraint, while runtime compatibility and CI
-  remain Python 3.11. Resolving that mismatch without suppression is planned work.
+- Mypy is the sole type checker and targets Python 3.11, matching the package floor, Ruff, Docker,
+  and CI. `.python-version` makes Python 3.11 the default interpreter family for clean local uv
+  environments, and the locked Python 3.11 dependency set is the canonical static-analysis path.
 - Pytest is the sole test runner. Use plugins only for distinct needs such as coverage or
   async behavior.
 - Alembic owns PostgreSQL schema evolution; `metadata.create_all` is not an operational
@@ -82,9 +83,9 @@ The following tools are intentionally deferred, not silently treated as unnecess
   not satisfy the required workload contract.
 
 The local Docker client is installed, but the daemon was unavailable during Phase 0, so fresh
-local image and PostgreSQL 16 runtime validation remain unavailable. GitHub Actions currently
-verifies the existing PostgreSQL 15 and image boundaries. These are environment limitations, not
-reasons to select a different build or database tool.
+local image and PostgreSQL 16 runtime validation remain unavailable. GitHub Actions is currently
+configured to verify the PostgreSQL 16 and existing image boundaries. These are environment
+limitations, not reasons to select a different build or database tool.
 
 Add the smallest nonredundant tool set through the dependency and review policies; never invent
 an action revision, image digest, scan result, or vulnerability-free claim.
