@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a reproducible correctness or reliability problem using safe synthetic data.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Do not include credentials, account identifiers, private market data, or vulnerability
+        details. Use the private process in SECURITY.md for security reports.
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release version or full commit hash where the problem occurs.
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Runtime mode
+      options:
+        - Offline fixture
+        - Shadow
+        - Paper (no secret values)
+        - Legacy prototype
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: Include concise, redacted output and the first incorrect state.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction
+      description: Provide minimal commands or code using synthetic fixtures and fake credentials.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety confirmation
+      options:
+        - label: I removed all credentials, tokens, private URLs, and account identifiers.
+          required: true
+        - label: This report does not describe an unpatched security vulnerability.
+          required: true
