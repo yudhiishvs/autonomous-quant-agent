@@ -27,13 +27,24 @@ from adaptive_trader.platform.config import (
     load_runtime_settings,
 )
 from adaptive_trader.platform.domain import (
+    AuditEvent,
+    AuditPayload,
+    AuditStreamHead,
+    AuditVerificationReport,
+    AuditWriter,
     DecimalRounding,
     DeterministicId,
+    audit_event_hash,
     quantize_decimal,
     require_finite_decimal,
     require_utc_instant,
 )
-from adaptive_trader.platform.errors import DomainValidationError
+from adaptive_trader.platform.errors import (
+    AuditIntegrityError,
+    AuditPersistenceError,
+    AuditValidationError,
+    DomainValidationError,
+)
 from adaptive_trader.platform.hashing import sha256_hex
 from adaptive_trader.platform.security import (
     LOCAL_BOOTSTRAP_FILENAMES,
@@ -50,6 +61,14 @@ from adaptive_trader.platform.universe import SymbolRole, UniverseSpec
 
 __all__ = [
     "LOCAL_BOOTSTRAP_FILENAMES",
+    "AuditEvent",
+    "AuditIntegrityError",
+    "AuditPayload",
+    "AuditPersistenceError",
+    "AuditStreamHead",
+    "AuditValidationError",
+    "AuditVerificationReport",
+    "AuditWriter",
     "BrokerAdapter",
     "CanonicalizationError",
     "DecimalRounding",
@@ -82,6 +101,7 @@ __all__ = [
     "StoragePolicySpec",
     "SymbolRole",
     "UniverseSpec",
+    "audit_event_hash",
     "bootstrap_local_secrets",
     "canonical_json_bytes",
     "load_experiment",

@@ -69,7 +69,6 @@ Inject these values through the runtime host's secret/configuration system. Neve
 | `APA_ALPACA_DATA_API_KEY` | `backfill`, `run` | Dedicated collector API key |
 | `APA_ALPACA_DATA_SECRET_KEY` | `backfill`, `run` | Dedicated collector secret |
 | `APA_MARKET_DATA_DATABASE_URL` | `status`, `ready`, `backfill`, `run` | Least-privilege collector PostgreSQL URL using the psycopg driver |
-| `APA_MARKET_DATA_MIGRATION_DATABASE_URL` | `migrate` only | Separate schema-owner URL; never inject it into the long-running collector |
 | `APA_MARKET_DATA_HISTORY_START` | first run or `backfill` without `--start` | ISO date or timezone-aware initial boundary; required whenever any collection checkpoint is missing |
 
 Use a database URL shaped like:
@@ -105,9 +104,22 @@ Choose the initial history boundary deliberately. A date requests every eligible
 Apply migrations before starting any collector process:
 
 ~~~bash
-uv run --no-sync adaptive-market-data migrate
+uv run --no-sync adaptive-market-data migrate \
+  --database-url-file /run/secrets/aqa-database-url \
+  --bootstrap-admin-database-url-file /run/secrets/aqa-bootstrap-admin-database-url \
+  --application-root /srv/autonomous-quant-agent
 uv run --no-sync adaptive-market-data status
 ~~~
+
+Both URL files must be owner-private. `--database-url-file` contains the target URL, using the
+validated legacy object owner only when upgrading a pre-governance database. The distinct
+`--bootstrap-admin-database-url-file` is required only for that legacy transition (or recovery of
+an interrupted transition) and is used solely to remove the temporary cluster-role membership;
+omit it for a fresh or already governed database. The application root must contain the
+owner-private platform role-password files. The migration command derives `aqa_migrate_login`
+from those inputs, uses the legacy owner only through the governance migration, and applies every
+governed descendant through the fixed non-superuser migration login. It never loads Alpaca
+credentials.
 
 `status` checks storage and never requires a collector to be active. The container health check uses the collector's `ready` subcommand, which performs an indexed ownership probe and succeeds only while the canonical singleton lease and its exact ingestion run are active; it does not repeatedly count the growing bar tables.
 
@@ -129,12 +141,15 @@ uv run --no-sync adaptive-market-data run
 
 Alternatively, on a truly empty target database, `run --start-if-empty 2025-01-02` performs the catch-up before opening the stream. That option applies only while one or more required coverage checkpoints are missing. Once all 29 checkpoints exist, restarts derive their catch-up range from the database.
 
-For the container path, migrate once and then start the restart-managed collector:
+For the container path, migrate once from the trusted deployment host and then start the
+restart-managed collector. Do not inject bootstrap-owner or migration credentials into the
+long-running collector container:
 
 ~~~bash
-docker compose --profile market-data run --rm \
-  -e APA_MARKET_DATA_MIGRATION_DATABASE_URL \
-  market-data-collector python -m adaptive_trader.collection migrate
+uv run --no-sync adaptive-market-data migrate \
+  --database-url-file /run/secrets/aqa-database-url \
+  --bootstrap-admin-database-url-file /run/secrets/aqa-bootstrap-admin-database-url \
+  --application-root /srv/autonomous-quant-agent
 docker compose --profile market-data up -d market-data-collector
 docker compose --profile market-data logs -f market-data-collector
 ~~~
@@ -169,7 +184,7 @@ Use `adaptive-market-data status` for a credential-free JSON snapshot of current
 
 | Symptom | Safe action |
 | --- | --- |
-| Migration mismatch | Stop the collector, back up the database, run `adaptive-market-data migrate`, then restart |
+| Migration mismatch | Stop the collector, back up the database, run `adaptive-market-data migrate --database-url-file OWNER_PRIVATE_FILE --application-root TRUSTED_ROOT` (adding `--bootstrap-admin-database-url-file ADMIN_FILE` only for a legacy/interrupted handoff), then restart |
 | Database unavailable | Restore database service first; the collector fails closed and later resumes from checkpoints |
 | Lease unavailable | Find the existing collector; do not bypass the lease. Wait for a confirmed stale lease to expire before restarting |
 | Repeated WebSocket restarts | Keep the process running if REST reconciliation remains healthy; inspect provider/network status and collector events |

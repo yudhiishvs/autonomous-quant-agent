@@ -43,6 +43,7 @@ SERVICE_SOURCES = {
     RuntimeService.STRATEGY_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.EXECUTION_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.DASHBOARD: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.AUDIT_VERIFIER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.MARKET_DATA_LIVE: frozenset(
         {
             SecretFileVariable.DATABASE_URL,
@@ -76,6 +77,7 @@ SERVICE_MODES = {
     RuntimeService.STRATEGY_WORKER: frozenset(ExecutionMode),
     RuntimeService.EXECUTION_WORKER: frozenset({ExecutionMode.OFFLINE}),
     RuntimeService.DASHBOARD: frozenset(ExecutionMode),
+    RuntimeService.AUDIT_VERIFIER: frozenset(ExecutionMode),
     RuntimeService.MARKET_DATA_LIVE: frozenset({ExecutionMode.SHADOW, ExecutionMode.PAPER}),
     RuntimeService.PAPER_EXECUTION_WORKER: frozenset({ExecutionMode.PAPER}),
 }
@@ -156,6 +158,7 @@ def test_runtime_service_and_setting_inventories_are_exact() -> None:
         "strategy-worker",
         "execution-worker",
         "dashboard",
+        "audit-verifier",
         "market-data-live",
         "paper-execution-worker",
     }

@@ -44,6 +44,7 @@ jobs:
       APA_TEST_POSTGRES_URL: >-
         postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
       APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE: "YES"
+      APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES: "YES"
 
     steps:
       - name: Check out repository
@@ -95,8 +96,10 @@ jobs:
           )"
           test "${actual_major}" = "16"
 
-      - name: Validate PostgreSQL migrations
-        run: uv run --no-sync alembic upgrade head
+      - name: Validate PostgreSQL role bootstrap and migrations
+        run: >-
+          uv run --no-sync pytest -q
+          tests/integration/test_platform_postgres_roles.py
 
       - name: Run offline test suite
         run: uv run --no-sync pytest -q

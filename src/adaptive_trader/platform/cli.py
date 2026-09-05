@@ -12,16 +12,27 @@ import typer
 from adaptive_trader.platform.config import (
     ExperimentConfigError,
     PlatformConfig,
+    RuntimeService,
     load_platform_config,
+    load_runtime_settings,
+)
+from adaptive_trader.platform.domain import AuditVerificationReport
+from adaptive_trader.platform.errors import (
+    AuditIntegrityError,
+    AuditPersistenceError,
+    AuditValidationError,
+    RuntimeSettingsError,
 )
 from adaptive_trader.platform.security import (
     LocalSecretBootstrapError,
     LocalSecretBootstrapResult,
     bootstrap_local_secrets,
 )
+from adaptive_trader.platform.storage import AuditRepository, create_platform_read_only_engine
 
 DEFAULT_CONFIG_ROOT = Path("configs")
 DEFAULT_PROFILE = Path("platform/offline.yaml")
+DEFAULT_RUNTIME_CONFIG = DEFAULT_CONFIG_ROOT / DEFAULT_PROFILE
 
 app = typer.Typer(
     name="aqa",
@@ -47,8 +58,17 @@ secrets_app = typer.Typer(
     rich_markup_mode=None,
     pretty_exceptions_enable=False,
 )
+audit_app = typer.Typer(
+    name="audit",
+    help="Verify immutable platform audit evidence.",
+    no_args_is_help=True,
+    add_completion=False,
+    rich_markup_mode=None,
+    pretty_exceptions_enable=False,
+)
 app.add_typer(config_app, name="config")
 app.add_typer(secrets_app, name="secrets")
+app.add_typer(audit_app, name="audit")
 
 
 def _config_root(path: Path) -> Path:
@@ -127,6 +147,61 @@ def _emit_bootstrap_result(result: LocalSecretBootstrapResult, *, json_output: b
         typer.echo(f"skipped: {path}")
 
 
+def _audit_environment(
+    *,
+    profile: Path,
+    database_url_file: Path | None,
+) -> dict[str, str]:
+    environment = {"AQA_CONFIG": profile.as_posix()}
+    if database_url_file is not None:
+        environment["AQA_DATABASE_URL_FILE"] = database_url_file.as_posix()
+    return environment
+
+
+def _audit_success_payload(report: AuditVerificationReport) -> dict[str, object]:
+    if type(report) is not AuditVerificationReport:
+        raise AuditIntegrityError("audit verification returned an invalid report")
+    heads = report.stream_heads
+    return {
+        "check": "audit",
+        "event_count": report.event_count,
+        "status": "ok",
+        "stream_count": len(heads),
+        "stream_heads": [
+            {
+                "event_hash": head.event_hash,
+                "sequence": head.sequence,
+                "stream_id": head.stream_id,
+            }
+            for head in heads
+        ],
+    }
+
+
+def _emit_audit_success(report: AuditVerificationReport, *, json_output: bool) -> None:
+    payload = _audit_success_payload(report)
+    if json_output:
+        typer.echo(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+        return
+    typer.echo(
+        f"audit verify: ok; streams={payload['stream_count']}; events={payload['event_count']}"
+    )
+
+
+def _emit_audit_failure(*, json_output: bool) -> None:
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {"check": "audit", "error": "audit verification failed", "status": "error"},
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            err=True,
+        )
+        return
+    typer.echo("audit verify: error: audit verification failed", err=True)
+
+
 @app.command("doctor")
 def doctor(
     profile: Annotated[
@@ -202,6 +277,85 @@ def bootstrap_local(
             typer.echo("secrets bootstrap-local: error: local secret bootstrap failed", err=True)
         raise typer.Exit(code=2) from None
     _emit_bootstrap_result(result, json_output=json_output)
+
+
+@audit_app.command("verify")
+def verify_audit(
+    profile: Annotated[
+        Path,
+        typer.Option(
+            "--config",
+            help="Profile path beneath the application root (default: offline).",
+        ),
+    ] = DEFAULT_RUNTIME_CONFIG,
+    database_url_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--database-url-file",
+            help="Opaque database URL secret-file reference beneath the application root.",
+        ),
+    ] = None,
+    application_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--application-root",
+            help="Trusted application root containing configuration and runtime storage.",
+        ),
+    ] = None,
+    stream_id: Annotated[
+        str | None,
+        typer.Option("--stream", help="Verify only one complete audit stream."),
+    ] = None,
+    expected_sequence: Annotated[
+        int | None,
+        typer.Option(
+            "--expected-sequence",
+            help="Expected terminal sequence for the requested stream.",
+        ),
+    ] = None,
+    expected_hash: Annotated[
+        str | None,
+        typer.Option(
+            "--expected-hash",
+            help="Expected terminal event hash for the requested stream.",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit stable machine-readable output."),
+    ] = False,
+) -> None:
+    """Verify audit payloads, IDs, hashes, sequence continuity, and stream heads."""
+
+    try:
+        selected_root = _config_root(Path.cwd() if application_root is None else application_root)
+        settings = load_runtime_settings(
+            _audit_environment(profile=profile, database_url_file=database_url_file),
+            service=RuntimeService.AUDIT_VERIFIER,
+            application_root=selected_root,
+        )
+        engine = create_platform_read_only_engine(
+            settings,
+            application_name="aqa-audit-verify",
+        )
+        try:
+            report = AuditRepository(engine).verify(
+                stream_id=stream_id,
+                expected_sequence=expected_sequence,
+                expected_hash=expected_hash,
+            )
+        finally:
+            engine.dispose()
+    except (
+        AuditIntegrityError,
+        AuditPersistenceError,
+        AuditValidationError,
+        ExperimentConfigError,
+        RuntimeSettingsError,
+    ):
+        _emit_audit_failure(json_output=json_output)
+        raise typer.Exit(code=2) from None
+    _emit_audit_success(report, json_output=json_output)
 
 
 def main() -> None:
