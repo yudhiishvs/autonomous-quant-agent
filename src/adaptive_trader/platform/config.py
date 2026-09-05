@@ -6,22 +6,25 @@ import hmac
 import os
 import re
 import stat
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from pathlib import Path, PurePosixPath
-from typing import Literal, Self, cast
+from typing import Any, Literal, Never, Self, SupportsIndex, cast
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     ValidationError,
     ValidationInfo,
     field_validator,
     model_validator,
 )
+from pydantic.json_schema import JsonSchemaValue
 from yaml.constructor import ConstructorError
 from yaml.events import (
     AliasEvent,
@@ -34,6 +37,7 @@ from yaml.nodes import MappingNode
 
 from adaptive_trader.platform.canonical import CanonicalizationError
 from adaptive_trader.platform.hashing import sha256_hex
+from adaptive_trader.platform.security import SecretFileReference, SecretFileVariable
 from adaptive_trader.platform.universe import UniverseSpec, _normalize_symbol_tuple
 
 _MAX_CONFIG_BYTES = 65_536
@@ -50,6 +54,14 @@ _RELATIVE_CONFIG_PATH_PATTERN = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$",
     flags=re.ASCII,
 )
+_RUNTIME_HOST_LABEL_PATTERN = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$",
+    flags=re.ASCII,
+)
+_CONCRETE_PATH_TYPE = type(Path())
+_RUNTIME_SETTINGS_CONSTRUCTION_TOKEN = object()
+_MAX_RUNTIME_PATH_BYTES = 4_096
+_MAX_RUNTIME_PATH_COMPONENT_BYTES = 255
 
 
 class ExperimentConfigError(ValueError):
@@ -1078,3 +1090,732 @@ def load_platform_config(
     if composition_failed or platform_config is None:
         raise ExperimentConfigError("platform configuration could not be safely composed")
     return platform_config
+
+
+class RuntimeService(StrEnum):
+    """Closed process identities used to enforce least-privilege startup settings."""
+
+    MIGRATE = "migrate"
+    CONTROL_API = "control-api"
+    MARKET_DATA_WORKER = "market-data-worker"
+    SCHEDULER_WORKER = "scheduler-worker"
+    STRATEGY_WORKER = "strategy-worker"
+    EXECUTION_WORKER = "execution-worker"
+    DASHBOARD = "dashboard"
+    MARKET_DATA_LIVE = "market-data-live"
+    PAPER_EXECUTION_WORKER = "paper-execution-worker"
+
+
+class PaperOrderEnablement(StrEnum):
+    """Derived paper-order acknowledgement without retaining its raw environment value."""
+
+    DISABLED = "disabled"
+    ACKNOWLEDGED = "acknowledged"
+
+
+class RuntimeSettingsError(ValueError):
+    """Raised when a service runtime cannot be composed through the safe boundary."""
+
+
+_NONSECRET_RUNTIME_VARIABLES = (
+    "AQA_CONFIG",
+    "AQA_ARTIFACT_ROOT",
+    "AQA_API_BASE_URL",
+    "AQA_LOG_FORMAT",
+    "AQA_ENABLE_PAPER_ORDERS",
+    "AQA_API_DOCS_ENABLED",
+)
+_FORBIDDEN_ALPACA_VARIABLES = frozenset(
+    {
+        "APCA_API_KEY_ID",
+        "APCA_API_SECRET_KEY",
+        "APCA_API_BASE_URL",
+        "ALPACA_API_KEY",
+        "ALPACA_SECRET_KEY",
+    }
+)
+_RUNTIME_DEFAULTS = {
+    "AQA_CONFIG": "configs/platform/offline.yaml",
+    "AQA_ARTIFACT_ROOT": "outputs/artifacts",
+    "AQA_API_BASE_URL": "http://127.0.0.1:8000",
+    "AQA_LOG_FORMAT": "json",
+    "AQA_ENABLE_PAPER_ORDERS": "NO",
+    "AQA_API_DOCS_ENABLED": "NO",
+}
+_SERVICE_SECRET_SOURCES = {
+    RuntimeService.MIGRATE: frozenset({SecretFileVariable.DATABASE_URL}),
+    RuntimeService.CONTROL_API: frozenset(
+        {SecretFileVariable.DATABASE_URL, SecretFileVariable.OPERATOR_TOKEN}
+    ),
+    RuntimeService.MARKET_DATA_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
+    RuntimeService.SCHEDULER_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
+    RuntimeService.STRATEGY_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
+    RuntimeService.EXECUTION_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
+    RuntimeService.DASHBOARD: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.MARKET_DATA_LIVE: frozenset(
+        {
+            SecretFileVariable.DATABASE_URL,
+            SecretFileVariable.ALPACA_DATA_API_KEY,
+            SecretFileVariable.ALPACA_DATA_SECRET_KEY,
+        }
+    ),
+    RuntimeService.PAPER_EXECUTION_WORKER: frozenset(
+        {
+            SecretFileVariable.DATABASE_URL,
+            SecretFileVariable.ALPACA_PAPER_API_KEY,
+            SecretFileVariable.ALPACA_PAPER_SECRET_KEY,
+            SecretFileVariable.PAPER_ACCOUNT_ID_HASH,
+        }
+    ),
+}
+_SERVICE_BASE_REQUIRED_SOURCES = {
+    RuntimeService.MIGRATE: frozenset({SecretFileVariable.DATABASE_URL}),
+    RuntimeService.CONTROL_API: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.MARKET_DATA_WORKER: frozenset(),
+    RuntimeService.SCHEDULER_WORKER: frozenset(),
+    RuntimeService.STRATEGY_WORKER: frozenset(),
+    RuntimeService.EXECUTION_WORKER: frozenset(),
+    RuntimeService.DASHBOARD: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.MARKET_DATA_LIVE: frozenset(
+        {
+            SecretFileVariable.ALPACA_DATA_API_KEY,
+            SecretFileVariable.ALPACA_DATA_SECRET_KEY,
+        }
+    ),
+    RuntimeService.PAPER_EXECUTION_WORKER: frozenset(
+        {
+            SecretFileVariable.ALPACA_PAPER_API_KEY,
+            SecretFileVariable.ALPACA_PAPER_SECRET_KEY,
+            SecretFileVariable.PAPER_ACCOUNT_ID_HASH,
+        }
+    ),
+}
+_SERVICE_MODES = {
+    RuntimeService.MIGRATE: frozenset(ExecutionMode),
+    RuntimeService.CONTROL_API: frozenset(ExecutionMode),
+    RuntimeService.MARKET_DATA_WORKER: frozenset({ExecutionMode.OFFLINE}),
+    RuntimeService.SCHEDULER_WORKER: frozenset(ExecutionMode),
+    RuntimeService.STRATEGY_WORKER: frozenset(ExecutionMode),
+    RuntimeService.EXECUTION_WORKER: frozenset({ExecutionMode.OFFLINE}),
+    RuntimeService.DASHBOARD: frozenset(ExecutionMode),
+    RuntimeService.MARKET_DATA_LIVE: frozenset({ExecutionMode.SHADOW, ExecutionMode.PAPER}),
+    RuntimeService.PAPER_EXECUTION_WORKER: frozenset({ExecutionMode.PAPER}),
+}
+_SECRET_FIELD_BY_SOURCE = {
+    SecretFileVariable.DATABASE_URL: "database_url_file",
+    SecretFileVariable.OPERATOR_TOKEN: "operator_token_file",
+    SecretFileVariable.ALPACA_DATA_API_KEY: "alpaca_data_api_key_file",
+    SecretFileVariable.ALPACA_DATA_SECRET_KEY: "alpaca_data_secret_key_file",
+    SecretFileVariable.ALPACA_PAPER_API_KEY: "alpaca_paper_api_key_file",
+    SecretFileVariable.ALPACA_PAPER_SECRET_KEY: "alpaca_paper_secret_key_file",
+    SecretFileVariable.PAPER_ACCOUNT_ID_HASH: "paper_account_id_hash_file",
+}
+
+
+def _runtime_config_path(value: object) -> str:
+    failed = False
+    validated = ""
+    try:
+        validated = _validate_relative_config_path(value, field_name="AQA_CONFIG")
+    except ValueError:
+        failed = True
+    if failed:
+        raise RuntimeSettingsError("AQA_CONFIG must be a canonical path beneath configs")
+    if not validated.startswith("configs/") or validated == "configs/":
+        raise RuntimeSettingsError("AQA_CONFIG must be a canonical path beneath configs")
+    return validated
+
+
+def _runtime_base_url(value: object) -> str:
+    if type(value) is not str or not value or len(value) > 2_048:
+        raise RuntimeSettingsError("AQA_API_BASE_URL must be a bounded HTTP origin")
+    encoding_failed = False
+    try:
+        encoded = value.encode("ascii")
+    except UnicodeEncodeError:
+        encoding_failed = True
+        encoded = b""
+    if (
+        encoding_failed
+        or not encoded
+        or any(byte < 0x21 or byte == 0x7F for byte in encoded)
+        or "\\" in value
+    ):
+        raise RuntimeSettingsError("AQA_API_BASE_URL must be a bounded HTTP origin")
+
+    parse_failed = False
+    scheme = ""
+    hostname = ""
+    port: int | None = None
+    parsed = None
+    try:
+        parsed = urlsplit(value)
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname or ""
+        port = parsed.port
+    except (TypeError, ValueError):
+        parse_failed = True
+    hostname_is_valid = (
+        bool(hostname)
+        and len(hostname) <= 253
+        and all(
+            _RUNTIME_HOST_LABEL_PATTERN.fullmatch(label) is not None
+            for label in hostname.split(".")
+        )
+    )
+    if (
+        parse_failed
+        or parsed is None
+        or scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username is not None
+        or parsed.password is not None
+        or not hostname_is_valid
+        or (port is not None and not 1 <= port <= 65_535)
+    ):
+        raise RuntimeSettingsError("AQA_API_BASE_URL must be a bounded HTTP origin")
+    authority = hostname.lower() if port is None else f"{hostname.lower()}:{port}"
+    if parsed.netloc.lower() != authority:
+        raise RuntimeSettingsError("AQA_API_BASE_URL must be a bounded HTTP origin")
+    return f"{scheme}://{authority}"
+
+
+def _required_secret_sources(
+    *,
+    service: RuntimeService,
+    platform: PlatformConfig,
+) -> frozenset[SecretFileVariable]:
+    required = set(_SERVICE_BASE_REQUIRED_SOURCES[service])
+    database_allowed = SecretFileVariable.DATABASE_URL in _SERVICE_SECRET_SOURCES[service]
+    if database_allowed and platform.profile.storage.database_required:
+        required.add(SecretFileVariable.DATABASE_URL)
+    return frozenset(required)
+
+
+class RuntimeSettings(_StrictFrozenModel):
+    """Validated, service-scoped startup configuration containing only opaque secret references."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+        validate_default=True,
+        revalidate_instances="never",
+        hide_input_in_errors=True,
+    )
+
+    platform: PlatformConfig
+    service: RuntimeService
+    config_path: str
+    artifact_root: Path
+    api_base_url: str
+    log_format: Literal["json"]
+    paper_order_enablement: PaperOrderEnablement
+    api_docs_enabled: bool
+    database_url_file: SecretFileReference | None = None
+    operator_token_file: SecretFileReference | None = None
+    alpaca_data_api_key_file: SecretFileReference | None = None
+    alpaca_data_secret_key_file: SecretFileReference | None = None
+    alpaca_paper_api_key_file: SecretFileReference | None = None
+    alpaca_paper_secret_key_file: SecretFileReference | None = None
+    paper_account_id_hash_file: SecretFileReference | None = None
+    offline_database_path: Path | None = None
+
+    def __init__(
+        self,
+        *,
+        _construction_token: object | None = None,
+        **data: Any,
+    ) -> None:
+        if _construction_token is not _RUNTIME_SETTINGS_CONSTRUCTION_TOKEN:
+            raise TypeError("runtime settings must be created with load_runtime_settings")
+        super().__init__(**data)
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        """Return this immutable instance and reject Pydantic's unvalidated update path."""
+
+        del deep
+        if update is not None:
+            raise TypeError("runtime settings cannot be copied with updates")
+        return self
+
+    def __copy__(self) -> Self:
+        return self
+
+    def __deepcopy__(self, memo: dict[int, Any] | None = None) -> Self:
+        del memo
+        return self
+
+    def __replace__(self, **changes: Any) -> Self:
+        del changes
+        raise TypeError("runtime settings cannot be replaced")
+
+    def __getstate__(self) -> Never:
+        raise TypeError("runtime settings cannot be serialized")
+
+    def __setstate__(self, state: object) -> Never:
+        del state
+        raise TypeError("runtime settings cannot be deserialized")
+
+    def __reduce__(self) -> Never:
+        raise TypeError("runtime settings cannot be serialized")
+
+    def __reduce_ex__(self, protocol: SupportsIndex) -> Never:
+        del protocol
+        raise TypeError("runtime settings cannot be serialized")
+
+    @classmethod
+    def model_construct(
+        cls,
+        _fields_set: set[str] | None = None,
+        **values: Any,
+    ) -> Self:
+        del _fields_set, values
+        raise TypeError("runtime settings cannot bypass validation")
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls,
+        core_schema_: Any,
+        handler: GetJsonSchemaHandler,
+    ) -> JsonSchemaValue:
+        """Publish an honest output-only schema for factory-composed settings."""
+
+        if handler.mode == "validation":
+            return {
+                "not": {},
+                "description": "Factory-created RuntimeSettings instance only; JSON input is rejected.",
+            }
+        rendered = dict(handler(core_schema_))
+        rendered["readOnly"] = True
+        return rendered
+
+    @field_validator("service", mode="before")
+    @classmethod
+    def validate_service(cls, value: object) -> RuntimeService:
+        if type(value) is not RuntimeService:
+            raise ValueError("service must be selected by trusted startup code")
+        return value
+
+    @field_validator("config_path", mode="before")
+    @classmethod
+    def validate_config_path(cls, value: object) -> str:
+        return _runtime_config_path(value)
+
+    @field_validator("api_base_url", mode="before")
+    @classmethod
+    def validate_api_base_url(cls, value: object) -> str:
+        return _runtime_base_url(value)
+
+    @field_validator("artifact_root", "offline_database_path", mode="before")
+    @classmethod
+    def validate_runtime_paths(cls, value: object) -> Path | None:
+        if value is None:
+            return None
+        if type(value) is not _CONCRETE_PATH_TYPE or not value.is_absolute():
+            raise ValueError("runtime paths must be trusted absolute pathlib.Path values")
+        return value
+
+    @model_validator(mode="after")
+    def validate_service_scope(self) -> Self:
+        if self.platform.profile.mode not in _SERVICE_MODES[self.service]:
+            raise ValueError("service is incompatible with the selected platform mode")
+
+        references = {
+            source: getattr(self, field_name)
+            for source, field_name in _SECRET_FIELD_BY_SOURCE.items()
+        }
+        configured = frozenset(source for source, reference in references.items() if reference)
+        allowed = _SERVICE_SECRET_SOURCES[self.service]
+        required = _required_secret_sources(service=self.service, platform=self.platform)
+        if not configured <= allowed:
+            raise ValueError("service received a secret reference outside its authority")
+        if not required <= configured:
+            raise ValueError("service is missing a required secret reference")
+
+        for source, reference in references.items():
+            if reference is not None and reference.source is not source:
+                raise ValueError("secret reference source does not match its settings field")
+
+        uses_offline_fallback = (
+            self.platform.profile.mode is ExecutionMode.OFFLINE
+            and SecretFileVariable.DATABASE_URL in allowed
+            and self.database_url_file is None
+        )
+        if uses_offline_fallback != (self.offline_database_path is not None):
+            raise ValueError("offline database fallback does not match the storage selection")
+
+        if self.paper_order_enablement is PaperOrderEnablement.ACKNOWLEDGED and (
+            self.service is not RuntimeService.PAPER_EXECUTION_WORKER
+            or self.platform.profile.mode is not ExecutionMode.PAPER
+        ):
+            raise ValueError("paper-order acknowledgement is outside this service authority")
+        return self
+
+
+def _runtime_environment_snapshot(
+    environment: Mapping[str, str],
+    *,
+    service: RuntimeService,
+) -> dict[str, str]:
+    """Copy only allowlisted values once, without inspecting unrelated or forbidden values."""
+
+    failed = False
+    keys: tuple[object, ...] = ()
+    snapshot: dict[str, str] = {}
+    try:
+        if not isinstance(environment, Mapping):
+            failed = True
+        else:
+            collected_keys: list[object] = []
+            for index, key in enumerate(iter(environment)):
+                if index >= 4_096:
+                    failed = True
+                    break
+                collected_keys.append(key)
+            keys = tuple(collected_keys)
+    except Exception:
+        failed = True
+    if failed or any(type(key) is not str for key in keys):
+        raise RuntimeSettingsError("runtime environment could not be read safely")
+    string_keys = cast(tuple[str, ...], keys)
+    if len(set(string_keys)) != len(string_keys):
+        raise RuntimeSettingsError("runtime environment could not be read safely")
+
+    key_set = frozenset(string_keys)
+    if key_set & _FORBIDDEN_ALPACA_VARIABLES:
+        raise RuntimeSettingsError("forbidden generic Alpaca environment variable is present")
+    known_variables = frozenset(_NONSECRET_RUNTIME_VARIABLES) | frozenset(
+        source.value for source in SecretFileVariable
+    )
+    if any(key.startswith("AQA_") and key not in known_variables for key in string_keys):
+        raise RuntimeSettingsError("unknown AQA runtime variable is present")
+
+    allowed_sources = _SERVICE_SECRET_SOURCES[service]
+    supplied_sources = frozenset(source for source in SecretFileVariable if source.value in key_set)
+    if not supplied_sources <= allowed_sources:
+        raise RuntimeSettingsError("service received a secret reference outside its authority")
+
+    relevant_names = (
+        *_NONSECRET_RUNTIME_VARIABLES,
+        *(source.value for source in sorted(allowed_sources, key=lambda item: item.value)),
+    )
+    failed = False
+    try:
+        for name in relevant_names:
+            if name not in key_set:
+                continue
+            value = environment[name]
+            if type(value) is not str or len(value) > 65_536:
+                failed = True
+                break
+            snapshot[name] = value
+    except Exception:
+        failed = True
+    if failed:
+        raise RuntimeSettingsError("runtime environment could not be read safely")
+    return snapshot
+
+
+def _validated_application_root(application_root: Path) -> tuple[Path, int]:
+    if type(application_root) is not _CONCRETE_PATH_TYPE:
+        raise RuntimeSettingsError("application_root must be an exact pathlib.Path")
+    rendered = os.fspath(application_root)
+    if (
+        application_root.anchor != os.sep
+        or rendered == os.sep
+        or application_root.as_posix() != rendered
+        or any(component in {"", ".", ".."} for component in application_root.parts[1:])
+    ):
+        raise RuntimeSettingsError("application_root must be a canonical absolute POSIX path")
+    _runtime_path_parts(rendered, setting="application_root")
+
+    descriptor = -1
+    failed = False
+    path_byte_limit = 0
+    try:
+        descriptor = _open_nonsymlink_directory(application_root)
+        filesystem_limit = os.fpathconf(descriptor, "PC_PATH_MAX")
+        if type(filesystem_limit) is not int or filesystem_limit <= 1:
+            failed = True
+        else:
+            path_byte_limit = min(filesystem_limit - 1, _MAX_RUNTIME_PATH_BYTES - 1)
+            if len(rendered.encode("utf-8")) > path_byte_limit:
+                failed = True
+    except (OSError, RuntimeError, TypeError, ValueError):
+        failed = True
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                failed = True
+    if failed:
+        raise RuntimeSettingsError("application_root could not be validated safely")
+    return application_root, path_byte_limit
+
+
+def _runtime_path_parts(value: str, *, setting: str) -> tuple[bool, tuple[str, ...]]:
+    if not value or "\x00" in value or "\\" in value:
+        raise RuntimeSettingsError(f"{setting} must be a canonical POSIX path")
+    encoding_failed = False
+    encoded = b""
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        encoding_failed = True
+    if encoding_failed or len(encoded) > _MAX_RUNTIME_PATH_BYTES:
+        raise RuntimeSettingsError(f"{setting} must be bounded UTF-8")
+    absolute = value.startswith("/")
+    components = value.split("/")
+    if absolute:
+        components = components[1:]
+    if not components or any(component in {"", ".", ".."} for component in components):
+        raise RuntimeSettingsError(f"{setting} contains a prohibited path component")
+    if any(
+        len(component.encode("utf-8")) > _MAX_RUNTIME_PATH_COMPONENT_BYTES
+        for component in components
+    ):
+        raise RuntimeSettingsError(f"{setting} contains an oversized path component")
+    return absolute, tuple(components)
+
+
+def _validate_existing_runtime_path(
+    *,
+    application_root: Path,
+    parts: tuple[str, ...],
+    leaf_kind: Literal["directory", "file"],
+) -> None:
+    root_descriptor = -1
+    current_descriptor = -1
+    failed = False
+    try:
+        root_descriptor = _open_nonsymlink_directory(application_root)
+        current_descriptor = root_descriptor
+        for index, component in enumerate(parts):
+            is_leaf = index == len(parts) - 1
+            try:
+                component_status = os.stat(
+                    component,
+                    dir_fd=current_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                break
+            if stat.S_ISLNK(component_status.st_mode):
+                failed = True
+                break
+            expected_directory = not is_leaf or leaf_kind == "directory"
+            if expected_directory and not stat.S_ISDIR(component_status.st_mode):
+                failed = True
+                break
+            if is_leaf and leaf_kind == "file" and not stat.S_ISREG(component_status.st_mode):
+                failed = True
+                break
+            if stat.S_ISDIR(component_status.st_mode):
+                next_descriptor = -1
+                try:
+                    next_descriptor = os.open(
+                        component,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                        dir_fd=current_descriptor,
+                    )
+                    next_status = os.fstat(next_descriptor)
+                    if (component_status.st_dev, component_status.st_ino) != (
+                        next_status.st_dev,
+                        next_status.st_ino,
+                    ):
+                        failed = True
+                        break
+                    if current_descriptor != root_descriptor:
+                        os.close(current_descriptor)
+                    current_descriptor = next_descriptor
+                    next_descriptor = -1
+                finally:
+                    if next_descriptor >= 0:
+                        try:
+                            os.close(next_descriptor)
+                        except OSError:
+                            failed = True
+    except (OSError, RuntimeError, TypeError, ValueError):
+        failed = True
+    finally:
+        if current_descriptor >= 0 and current_descriptor != root_descriptor:
+            try:
+                os.close(current_descriptor)
+            except OSError:
+                failed = True
+        if root_descriptor >= 0:
+            try:
+                os.close(root_descriptor)
+            except OSError:
+                failed = True
+    if failed:
+        raise RuntimeSettingsError("runtime path could not be validated safely")
+
+
+def _contained_runtime_path(
+    value: str,
+    *,
+    setting: str,
+    application_root: Path,
+    path_byte_limit: int,
+    leaf_kind: Literal["directory", "file"],
+) -> Path:
+    absolute, components = _runtime_path_parts(value, setting=setting)
+    root_parts = application_root.parts
+    if absolute:
+        candidate_parts = (os.sep, *components)
+        if candidate_parts[: len(root_parts)] != root_parts:
+            raise RuntimeSettingsError(f"{setting} must remain beneath application_root")
+        relative_parts = candidate_parts[len(root_parts) :]
+    else:
+        relative_parts = components
+    if not relative_parts:
+        raise RuntimeSettingsError(f"{setting} cannot select application_root itself")
+    candidate = application_root.joinpath(*relative_parts)
+    if len(candidate.as_posix().encode("utf-8")) > path_byte_limit:
+        raise RuntimeSettingsError(f"{setting} must remain within the path-size limit")
+    _validate_existing_runtime_path(
+        application_root=application_root,
+        parts=relative_parts,
+        leaf_kind=leaf_kind,
+    )
+    return candidate
+
+
+def _paper_order_enablement(value: str) -> PaperOrderEnablement:
+    if value == "NO":
+        return PaperOrderEnablement.DISABLED
+    if value == "I_ACKNOWLEDGE_AQA_PAPER_ONLY":
+        return PaperOrderEnablement.ACKNOWLEDGED
+    raise RuntimeSettingsError("AQA_ENABLE_PAPER_ORDERS is not an accepted acknowledgement")
+
+
+def _api_docs_enabled(value: str) -> bool:
+    if value == "NO":
+        return False
+    if value == "YES":
+        return True
+    raise RuntimeSettingsError("AQA_API_DOCS_ENABLED must be exact NO or YES")
+
+
+def load_runtime_settings(
+    environment: Mapping[str, str],
+    *,
+    service: RuntimeService,
+    application_root: Path,
+) -> RuntimeSettings:
+    """Compose one process's settings without reading process state or secret-file contents."""
+
+    if type(service) is not RuntimeService:
+        raise RuntimeSettingsError("service must be selected by trusted startup code")
+    root, path_byte_limit = _validated_application_root(application_root)
+    snapshot = _runtime_environment_snapshot(environment, service=service)
+
+    config_path = _runtime_config_path(snapshot.get("AQA_CONFIG", _RUNTIME_DEFAULTS["AQA_CONFIG"]))
+    platform_failed = False
+    platform: PlatformConfig | None = None
+    try:
+        platform = load_platform_config(
+            Path(config_path.removeprefix("configs/")),
+            config_root=root / "configs",
+        )
+    except ExperimentConfigError:
+        platform_failed = True
+    if platform_failed or platform is None:
+        raise RuntimeSettingsError("runtime platform configuration is invalid")
+    if platform.profile.mode not in _SERVICE_MODES[service]:
+        raise RuntimeSettingsError("service is incompatible with the selected platform mode")
+
+    artifact_root = _contained_runtime_path(
+        snapshot.get("AQA_ARTIFACT_ROOT", _RUNTIME_DEFAULTS["AQA_ARTIFACT_ROOT"]),
+        setting="AQA_ARTIFACT_ROOT",
+        application_root=root,
+        path_byte_limit=path_byte_limit,
+        leaf_kind="directory",
+    )
+    api_base_url = _runtime_base_url(
+        snapshot.get("AQA_API_BASE_URL", _RUNTIME_DEFAULTS["AQA_API_BASE_URL"])
+    )
+    log_format = snapshot.get("AQA_LOG_FORMAT", _RUNTIME_DEFAULTS["AQA_LOG_FORMAT"])
+    if log_format != "json":
+        raise RuntimeSettingsError("AQA_LOG_FORMAT must be exact json")
+    paper_enablement = _paper_order_enablement(
+        snapshot.get(
+            "AQA_ENABLE_PAPER_ORDERS",
+            _RUNTIME_DEFAULTS["AQA_ENABLE_PAPER_ORDERS"],
+        )
+    )
+    docs_enabled = _api_docs_enabled(
+        snapshot.get("AQA_API_DOCS_ENABLED", _RUNTIME_DEFAULTS["AQA_API_DOCS_ENABLED"])
+    )
+
+    reference_values: dict[str, SecretFileReference] = {}
+    reference_failed = False
+    for source in sorted(_SERVICE_SECRET_SOURCES[service], key=lambda item: item.value):
+        supplied_path = snapshot.get(source.value)
+        if supplied_path is None:
+            continue
+        try:
+            reference_values[_SECRET_FIELD_BY_SOURCE[source]] = SecretFileReference.from_path(
+                supplied_path,
+                source=source,
+                application_root=root,
+            )
+        except (TypeError, ValueError):
+            reference_failed = True
+            break
+    if reference_failed:
+        raise RuntimeSettingsError("service secret-file reference is invalid")
+
+    required_sources = _required_secret_sources(service=service, platform=platform)
+    configured_sources = frozenset(
+        source for source in _SERVICE_SECRET_SOURCES[service] if source.value in snapshot
+    )
+    if not required_sources <= configured_sources:
+        raise RuntimeSettingsError("service is missing a required secret reference")
+
+    offline_database_path: Path | None = None
+    if (
+        platform.profile.mode is ExecutionMode.OFFLINE
+        and SecretFileVariable.DATABASE_URL in _SERVICE_SECRET_SOURCES[service]
+        and SecretFileVariable.DATABASE_URL not in configured_sources
+    ):
+        offline_database_path = _contained_runtime_path(
+            "runtime/aqa-offline.sqlite3",
+            setting="offline database path",
+            application_root=root,
+            path_byte_limit=path_byte_limit,
+            leaf_kind="file",
+        )
+
+    validation_failed = False
+    settings: RuntimeSettings | None = None
+    try:
+        settings = RuntimeSettings(
+            _construction_token=_RUNTIME_SETTINGS_CONSTRUCTION_TOKEN,
+            platform=platform,
+            service=service,
+            config_path=config_path,
+            artifact_root=artifact_root,
+            api_base_url=api_base_url,
+            log_format=cast(Literal["json"], log_format),
+            paper_order_enablement=paper_enablement,
+            api_docs_enabled=docs_enabled,
+            offline_database_path=offline_database_path,
+            **reference_values,
+        )
+    except ValidationError:
+        validation_failed = True
+    if validation_failed or settings is None:
+        raise RuntimeSettingsError("runtime settings failed strict validation")
+    return settings

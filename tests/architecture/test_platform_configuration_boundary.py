@@ -7,6 +7,7 @@ from pathlib import Path
 
 CONFIG_MODULE = Path("src/adaptive_trader/platform/config.py")
 CLI_MODULE = Path("src/adaptive_trader/platform/cli.py")
+SECURITY_MODULE = Path("src/adaptive_trader/platform/security.py")
 UNIVERSE_MODULE = Path("src/adaptive_trader/platform/universe.py")
 ALLOWED_IMPORTS = {
     CLI_MODULE: {
@@ -22,6 +23,7 @@ ALLOWED_IMPORTS = {
         "__future__",
         "adaptive_trader.platform.canonical",
         "adaptive_trader.platform.hashing",
+        "adaptive_trader.platform.security",
         "adaptive_trader.platform.universe",
         "collections.abc",
         "decimal",
@@ -30,13 +32,26 @@ ALLOWED_IMPORTS = {
         "os",
         "pathlib",
         "pydantic",
+        "pydantic.json_schema",
         "re",
         "stat",
         "typing",
+        "urllib.parse",
         "yaml",
         "yaml.constructor",
         "yaml.events",
         "yaml.nodes",
+    },
+    SECURITY_MODULE: {
+        "__future__",
+        "enum",
+        "os",
+        "pathlib",
+        "pydantic",
+        "pydantic.json_schema",
+        "pydantic_core",
+        "stat",
+        "typing",
     },
     UNIVERSE_MODULE: {"__future__", "enum", "pydantic", "re", "typing"},
 }

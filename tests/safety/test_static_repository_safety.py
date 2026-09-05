@@ -47,17 +47,45 @@ def test_every_alpaca_trading_client_is_literal_paper_true(project_root: Path) -
 
 
 def test_no_live_endpoint_or_generic_alpaca_credentials(project_root: Path) -> None:
-    forbidden = {
-        "https://api.alpaca.markets",
+    forbidden_generic_variables = {
         "APCA_API_KEY_ID",
         "APCA_API_SECRET_KEY",
+        "APCA_API_BASE_URL",
         "ALPACA_API_KEY",
         "ALPACA_SECRET_KEY",
     }
+    runtime_config_path = project_root / "src/adaptive_trader/platform/config.py"
+    runtime_source = runtime_config_path.read_text(encoding="utf-8")
+    runtime_tree = ast.parse(runtime_source, filename=str(runtime_config_path))
+    inventory_assignments = [
+        node
+        for node in runtime_tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "_FORBIDDEN_ALPACA_VARIABLES"
+            for target in node.targets
+        )
+    ]
+    assert len(inventory_assignments) == 1
+    inventory_literals = {
+        node.value
+        for node in ast.walk(inventory_assignments[0].value)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    assert inventory_literals == forbidden_generic_variables
+    for variable in forbidden_generic_variables:
+        assert runtime_source.count(f'"{variable}"') == 1
+
+    other_sources = [path for path in _python_sources(project_root) if path != runtime_config_path]
+    source_without_rejection_inventory = "\n".join(
+        path.read_text(encoding="utf-8") for path in other_sources
+    )
+    for variable in forbidden_generic_variables:
+        assert variable not in source_without_rejection_inventory
+
     files = [*_python_sources(project_root), *sorted((project_root / "configs").glob("*.yaml"))]
     combined = "\n".join(path.read_text(encoding="utf-8") for path in files)
-    for value in forbidden:
-        assert value not in combined
+    assert "https://api.alpaca.markets" not in combined
     assert "live-trade" not in combined.lower()
 
 
