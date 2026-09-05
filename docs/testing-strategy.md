@@ -45,7 +45,7 @@ PostgreSQL and supplies the explicit disposable settings, so the same command in
 
 ## Disposable PostgreSQL
 
-After creating a local loopback PostgreSQL 15 database named `collector_test`:
+After creating a local loopback PostgreSQL 16 database named `collector_test`:
 
 ```bash
 APA_TEST_POSTGRES_URL=postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test \

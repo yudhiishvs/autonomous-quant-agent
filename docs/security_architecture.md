@@ -113,7 +113,7 @@ execution service and no runtime command consumes a loaded platform secret.
 | Generic config/runtime composition | Explicitly injected environment mapping, strict profiles, immutable experiment identity, closed service/secret scope, opaque references | Ambient environment reads, secret-file reads during composition, network/client construction, persistent mutation | `IMPLEMENTED_AND_VERIFIED` |
 | Generic secret loader | One explicitly referenced current-user-owned POSIX regular file in mode `0400` or `0600`, up to 16 KiB | Symlinks, directories/special files, shared modes, NUL, empty or invalid UTF-8 content, serialization of values | `IMPLEMENTED_AND_VERIFIED` |
 | Local secret bootstrap | Exact fixed local infrastructure inventory beneath an owner-controlled application root | Alpaca keys, arbitrary filenames, overwrite, value output, unsafe existing state | `IMPLEMENTED_AND_VERIFIED` |
-| Current CI | Locked Python 3.11 install, offline checks, disposable PostgreSQL 15, Compose validation, image builds, collector image network denial | Alpaca credentials and Alpaca calls; target PostgreSQL 16/security/SBOM/container-scan/CodeQL job set is absent | `PARTIALLY_IMPLEMENTED` relative to the target |
+| Current CI | Locked Python 3.11 install, offline checks, configuration for digest-pinned disposable PostgreSQL 16 with a runtime major-version assertion, Compose validation, image builds, and collector image network denial | Local container-runtime validation is unavailable; exact remote-run evidence belongs in the active execution plan; Alpaca credentials/calls and the remaining target security/SBOM/container-scan/CodeQL job set are absent | `PARTIALLY_IMPLEMENTED` relative to the target |
 
 The standalone collector still uses the legacy `APA_*` runtime namespace. The generic platform
 secret interface below is a new boundary and does not retroactively make the legacy processes
@@ -468,8 +468,9 @@ inventory are `NOT_IMPLEMENTED`.
 - The collector image uses a nonroot user and omits the Alpaca trading SDK and application
   execution modules. The current Compose collector service additionally applies a read-only root
   filesystem, dropped capabilities, and no-new-privileges.
-- The current workflow uses PostgreSQL 15, not the target PostgreSQL 16, and combines checks into
-  one offline job.
+- The current workflow is configured to verify a digest-pinned PostgreSQL 16 service and its runtime
+  major version, with exact remote-run evidence recorded per commit in the active execution plan;
+  it still combines checks into one offline job.
 
 ### Target controls
 

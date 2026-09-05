@@ -523,9 +523,10 @@ commit count is planned.
   new platform.
 - Current collector secrets are direct `APA_*` environment values, while the new platform permits
   only file-backed `AQA_*_FILE` interfaces.
-- The existing migration uses schema `market_data` and PostgreSQL 15 CI. The target needs additive
-  `aqa_*` tables, roles, PostgreSQL 16 tests, and an upgrade path that does not discard collector
-  history.
+- The existing migration uses schema `market_data`; CI used PostgreSQL 15 at program start and is
+  now configured for a digest-pinned PostgreSQL 16 service with a runtime major assertion. The
+  target still needs additive `aqa_*` tables, roles, and an upgrade path that does not discard
+  collector history.
 - The current dashboard reads SQLite/artifacts directly, conflicting with the required API-only
   boundary, and Compose publishes its port on all host interfaces rather than loopback only.
 - An earlier local Python 3.14 environment exposed a NumPy-stub parsing mismatch while runtime and
@@ -808,6 +809,16 @@ Platform domain and initial security-documentation evidence on 2026-09-05:
 | `.venv/bin/pytest -q` | PASS — 987 passed, one PostgreSQL module skipped for absent test URL, and one upstream WebSocket deprecation warning in 64.94 seconds. |
 | Synthetic backtest, deterministic replay, and Compose configuration | PASS — the backtest completed all six deterministic portfolios; replay processed nine events, one cycle, and three fake-broker submissions; Compose rendered without starting services. |
 | Independent domain and security-documentation reviews | PASS after correcting semantic UTC handling, generic fixture inputs, validation precedence, embedded experiment-literal detection, current/target redaction scope, exact secret interfaces, process denials, dashboard authority wording, artifact-code threats, and evidence-status reconciliation. Re-review found no remaining blocker, high, or medium issue. |
+
+PostgreSQL 16 CI candidate evidence on 2026-09-05:
+
+| Command or evidence | Result |
+| --- | --- |
+| `docker buildx imagetools inspect postgres:16` | PASS — Docker Hub reported official OCI index `sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94`, version 16.15, with a Linux AMD64 manifest. |
+| Focused CI-contract and static-safety tests | PASS — nine tests locally; the broader safety selection passed 46 tests in the independent implementation run. |
+| Whole-worktree Ruff format/lint and full-source Mypy | PASS — 153 files formatted, lint clean, and 54 source files type-checked. |
+| Local PostgreSQL 16 service execution | NOT RUN — the local Docker daemon remains unavailable; the workflow itself asserts the runtime server major before migration. |
+| Independent CI security and maintainability review | PASS after current-state documentation was corrected; the digest, GitHub service-container context, quoted shell boundary, validation ordering, and credential-free behavior were verified with no blocker or high finding. |
 
 No real credential file was read, no external data or broker connection was made, and no Alpaca
 paper or real-money order was submitted during this baseline.

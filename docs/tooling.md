@@ -83,9 +83,9 @@ The following tools are intentionally deferred, not silently treated as unnecess
   not satisfy the required workload contract.
 
 The local Docker client is installed, but the daemon was unavailable during Phase 0, so fresh
-local image and PostgreSQL 16 runtime validation remain unavailable. GitHub Actions currently
-verifies the existing PostgreSQL 15 and image boundaries. These are environment limitations, not
-reasons to select a different build or database tool.
+local image and PostgreSQL 16 runtime validation remain unavailable. GitHub Actions is currently
+configured to verify the PostgreSQL 16 and existing image boundaries. These are environment
+limitations, not reasons to select a different build or database tool.
 
 Add the smallest nonredundant tool set through the dependency and review policies; never invent
 an action revision, image digest, scan result, or vulnerability-free claim.
