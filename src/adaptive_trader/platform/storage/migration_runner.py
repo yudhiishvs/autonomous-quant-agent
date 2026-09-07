@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 from alembic import command
@@ -9,13 +10,20 @@ from alembic.config import Config
 from alembic.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 
+from adaptive_trader.platform.config import ExperimentDefinition
+from adaptive_trader.platform.package_resources import (
+    packaged_alembic_ini,
+    packaged_migration_root,
+)
 from adaptive_trader.platform.security import RedactedSecret
 from adaptive_trader.platform.storage.engine import (
     normalize_platform_postgres_url,
     platform_postgres_connect_args,
 )
+from adaptive_trader.platform.storage.experiments import ExperimentRepository
 from adaptive_trader.platform.storage.migration_roles import (
     MIGRATION_ROLE_REVISION,
     migration_role_revision_sets,
@@ -28,13 +36,12 @@ from adaptive_trader.platform.storage.role_bootstrap import (
     require_legacy_role_transition,
 )
 
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _VERSION_TABLE_SCHEMA = "market_data"
 
 
 def _alembic_config(database_url: str) -> Config:
-    config = Config(str(_PROJECT_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(_PROJECT_ROOT / "migrations"))
+    config = Config(str(packaged_alembic_ini()))
+    config.set_main_option("script_location", str(packaged_migration_root()))
     config.set_main_option(
         "sqlalchemy.url",
         normalize_platform_postgres_url(database_url)
@@ -42,6 +49,17 @@ def _alembic_config(database_url: str) -> Config:
         .replace("%", "%%"),
     )
     return config
+
+
+def platform_migration_head() -> str:
+    """Return the single build-installed migration head without opening a database."""
+
+    config = Config(str(packaged_alembic_ini()))
+    config.set_main_option("script_location", str(packaged_migration_root()))
+    head = ScriptDirectory.from_config(config).get_current_head()
+    if head is None:
+        raise RuntimeError("No platform migration head exists")
+    return head
 
 
 def _current_revision(database_url: str) -> str | None:
@@ -123,6 +141,8 @@ def migrate_platform_database(
     *,
     application_root: Path,
     bootstrap_admin_database_url: RedactedSecret | None = None,
+    experiment: ExperimentDefinition | None = None,
+    registered_at: datetime | None = None,
 ) -> None:
     """Reach head without using legacy authority beyond the governance handoff.
 
@@ -139,6 +159,10 @@ def migrate_platform_database(
         and type(bootstrap_admin_database_url) is not RedactedSecret
     ):
         raise TypeError("platform migration administrator requires a loaded database URL")
+    if experiment is not None and type(experiment) is not ExperimentDefinition:
+        raise TypeError("platform migration experiment must be an immutable definition")
+    if experiment is None and registered_at is not None:
+        raise TypeError("experiment registration time requires an experiment")
     migration_database_url = migration_login_database_url(
         base_database_url,
         application_root=application_root,
@@ -184,3 +208,34 @@ def migrate_platform_database(
 
     if _current_revision(migration_database_url) != expected_head:
         raise RuntimeError("Platform migrations did not reach the checked-in head")
+    if experiment is not None:
+        _register_deployment_experiment(
+            migration_database_url,
+            experiment=experiment,
+            registered_at=datetime.now(UTC) if registered_at is None else registered_at,
+        )
+
+
+def _register_deployment_experiment(
+    migration_database_url: str,
+    *,
+    experiment: ExperimentDefinition,
+    registered_at: datetime,
+) -> None:
+    """Register immutable configuration through the narrow migration-role exception."""
+
+    engine: Engine = create_engine(
+        normalize_platform_postgres_url(migration_database_url),
+        future=True,
+        pool_pre_ping=True,
+        hide_parameters=True,
+        connect_args=platform_postgres_connect_args(
+            "aqa-platform-experiment-registration",
+            read_only=False,
+            migration=True,
+        ),
+    )
+    try:
+        ExperimentRepository(engine).register(experiment, registered_at=registered_at)
+    finally:
+        engine.dispose()

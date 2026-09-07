@@ -1,6 +1,10 @@
 """Broker-free contracts for collecting and identifying market data."""
 
-from adaptive_trader.collection.contracts import MarketBarV1, RawBarObservationV1
+from adaptive_trader.collection.contracts import (
+    MarketBarV1,
+    RawBarObservationV1,
+    RawBarObservationV2,
+)
 from adaptive_trader.collection.universe import (
     COLLECTION_UNIVERSE_V1,
     CollectionRole,
@@ -14,5 +18,6 @@ __all__ = [
     "CollectionUniverseV1",
     "MarketBarV1",
     "RawBarObservationV1",
+    "RawBarObservationV2",
     "UniverseMemberV1",
 ]

@@ -1,4 +1,9 @@
-# Architecture
+# Legacy portfolio application architecture
+
+This document owns the original research, replay, observer, and paper-simulation application.
+The generic platform and its separate authority boundaries are mapped in
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md). Do not infer platform implementation status from this
+legacy reference.
 
 > **PAPER TRADING — SIMULATED CAPITAL AND SIMULATED FILLS**
 

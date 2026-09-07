@@ -5,9 +5,14 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+
+from adaptive_trader.platform.security import SecretFileVariable, load_secret_file
 
 ALPACA_DATA_API_KEY_ENV = "APA_ALPACA_DATA_API_KEY"
 ALPACA_DATA_SECRET_KEY_ENV = "APA_ALPACA_DATA_SECRET_KEY"
+ALPACA_DATA_API_KEY_FILE_ENV = SecretFileVariable.ALPACA_DATA_API_KEY.value
+ALPACA_DATA_SECRET_KEY_FILE_ENV = SecretFileVariable.ALPACA_DATA_SECRET_KEY.value
 
 
 class AlpacaDataCredentialError(ValueError):
@@ -36,12 +41,31 @@ class AlpacaDataCredentials:
         cls,
         environment: Mapping[str, str] | None = None,
     ) -> AlpacaDataCredentials:
-        """Read only the two environment variables reserved for market data."""
+        """Read the data-only pair from hardened files or legacy compatibility variables."""
 
         values = os.environ if environment is None else environment
+        api_key_file = values.get(ALPACA_DATA_API_KEY_FILE_ENV, "").strip()
+        secret_key_file = values.get(ALPACA_DATA_SECRET_KEY_FILE_ENV, "").strip()
+        legacy_api_key = values.get(ALPACA_DATA_API_KEY_ENV, "").strip()
+        legacy_secret_key = values.get(ALPACA_DATA_SECRET_KEY_ENV, "").strip()
+        if api_key_file or secret_key_file:
+            if not api_key_file or not secret_key_file:
+                raise AlpacaDataCredentialError("both Alpaca data secret files are required")
+            if legacy_api_key or legacy_secret_key:
+                raise AlpacaDataCredentialError("Alpaca data credential sources are ambiguous")
+            return cls(
+                api_key=load_secret_file(
+                    Path(api_key_file),
+                    source=SecretFileVariable.ALPACA_DATA_API_KEY,
+                ).reveal(),
+                secret_key=load_secret_file(
+                    Path(secret_key_file),
+                    source=SecretFileVariable.ALPACA_DATA_SECRET_KEY,
+                ).reveal(),
+            )
         return cls(
-            api_key=values.get(ALPACA_DATA_API_KEY_ENV, ""),
-            secret_key=values.get(ALPACA_DATA_SECRET_KEY_ENV, ""),
+            api_key=legacy_api_key,
+            secret_key=legacy_secret_key,
         )
 
     def redact(self, message: object) -> str:

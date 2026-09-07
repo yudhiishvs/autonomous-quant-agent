@@ -7,6 +7,11 @@ from adaptive_trader.platform.data.aggregation import (
     SessionWindow,
     aggregate_one_minute_bars,
 )
+from adaptive_trader.platform.data.materialization import (
+    AggregateStore,
+    FifteenMinuteMaterializer,
+    MaterializationReceipt,
+)
 from adaptive_trader.platform.data.normalization import (
     CanonicalBar,
     MarketDataNormalizationError,
@@ -16,11 +21,14 @@ from adaptive_trader.platform.data.normalization import (
 )
 
 __all__ = [
+    "AggregateStore",
     "AggregatedBar",
     "AggregationError",
     "CanonicalBar",
     "EffectiveBar",
+    "FifteenMinuteMaterializer",
     "MarketDataNormalizationError",
+    "MaterializationReceipt",
     "NormalizationPolicy",
     "SessionWindow",
     "aggregate_one_minute_bars",

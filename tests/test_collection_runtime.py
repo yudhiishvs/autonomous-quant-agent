@@ -4,18 +4,68 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import typer.rich_utils
+from click import unstyle
 from typer.testing import CliRunner
 
 import adaptive_trader.collection.cli as collector_cli
 from adaptive_trader.collection.postgres import normalize_postgres_url
 from adaptive_trader.collection.repository import CollectorStatus
 from adaptive_trader.collection.runtime import (
+    MARKET_DATA_DATABASE_URL_ENV,
+    MARKET_DATA_DATABASE_URL_FILE_ENV,
     CollectorEnvironment,
     migration_database_url_from_environment,
     parse_utc_boundary,
+    require_file_backed_data_environment,
 )
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"AQA_DATABASE_URL": "synthetic-secret"},
+        {"APA_MARKET_DATA_DATABASE_URL": "synthetic-secret"},
+        {"APCA_API_KEY_ID": "synthetic-secret"},
+        {"AQA_ALPACA_PAPER_API_KEY_FILE": "/must/not/open"},
+        {"AQA_OPERATOR_TOKEN_FILE": "/must/not/open"},
+        {"AQA_ENABLE_PAPER_ORDERS": "YES"},
+        {"APA_ENABLE_PAPER_ORDERS": "YES"},
+        {"AQA_UNRECOGNIZED_SETTING": "value"},
+    ],
+)
+def test_collect_once_rejects_ambient_authority_before_loading_files(extra: dict[str, str]) -> None:
+    environment = {
+        "AQA_DATABASE_URL_FILE": "/must/not/open/database",
+        "AQA_ALPACA_DATA_API_KEY_FILE": "/must/not/open/key",
+        "AQA_ALPACA_DATA_SECRET_KEY_FILE": "/must/not/open/secret",
+        **extra,
+    }
+    with pytest.raises(ValueError) as error:
+        require_file_backed_data_environment(environment)
+    assert "synthetic-secret" not in str(error.value)
+    assert "/must/not/open" not in str(error.value)
+
+
+def test_collect_once_requires_all_file_references_without_reading_them() -> None:
+    environment = {
+        "AQA_DATABASE_URL_FILE": "/must/not/open/database",
+        "AQA_ALPACA_DATA_API_KEY_FILE": "/must/not/open/key",
+        "AQA_ALPACA_DATA_SECRET_KEY_FILE": "/must/not/open/secret",
+        "AQA_MARKET_DATA_HISTORY_START": "2026-09-03",
+        "AQA_ENABLE_PAPER_ORDERS": "NO",
+    }
+    require_file_backed_data_environment(environment)
+    for field in (
+        "AQA_DATABASE_URL_FILE",
+        "AQA_ALPACA_DATA_API_KEY_FILE",
+        "AQA_ALPACA_DATA_SECRET_KEY_FILE",
+    ):
+        with pytest.raises(ValueError, match="all three"):
+            require_file_backed_data_environment({**environment, field: ""})
 
 
 def test_runtime_environment_parses_hosted_postgres_and_redacts_password() -> None:
@@ -33,6 +83,48 @@ def test_runtime_environment_parses_hosted_postgres_and_redacts_password() -> No
     assert environment.history_start == datetime(2025, 1, 2, tzinfo=UTC)
     assert "private-password" not in repr(environment)
     assert "private-password" not in str(environment)
+
+
+def test_runtime_environment_loads_database_url_from_owner_private_file(
+    tmp_path: Path,
+) -> None:
+    database_url = (
+        "postgresql://collector:synthetic-password@db.example.invalid/market_data"
+        "?sslmode=verify-full"
+    )
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(f"{database_url}\n", encoding="utf-8")
+    database_url_file.chmod(0o600)
+
+    environment = CollectorEnvironment.from_environment(
+        {
+            MARKET_DATA_DATABASE_URL_FILE_ENV: str(database_url_file),
+            "APA_MARKET_DATA_HISTORY_START": "2025-01-02",
+        }
+    )
+
+    assert environment.database_url.startswith("postgresql+psycopg://collector:")
+    assert environment.history_start == datetime(2025, 1, 2, tzinfo=UTC)
+    assert "synthetic-password" not in repr(environment)
+
+
+def test_runtime_environment_rejects_ambiguous_database_sources(tmp_path: Path) -> None:
+    database_url_file = tmp_path / "database-url"
+    database_url_file.write_text(
+        "postgresql://collector:synthetic@127.0.0.1:5432/collector_test\n",
+        encoding="utf-8",
+    )
+    database_url_file.chmod(0o600)
+
+    with pytest.raises(ValueError, match="ambiguous"):
+        CollectorEnvironment.from_environment(
+            {
+                MARKET_DATA_DATABASE_URL_FILE_ENV: str(database_url_file),
+                MARKET_DATA_DATABASE_URL_ENV: (
+                    "postgresql://collector:legacy@127.0.0.1:5432/collector_test"
+                ),
+            }
+        )
 
 
 def test_runtime_environment_rejects_non_postgres_and_naive_timestamp() -> None:
@@ -53,16 +145,20 @@ def test_hosted_postgres_requires_full_tls_verification(sslmode: str | None) -> 
         )
 
 
-def test_hosted_postgres_accepts_verify_full_and_loopback_without_tls() -> None:
+def test_hosted_postgres_accepts_verify_full_and_local_hosts_without_tls() -> None:
     secured = normalize_postgres_url(
         "postgresql://collector:password@database.example.invalid/market_data?sslmode=verify-full"
     )
     loopback = normalize_postgres_url(
         "postgresql://collector:password@127.0.0.1:5432/collector_test"
     )
+    compose_internal = normalize_postgres_url(
+        "postgresql://collector:password@postgres:5432/collector_test"
+    )
 
     assert secured.query["sslmode"] == "verify-full"
     assert loopback.host == "127.0.0.1"
+    assert compose_internal.host == "postgres"
 
 
 @pytest.mark.parametrize(
@@ -142,8 +238,10 @@ def test_status_is_database_only_and_never_loads_alpaca_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeRepository:
-        def __init__(self, _database_url: str) -> None:
+        def __init__(self, _database_url: str, *, canonical: bool) -> None:
+            assert canonical is True
             self.closed = False
+            self.engine = object()
 
         def verify_schema(self) -> None:
             return None
@@ -160,6 +258,14 @@ def test_status_is_database_only_and_never_loads_alpaca_credentials(
     monkeypatch.setattr(collector_cli, "_environment", lambda: environment)
     monkeypatch.setattr(collector_cli, "PostgresMarketDataRepository", FakeRepository)
     monkeypatch.setattr(collector_cli, "require_database_at_head", lambda _url: None)
+    monkeypatch.setattr(
+        collector_cli,
+        "health_snapshot",
+        lambda *_args, **_kwargs: {
+            "service_ready": True,
+            "research_ready": False,
+        },
+    )
 
     def forbid_credentials() -> None:
         raise AssertionError("status must not load Alpaca credentials")
@@ -199,7 +305,9 @@ def test_migrate_uses_the_bounded_shared_runner(
         *,
         application_root: Path,
         bootstrap_admin_database_url: object | None,
+        experiment: object,
     ) -> None:
+        assert experiment == collector_cli.collection_experiment()
         assert str(database_secret) == "<redacted>"
         assert bootstrap_admin_database_url is None
         calls.append(("migrate", application_root))
@@ -242,7 +350,7 @@ def test_migrate_defaults_to_the_absolute_current_application_root(
     monkeypatch.setattr(
         collector_cli,
         "migrate_platform_database",
-        lambda _secret, *, application_root, bootstrap_admin_database_url: (
+        lambda _secret, *, application_root, bootstrap_admin_database_url, experiment: (
             observed_roots.append(application_root)
             if bootstrap_admin_database_url is None
             else None
@@ -277,7 +385,9 @@ def test_migrate_passes_a_distinct_redacted_bootstrap_administrator(
         *,
         application_root: Path,
         bootstrap_admin_database_url: object | None,
+        experiment: object,
     ) -> None:
+        assert experiment == collector_cli.collection_experiment()
         assert application_root == tmp_path
         captured.append((database_secret, bootstrap_admin_database_url))
 
@@ -303,11 +413,17 @@ def test_migrate_passes_a_distinct_redacted_bootstrap_administrator(
     assert admin_url not in result.output
 
 
-def test_migrate_requires_an_owner_private_database_url_file() -> None:
-    result = CliRunner().invoke(collector_cli.app, ["migrate"])
+@pytest.mark.parametrize("terminal_color", [False, True])
+def test_migrate_requires_an_owner_private_database_url_file(
+    monkeypatch: pytest.MonkeyPatch, terminal_color: bool
+) -> None:
+    monkeypatch.setenv("TERM", "xterm")
+    monkeypatch.setattr(typer.rich_utils, "FORCE_TERMINAL", terminal_color)
+    result = CliRunner().invoke(collector_cli.app, ["migrate"], color=terminal_color)
 
     assert result.exit_code == 2
-    assert "--database-url-file" in result.output
+    # Rich inserts ANSI styles within option names on GitHub Actions terminals.
+    assert "--database-url-file" in unstyle(result.output)
 
 
 def test_migrate_redacts_runner_failures(
@@ -346,8 +462,9 @@ def test_readiness_requires_an_active_lease_and_run(
     expected_exit: int,
 ) -> None:
     class FakeRepository:
-        def __init__(self, _database_url: str) -> None:
-            pass
+        def __init__(self, _database_url: str, *, canonical: bool) -> None:
+            assert canonical is True
+            self.engine = object()
 
         def verify_schema(self) -> None:
             return None
@@ -368,6 +485,13 @@ def test_readiness_requires_an_active_lease_and_run(
     monkeypatch.setattr(collector_cli, "_environment", lambda: environment)
     monkeypatch.setattr(collector_cli, "PostgresMarketDataRepository", FakeRepository)
     monkeypatch.setattr(collector_cli, "require_database_at_head", lambda _url: None)
+    monkeypatch.setattr(
+        collector_cli,
+        "health_snapshot",
+        lambda *_args, **_kwargs: {
+            "service_ready": True,
+        },
+    )
 
     result = CliRunner().invoke(collector_cli.app, ["ready"])
 
@@ -382,8 +506,8 @@ def test_collection_failure_does_not_echo_exception_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeRepository:
-        def __init__(self, _database_url: str) -> None:
-            pass
+        def __init__(self, _database_url: str, *, canonical: bool) -> None:
+            assert canonical is True
 
         def close(self) -> None:
             return None
@@ -419,3 +543,88 @@ def test_collection_failure_does_not_echo_exception_secrets(
     assert "Historical collection failed (RuntimeError)" in result.stderr
     assert "alpaca-secret" not in result.output
     assert "database-secret" not in result.output
+
+
+@pytest.mark.parametrize("metadata_kind", [None, "invalid", "oversized", "symlink"])
+def test_snapshot_cli_keeps_provider_credentials_out_and_bounds_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, metadata_kind: str | None
+) -> None:
+    from adaptive_trader.collection import snapshots
+
+    closed: list[bool] = []
+    calls: list[dict[str, object]] = []
+
+    class Repository:
+        engine = object()
+
+        def __init__(self, _url: object, *, canonical: bool) -> None:
+            assert canonical is True
+
+        def verify_schema(self) -> None:
+            pass
+
+        def close(self) -> None:
+            closed.append(True)
+
+    def freeze(_engine: object, **kwargs: object) -> tuple[object, object]:
+        calls.append(kwargs)
+        return SimpleNamespace(
+            dataset_id="fixture_dataset",
+            artifact_id="fixture_artifact",
+            manifest_hash="a" * 64,
+            status=SimpleNamespace(value="diagnostic"),
+            promotable=False,
+        ), SimpleNamespace(created=True)
+
+    def forbidden() -> None:
+        raise AssertionError("snapshot must not load provider credentials")
+
+    monkeypatch.setattr(collector_cli.AlpacaDataCredentials, "from_environment", forbidden)
+    monkeypatch.setattr(
+        collector_cli,
+        "_environment",
+        lambda: CollectorEnvironment(
+            "postgresql+psycopg://collector:database-secret@127.0.0.1/collector_test"
+        ),
+    )
+    monkeypatch.setattr(collector_cli, "PostgresMarketDataRepository", Repository)
+    monkeypatch.setattr(collector_cli, "require_database_at_head", lambda _url: None)
+    monkeypatch.setattr(snapshots, "freeze_collection_snapshot", freeze)
+    args = [
+        "snapshot",
+        "--start",
+        "2026-09-03T13:30:00Z",
+        "--end",
+        "2026-09-03T13:45:00Z",
+        "--artifact-root",
+        str(tmp_path / "artifacts"),
+        "--source-git-commit",
+        "1" * 40,
+        "--uv-lock-sha256",
+        "2" * 64,
+        "--diagnostic",
+    ]
+    if metadata_kind is not None:
+        metadata = tmp_path / "metadata.json"
+        metadata.write_text(
+            "x" * 65_537
+            if metadata_kind == "oversized"
+            else '{"secret":"metadata-sentinel"}'  # pragma: allowlist secret
+        )
+        if metadata_kind == "symlink":
+            linked = tmp_path / "linked.json"
+            linked.symlink_to(metadata)
+            metadata = linked
+        args += ["--metadata-file", str(metadata)]
+    result = CliRunner().invoke(collector_cli.app, args)
+    assert result.exit_code == (0 if metadata_kind is None else 1)
+    assert closed == [True]
+    assert "database-secret" not in result.output
+    assert "metadata-sentinel" not in result.output
+    if metadata_kind is None:
+        assert len(calls) == 1
+        assert calls[0]["diagnostic"] is True
+        assert calls[0]["dirty_worktree"] is True
+        assert '"promotable": false' in result.output
+    else:
+        assert calls == []

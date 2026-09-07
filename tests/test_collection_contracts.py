@@ -14,6 +14,7 @@ from adaptive_trader.collection import (
     CollectionUniverseV1,
     MarketBarV1,
     RawBarObservationV1,
+    RawBarObservationV2,
     UniverseMemberV1,
 )
 
@@ -172,6 +173,29 @@ def test_raw_observation_has_retry_stable_id_and_explicit_correction_semantics()
     assert correction.observation_id != original.observation_id
     assert original.identity_hash == bar.identity_hash
     assert original.content_hash == bar.content_hash
+    with pytest.raises(FrozenInstanceError):
+        original.is_correction = True  # type: ignore[misc]
+
+
+def test_raw_v2_preserves_each_receipt_without_changing_v1_identity() -> None:
+    bar = _bar()
+    original = RawBarObservationV2(bar=bar, raw_payload_sha256="a" * 64)
+    exact_retry = replace(original)
+    later = replace(
+        original,
+        bar=replace(bar, receipt_timestamp_utc=bar.receipt_timestamp_utc + timedelta(seconds=5)),
+    )
+    changed_quality = replace(original, bar=replace(bar, quality_flags=frozenset({"gap_repair"})))
+    legacy = RawBarObservationV1(bar=bar, raw_payload_sha256="a" * 64)
+
+    assert original.SCHEMA_VERSION == "raw-bar-observation.v2"
+    assert exact_retry.observation_id == original.observation_id
+    assert later.observation_id != original.observation_id
+    assert changed_quality.observation_id != original.observation_id
+    assert changed_quality.content_hash == original.content_hash
+    assert original.content_hash == later.content_hash == legacy.content_hash
+    assert legacy.observation_id != original.observation_id
+    assert isinstance(original, RawBarObservationV1)
     with pytest.raises(FrozenInstanceError):
         original.is_correction = True  # type: ignore[misc]
 

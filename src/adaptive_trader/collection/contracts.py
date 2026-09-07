@@ -344,3 +344,33 @@ class RawBarObservationV1:
         """Forward the enclosed logical bar content digest."""
 
         return self.bar.content_hash
+
+
+@dataclass(frozen=True, slots=True)
+class RawBarObservationV2(RawBarObservationV1):
+    """One actual received delivery, with retry-stable identity for that receipt.
+
+    V1 remains readable and constructible without changing any existing identifier. V2 adds
+    actual receipt time so later authoritative A → B → A reports retain three observations
+    instead of discarding the restored A as an old duplicate. Repeating this same envelope
+    remains idempotent. Equal economic values received again remain separate raw evidence;
+    canonical projection deduplication prevents unnecessary economic revisions.
+    """
+
+    SCHEMA_VERSION = "raw-bar-observation.v2"
+
+    @property
+    def observation_id(self) -> str:
+        return _sha256(
+            {
+                "bar_content_hash": self.bar.content_hash,
+                "bar_identity_hash": self.bar.identity_hash,
+                "is_correction": self.is_correction,
+                "provider_event_id": self.provider_event_id,
+                "raw_payload_sha256": self.raw_payload_sha256,
+                "receipt_timestamp_utc": _timestamp_text(self.bar.receipt_timestamp_utc),
+                "quality_flags": sorted(self.bar.quality_flags),
+                "schema_version": self.SCHEMA_VERSION,
+                "source": self.bar.source,
+            }
+        )

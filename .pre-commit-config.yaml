@@ -1,0 +1,33 @@
+minimum_pre_commit_version: 4.0.0
+default_language_version:
+  python: python3.11
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: 7c55798a78262d14b2074abf623d8a992ebb70d4
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+        args: [--check]
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: 3e8a8703264a2f4a69428a0aa4dcb512790b2c8c
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^(?:src/adaptive_trader/strategies/__init__\.py|src/adaptive_trader/strategies/mean_reversion\.py|src/adaptive_trader/strategies/momentum\.py|src/adaptive_trader/strategies/base\.py|src/adaptive_trader/allocator\.py|src/adaptive_trader/backtest\.py|src/adaptive_trader/config\.py|src/adaptive_trader/data\.py|src/adaptive_trader/decision_engine\.py|src/adaptive_trader/features\.py|src/adaptive_trader/metrics\.py|src/adaptive_trader/models\.py|src/adaptive_trader/regimes\.py|src/adaptive_trader/reporting\.py|src/adaptive_trader/risk\.py|docs/methodology\.md|src/adaptive_trader/cli\.py|src/adaptive_trader/live\.py|src/adaptive_trader/replay\.py|src/adaptive_trader/market_data_live\.py|src/adaptive_trader/forward_reporting\.py|src/adaptive_trader/observer_evidence\.py|src/adaptive_trader/persistence\.py|src/adaptive_trader/live_models\.py|scripts/validate_real_data_dry_run\.py|scripts/generate_phase2_quality_evidence\.py|scripts/audit_observer_session\.py|scripts/summarize_observer_evidence\.py|scripts/run_observer\.sh|scripts/run_full_observer_session\.sh|scripts/run_paper\.sh|configs/backtest\.yaml|configs/observer\.yaml|configs/paper\.yaml|configs/replay\.yaml|configs/experiments/semiconductor_network_intraday_v1\.yaml|configs/platform/paper\.yaml|configs/platform/offline\.yaml|configs/platform/shadow\.yaml|src/adaptive_trader/platform/config\.py|src/adaptive_trader/platform/universe\.py|src/adaptive_trader/platform/domain\.py|tests/research/test_backtest_execution_honesty\.py|tests/research/test_undefined_metric_reporting\.py|tests/research/test_historical_outputs\.py|tests/research/test_forward_decision_engine\.py|tests/research/test_risk_safety_semantics\.py|tests/test_allocator\.py|tests/test_backtest\.py|tests/test_strategies\.py|tests/test_regimes\.py|tests/test_no_lookahead\.py|tests/test_metrics\.py|tests/test_data\.py|tests/test_risk\.py|tests/test_config_safety\.py|tests/test_integration\.py|tests/test_cli_modes\.py|tests/test_dashboard_and_forward_reporting\.py|tests/test_live_replay_service\.py|tests/test_phase2_observer_evidence\.py)$
+      - id: end-of-file-fixer
+        exclude: ^(?:src/adaptive_trader/strategies/__init__\.py|src/adaptive_trader/strategies/mean_reversion\.py|src/adaptive_trader/strategies/momentum\.py|src/adaptive_trader/strategies/base\.py|src/adaptive_trader/allocator\.py|src/adaptive_trader/backtest\.py|src/adaptive_trader/config\.py|src/adaptive_trader/data\.py|src/adaptive_trader/decision_engine\.py|src/adaptive_trader/features\.py|src/adaptive_trader/metrics\.py|src/adaptive_trader/models\.py|src/adaptive_trader/regimes\.py|src/adaptive_trader/reporting\.py|src/adaptive_trader/risk\.py|docs/methodology\.md|src/adaptive_trader/cli\.py|src/adaptive_trader/live\.py|src/adaptive_trader/replay\.py|src/adaptive_trader/market_data_live\.py|src/adaptive_trader/forward_reporting\.py|src/adaptive_trader/observer_evidence\.py|src/adaptive_trader/persistence\.py|src/adaptive_trader/live_models\.py|scripts/validate_real_data_dry_run\.py|scripts/generate_phase2_quality_evidence\.py|scripts/audit_observer_session\.py|scripts/summarize_observer_evidence\.py|scripts/run_observer\.sh|scripts/run_full_observer_session\.sh|scripts/run_paper\.sh|configs/backtest\.yaml|configs/observer\.yaml|configs/paper\.yaml|configs/replay\.yaml|configs/experiments/semiconductor_network_intraday_v1\.yaml|configs/platform/paper\.yaml|configs/platform/offline\.yaml|configs/platform/shadow\.yaml|src/adaptive_trader/platform/config\.py|src/adaptive_trader/platform/universe\.py|src/adaptive_trader/platform/domain\.py|tests/research/test_backtest_execution_honesty\.py|tests/research/test_undefined_metric_reporting\.py|tests/research/test_historical_outputs\.py|tests/research/test_forward_decision_engine\.py|tests/research/test_risk_safety_semantics\.py|tests/test_allocator\.py|tests/test_backtest\.py|tests/test_strategies\.py|tests/test_regimes\.py|tests/test_no_lookahead\.py|tests/test_metrics\.py|tests/test_data\.py|tests/test_risk\.py|tests/test_config_safety\.py|tests/test_integration\.py|tests/test_cli_modes\.py|tests/test_dashboard_and_forward_reporting\.py|tests/test_live_replay_service\.py|tests/test_phase2_observer_evidence\.py)$
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+        exclude: ^tests/unit/test_platform_audit_repository\.py$
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: 68e8b45440415753fff70a312ece8da92ba85b4a
+    hooks:
+      - id: detect-secrets
+        require_serial: true
+        args: [--baseline, .secrets.baseline]
+        exclude: ^uv\.lock$

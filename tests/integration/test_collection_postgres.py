@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import cast
@@ -18,7 +19,11 @@ from sqlalchemy import create_engine, delete, func, inspect, select, text, updat
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.schema import DropSchema
 
-from adaptive_trader.collection.contracts import MarketBarV1, RawBarObservationV1
+from adaptive_trader.collection.contracts import (
+    MarketBarV1,
+    RawBarObservationV1,
+    RawBarObservationV2,
+)
 from adaptive_trader.collection.migrations import (
     database_revision,
     upgrade_database,
@@ -31,6 +36,7 @@ from adaptive_trader.collection.postgres import (
 from adaptive_trader.collection.repository import (
     CheckpointKey,
     CheckpointRegressionError,
+    CollectionPersistenceError,
     CoverageAdvance,
     LeaseLostError,
     LeaseToken,
@@ -39,6 +45,7 @@ from adaptive_trader.collection.repository import (
 from adaptive_trader.collection.schema import (
     SCHEMA_NAME,
     bar_observations,
+    canonical_work,
     collection_universes,
     collector_checkpoints,
     collector_leases,
@@ -46,6 +53,7 @@ from adaptive_trader.collection.schema import (
     ingestion_runs,
 )
 from adaptive_trader.collection.universe import COLLECTION_UNIVERSE_V1
+from adaptive_trader.platform.storage.market_data import BarIdentity, MarketDataRepository
 
 pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 
@@ -663,3 +671,317 @@ def test_checkpoint_guards_reject_delete_and_truncate(
         with pytest.raises(DBAPIError) as exc_info, repository.engine.begin() as connection:
             connection.execute(statement)
         assert "collector checkpoints cannot be removed" in str(exc_info.value.orig)
+
+
+@pytest.fixture
+def canonical_repository(database_url: str) -> Iterator[PostgresMarketDataRepository]:
+    selected = PostgresMarketDataRepository(
+        database_url, application_name="collection-canonical-pg-tests", canonical=True
+    )
+    try:
+        yield selected
+    finally:
+        selected.close()
+
+
+def _canonical_identity(observation: RawBarObservationV1) -> BarIdentity:
+    bar = observation.bar
+    return BarIdentity(
+        provider="alpaca",
+        feed="iex",
+        adjustment="raw",
+        symbol=bar.symbol,
+        timeframe="1Min",
+        start_at=bar.bar_timestamp_utc,
+        end_at=bar.bar_timestamp_utc + timedelta(minutes=1),
+    )
+
+
+def _work_generation(repository: PostgresMarketDataRepository, symbol: str) -> int:
+    with repository.engine.connect() as connection:
+        return int(
+            connection.scalar(
+                select(canonical_work.c.generation).where(
+                    canonical_work.c.symbol == symbol,
+                    canonical_work.c.session_date == _BASE.date(),
+                )
+            )
+            or 0
+        )
+
+
+def test_canonical_mirror_uses_winning_source_and_preserves_raw_lineage(
+    canonical_repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    winning = _observation(minute=180, source="historical_reconciliation", close="104")
+    losing = _observation(minute=180, source="iex_bar", close="102", receipt_offset_seconds=90)
+    canonical = MarketDataRepository(canonical_repository.engine)
+
+    canonical_repository.append_batch((winning,), lease=mutation_lease)
+    generation = _work_generation(canonical_repository, "SPY")
+    canonical_repository.append_batch((losing,), lease=mutation_lease)
+    canonical_repository.append_batch((winning,), lease=mutation_lease)
+
+    history = canonical.list_events(_canonical_identity(winning))
+    assert len(history) == 1
+    assert history[0].bar.close == Decimal("104")
+    assert history[0].bar.source_event_id == f"observation_{winning.observation_id}"
+    assert history[0].bar.source_payload_hash == winning.raw_payload_sha256
+    assert _work_generation(canonical_repository, "SPY") == generation
+    with canonical_repository.engine.connect() as connection:
+        assert (
+            connection.scalar(
+                select(func.count())
+                .select_from(bar_observations)
+                .where(
+                    bar_observations.c.observation_id.in_(
+                        (winning.observation_id, losing.observation_id)
+                    )
+                )
+            )
+            == 2
+        )
+
+
+def test_canonical_batch_prelocks_corrections_and_retains_earlier_receipts(
+    canonical_repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    originals = tuple(
+        _observation(minute=minute, receipt_offset_seconds=120) for minute in (190, 192, 191)
+    )
+    corrections = tuple(
+        _observation(
+            minute=minute,
+            close="103",
+            source="historical_reconciliation",
+            receipt_offset_seconds=90,
+        )
+        for minute in (191, 190, 192)
+    )
+    canonical_repository.append_batch(originals, lease=mutation_lease)
+    canonical_repository.append_batch(corrections, lease=mutation_lease)
+    canonical = MarketDataRepository(canonical_repository.engine)
+    for correction in corrections:
+        history = canonical.list_events(_canonical_identity(correction))
+        assert len(history) == 2
+        assert history[1].bar.close == Decimal("103")
+        assert history[1].bar.received_at == correction.bar.receipt_timestamp_utc
+        assert history[1].bar.received_at < history[0].bar.received_at
+        assert history[1].correction_of_event_id == history[0].bar_event_id
+
+
+def test_canonical_raw_queue_and_checkpoint_share_rollback(
+    canonical_repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    observation = _observation(minute=200)
+    key = CheckpointKey("canonical-rollback", "alpaca", "IEX", "raw", "SPY", "1m")
+    generation = _work_generation(canonical_repository, "SPY")
+    boundary = observation.bar.bar_timestamp_utc + timedelta(minutes=1)
+    with pytest.raises(CollectionPersistenceError, match="unknown last observation"):
+        canonical_repository.append_batch(
+            (observation,),
+            lease=mutation_lease,
+            coverage_advances=(
+                CoverageAdvance(
+                    key,
+                    boundary,
+                    metadata={
+                        "window_start": observation.bar.bar_timestamp_utc.isoformat(),
+                        "window_end": boundary.isoformat(),
+                    },
+                    last_bar_timestamp_utc=observation.bar.bar_timestamp_utc,
+                    last_observation_id="0" * 64,
+                ),
+            ),
+        )
+    assert (
+        MarketDataRepository(canonical_repository.engine).latest(_canonical_identity(observation))
+        is None
+    )
+    assert canonical_repository.checkpoints(checkpoint_name="canonical-rollback") == {}
+    assert _work_generation(canonical_repository, "SPY") == generation
+    with canonical_repository.engine.connect() as connection:
+        assert (
+            connection.scalar(
+                select(bar_observations.c.observation_id).where(
+                    bar_observations.c.observation_id == observation.observation_id
+                )
+            )
+            is None
+        )
+
+
+def test_canonical_empty_historical_range_enqueues_gap_inspection(
+    canonical_repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    key = CheckpointKey("canonical-empty", "alpaca", "IEX", "raw", "AAOI", "1m")
+    boundary = _BASE + timedelta(minutes=10)
+    canonical_repository.append_batch(
+        (),
+        lease=mutation_lease,
+        coverage_advances=(
+            CoverageAdvance(
+                key,
+                _BASE + timedelta(days=5),
+                metadata={"window_start": _BASE.isoformat(), "window_end": boundary.isoformat()},
+            ),
+        ),
+    )
+    with canonical_repository.engine.connect() as connection:
+        row = (
+            connection.execute(
+                select(canonical_work).where(
+                    canonical_work.c.symbol == "AAOI", canonical_work.c.session_date == _BASE.date()
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert row["through_at"] == boundary
+    assert row["generation"] >= 1
+
+
+def test_receipt_aware_raw_evidence_preserves_a_b_a_and_economic_duplicates(
+    canonical_repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    observations: list[RawBarObservationV2] = []
+    for index, value in enumerate(("100", "103", "100", "100")):
+        fixture = _observation(minute=210, source="historical_reconciliation", close=value)
+        observations.append(
+            RawBarObservationV2(
+                bar=replace(
+                    fixture.bar,
+                    receipt_timestamp_utc=fixture.bar.receipt_timestamp_utc
+                    + timedelta(seconds=index),
+                ),
+                raw_payload_json=fixture.raw_payload_json,
+            )
+        )
+    for observation in observations:
+        canonical_repository.append_batch((observation,), lease=mutation_lease)
+    retry = canonical_repository.append_batch((observations[-1],), lease=mutation_lease)
+
+    assert retry.observations_inserted == 0
+    assert retry.duplicates == 1
+    history = MarketDataRepository(canonical_repository.engine).list_events(
+        _canonical_identity(observations[0])
+    )
+    assert [event.bar.close for event in history] == [
+        Decimal("100"),
+        Decimal("103"),
+        Decimal("100"),
+    ]
+    with canonical_repository.engine.connect() as connection:
+        raw = connection.execute(
+            select(bar_observations.c.schema_version, bar_observations.c.receipt_timestamp_utc)
+            .where(
+                bar_observations.c.observation_id.in_(
+                    [item.observation_id for item in observations]
+                )
+            )
+            .order_by(bar_observations.c.receipt_timestamp_utc)
+        ).all()
+        current = connection.execute(
+            select(current_bars.c.current_observation_id, current_bars.c.close).where(
+                current_bars.c.identity_hash == observations[0].identity_hash
+            )
+        ).one()
+    assert len(raw) == 4
+    assert [row.schema_version for row in raw] == ["raw-bar-observation.v2"] * 4
+    assert [row.receipt_timestamp_utc for row in raw] == [
+        item.bar.receipt_timestamp_utc for item in observations
+    ]
+    assert current.current_observation_id == observations[-1].observation_id
+    assert current.close == Decimal("100")
+
+
+def test_canonical_rebuild_pages_existing_v1_winners_without_rewriting_evidence(
+    repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    legacy = _observation(minute=225, source="historical_reconciliation", close="105")
+    repository.append_batch((legacy,), lease=mutation_lease)
+    canonical = MarketDataRepository(repository.engine)
+    assert canonical.latest(_canonical_identity(legacy)) is None
+    with repository.engine.connect() as connection:
+        original_raw = connection.execute(
+            select(bar_observations.c.observation_id, bar_observations.c.schema_version).order_by(
+                bar_observations.c.observation_id
+            )
+        ).all()
+        original_checkpoints = connection.execute(
+            select(collector_checkpoints).order_by(
+                collector_checkpoints.c.checkpoint_name, collector_checkpoints.c.symbol
+            )
+        ).all()
+        original_count = connection.scalar(select(func.count()).select_from(current_bars))
+    cursor = None
+    processed = 0
+    while True:
+        count, next_cursor = repository.rebuild_canonical_batch(
+            lease=mutation_lease, after_identity_hash=cursor, limit=2
+        )
+        if not count:
+            assert next_cursor is None
+            break
+        assert next_cursor is not None and (cursor is None or next_cursor > cursor)
+        assert 1 <= count <= 2
+        processed += count
+        cursor = next_cursor
+    assert processed == original_count
+    restored = canonical.latest(_canonical_identity(legacy))
+    assert restored is not None
+    assert restored.bar.close == Decimal("105")
+    assert restored.bar.source_event_id == "observation_" + legacy.observation_id
+    assert restored.bar.source_payload_hash == legacy.raw_payload_sha256
+    assert restored.bar.received_at == legacy.bar.receipt_timestamp_utc
+    generation = _work_generation(repository, "SPY")
+    # The immediately preceding digest gives an exact retry of the selected legacy row.
+    predecessor = f"{int(legacy.identity_hash, 16) - 1:064x}"
+    assert repository.rebuild_canonical_batch(
+        lease=mutation_lease, after_identity_hash=predecessor, limit=1
+    ) == (1, legacy.identity_hash)
+    assert len(canonical.list_events(_canonical_identity(legacy))) == 1
+    assert _work_generation(repository, "SPY") == generation + 1
+    with repository.engine.connect() as connection:
+        assert (
+            connection.execute(
+                select(
+                    bar_observations.c.observation_id, bar_observations.c.schema_version
+                ).order_by(bar_observations.c.observation_id)
+            ).all()
+            == original_raw
+        )
+        assert (
+            connection.execute(
+                select(collector_checkpoints).order_by(
+                    collector_checkpoints.c.checkpoint_name, collector_checkpoints.c.symbol
+                )
+            ).all()
+            == original_checkpoints
+        )
+
+
+def test_canonical_rebuild_and_derived_validation_reject_stale_ownership(
+    repository: PostgresMarketDataRepository,
+    mutation_lease: LeaseToken,
+) -> None:
+    stale = replace(mutation_lease, fencing_token=mutation_lease.fencing_token + 1)
+    generation = _work_generation(repository, "SPY")
+    with pytest.raises(LeaseLostError):
+        repository.rebuild_canonical_batch(lease=stale, limit=1)
+    with repository.engine.begin() as connection:
+        with pytest.raises(LeaseLostError):
+            repository.validate_ownership(connection, lease=stale)
+        repository.validate_ownership(connection, lease=mutation_lease)
+    assert _work_generation(repository, "SPY") == generation
+    with (
+        repository.engine.connect() as connection,
+        pytest.raises(CollectionPersistenceError, match="active database transaction"),
+    ):
+        repository.validate_ownership(connection, lease=mutation_lease)

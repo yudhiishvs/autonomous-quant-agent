@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from sqlalchemy import Connection, Engine, insert, select, update
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from adaptive_trader.platform.canonical import canonical_json_bytes
 from adaptive_trader.platform.constants import MAX_SIGNED_64_BIT_INTEGER
 from adaptive_trader.platform.data.calendar import ExchangeCalendar, TradingInterval
 from adaptive_trader.platform.domain import AuditPayload, AuditWriter, require_utc_instant
@@ -451,36 +453,106 @@ def compute_symbol_readiness(
         raise ReadinessValidationError("watermark quality policy is invalid")
     events = _require_events(effective_events, series)
     gaps = _require_gaps(unresolved_gaps, series)
-    by_start = {event.identity.start_at: event for event in events}
+    return _compute_symbol_readiness_stream(series, expected, iter(events), gaps, quality_policy)
 
+
+def compute_symbol_readiness_from_batches(
+    *,
+    series: DataSeries,
+    expected_intervals: Sequence[TradingInterval],
+    effective_event_batches: Iterable[Sequence[StoredBarEvent]],
+    unresolved_gaps: Sequence[DataGap],
+    quality_policy: BarQualityPolicy = STRICT_COMPLETE_QUALITY,
+) -> SymbolReadiness:
+    """Compute the identical readiness digest while retaining one verified event batch.
+
+    Batch producers must preserve chronological order. Each batch and each cross-batch
+    transition is validated; no receipt-time cursor or truncated history is accepted.
+    """
+
+    if type(series) is not DataSeries:
+        raise ReadinessValidationError("watermark series is invalid")
+    expected = _require_interval_sequence(expected_intervals, series.timeframe)
+    if not expected:
+        raise ReadinessValidationError("watermark computation requires expected intervals")
+    if type(quality_policy) is not BarQualityPolicy:
+        raise ReadinessValidationError("watermark quality policy is invalid")
+    gaps = _require_gaps(unresolved_gaps, series)
+
+    def verified_events() -> Iterator[StoredBarEvent]:
+        previous: StoredBarEvent | None = None
+        for batch in effective_event_batches:
+            for event in _require_events(batch, series):
+                if previous is not None and event.identity.start_at <= previous.identity.start_at:
+                    raise ReadinessValidationError("event batches must be uniquely ordered")
+                previous = event
+                yield event
+
+    return _compute_symbol_readiness_stream(
+        series, expected, verified_events(), gaps, quality_policy
+    )
+
+
+def _compute_symbol_readiness_stream(
+    series: DataSeries,
+    expected: Sequence[TradingInterval],
+    events: Iterator[StoredBarEvent],
+    gaps: Sequence[DataGap],
+    quality_policy: BarQualityPolicy,
+) -> SymbolReadiness:
+    current_event = next(events, None)
+    remaining_gaps = iter(gaps)
+    next_gap = next(remaining_gaps, None)
+    active_gaps: list[DataGap] = []
     contiguous_through: datetime | None = None
     latest_event: StoredBarEvent | None = None
     blocking_interval: TradingInterval | None = None
     blocking_gap_ids: tuple[str, ...] = ()
-    quality_components: list[tuple[Any, ...]] = []
+    # Stream the byte-identical canonical array, avoiding the generic encoder's
+    # aggregate node cap without relaxing its per-component type/size validation.
+    digest = hashlib.sha256()
+    digest.update(
+        canonical_json_bytes(
+            ("symbol_readiness_v1", series.hash_input, quality_policy.policy_hash)
+        )[:-1]
+    )
+    digest.update(b",[")
+    first_component = True
     for interval in expected:
-        interval_gaps = tuple(
-            gap.gap_id
-            for gap in gaps
-            if gap.start_at < interval.end_at and gap.end_at > interval.start_at
+        active_gaps = [gap for gap in active_gaps if gap.end_at > interval.start_at]
+        while next_gap is not None and next_gap.start_at < interval.end_at:
+            if next_gap.end_at > interval.start_at:
+                active_gaps.append(next_gap)
+            next_gap = next(remaining_gaps, None)
+        interval_gaps = tuple(gap.gap_id for gap in active_gaps)
+        while current_event is not None and current_event.identity.start_at < interval.start_at:
+            current_event = next(events, None)
+        event = (
+            current_event
+            if current_event is not None and current_event.identity.start_at == interval.start_at
+            else None
         )
-        event = by_start.get(interval.start_at)
         approved = bool(
             event is not None
             and event.identity.end_at == interval.end_at
             and event.identity.timeframe == series.timeframe
             and quality_policy.approves(event)
         )
-        quality_components.append(
-            (
-                interval.start_at,
-                interval.end_at,
-                None if event is None else event.bar_event_id,
-                None if event is None else event.revision,
-                None if event is None else event.normalized_payload_hash,
-                None if event is None else event.bar.quality_flags,
-                approved,
-                interval_gaps,
+        if not first_component:
+            digest.update(b",")
+        first_component = False
+        digest.update(
+            canonical_json_bytes(
+                (
+                    interval.start_at,
+                    interval.end_at,
+                    None if event is None else event.bar_event_id,
+                    None if event is None else event.revision,
+                    None if event is None else event.normalized_payload_hash,
+                    None if event is None else event.bar.quality_flags,
+                    approved,
+                    interval_gaps,
+                )
             )
         )
         if blocking_interval is None and (interval_gaps or not approved):
@@ -490,14 +562,11 @@ def compute_symbol_readiness(
             contiguous_through = interval.end_at
             latest_event = event
 
-    quality_hash = sha256_hex(
-        (
-            "symbol_readiness_v1",
-            series.hash_input,
-            quality_policy.policy_hash,
-            tuple(quality_components),
-        )
-    )
+    # Exhaust any trailing batches so invalid ordering cannot hide past the range.
+    for _ in events:
+        pass
+    digest.update(b"]]")
+    quality_hash = digest.hexdigest()
     return SymbolReadiness(
         series=series,
         range_start_at=expected[0].start_at,
@@ -940,98 +1009,152 @@ class WatermarkRepository:
                     unresolved_gaps=gaps,
                     quality_policy=quality_policy,
                 )
-                current = _select_symbol_watermark(
+                return self._persist_symbol_readiness(
                     connection,
                     experiment_hash=experiment_hash,
-                    series=series,
-                    lock=True,
-                )
-                if readiness.latest_contiguous_event is None:
-                    if current is not None and (
-                        current.contiguous_through == readiness.range_start_at
-                        and current.quality_hash == readiness.quality_hash
-                        and current.latest_bar_event_id is None
-                    ):
-                        return readiness, current
-                    if current is not None and current.version >= MAX_SIGNED_64_BIT_INTEGER:
-                        raise ReadinessIntegrityError(
-                            "symbol watermark version capacity is exhausted"
-                        )
-                    candidate = _new_blocked_symbol_watermark(
-                        experiment_hash=experiment_hash,
-                        readiness=readiness,
-                        version=1 if current is None else current.version + 1,
-                        updated_at=updated_at,
-                    )
-                    if current is not None and updated_at <= current.updated_at:
-                        raise ReadinessValidationError(
-                            "changed watermark recomputation must follow durable state time"
-                        )
-                    if current is None:
-                        connection.execute(
-                            insert(aqa_symbol_watermarks).values(
-                                **_symbol_watermark_values(candidate)
-                            )
-                        )
-                    else:
-                        result = connection.execute(
-                            update(aqa_symbol_watermarks)
-                            .where(
-                                aqa_symbol_watermarks.c.symbol_watermark_id
-                                == current.symbol_watermark_id,
-                                aqa_symbol_watermarks.c.version == current.version,
-                            )
-                            .values(**_symbol_watermark_values(candidate, include_identity=False))
-                        )
-                        if result.rowcount != 1:
-                            raise ReadinessPersistenceError(
-                                "symbol watermark update lost its concurrency fence"
-                            )
-                    self._audit_symbol_watermark(connection, candidate)
-                    return readiness, candidate
-                if current is not None and (
-                    current.contiguous_through == readiness.contiguous_through
-                    and current.quality_hash == readiness.quality_hash
-                    and current.latest_bar_event_id
-                    == readiness.latest_contiguous_event.bar_event_id
-                ):
-                    return readiness, current
-                if current is not None and current.version >= MAX_SIGNED_64_BIT_INTEGER:
-                    raise ReadinessIntegrityError("symbol watermark version capacity is exhausted")
-                candidate = _new_symbol_watermark(
-                    experiment_hash=experiment_hash,
                     readiness=readiness,
-                    version=1 if current is None else current.version + 1,
                     updated_at=updated_at,
                 )
-                if current is not None and updated_at <= current.updated_at:
-                    raise ReadinessValidationError(
-                        "changed watermark recomputation must follow durable state time"
-                    )
-                if current is None:
-                    connection.execute(
-                        insert(aqa_symbol_watermarks).values(**_symbol_watermark_values(candidate))
-                    )
-                else:
-                    result = connection.execute(
-                        update(aqa_symbol_watermarks)
-                        .where(
-                            aqa_symbol_watermarks.c.symbol_watermark_id
-                            == current.symbol_watermark_id,
-                            aqa_symbol_watermarks.c.version == current.version,
-                        )
-                        .values(**_symbol_watermark_values(candidate, include_identity=False))
-                    )
-                    if result.rowcount != 1:
-                        raise ReadinessPersistenceError(
-                            "symbol watermark update lost its concurrency fence"
-                        )
-                self._audit_symbol_watermark(connection, candidate)
-                return readiness, candidate
         except (ReadinessIntegrityError, ReadinessPersistenceError, ReadinessValidationError):
             raise
         except SQLAlchemyError:
             raise ReadinessPersistenceError("symbol watermark could not be persisted") from None
+
+    def publish_symbol_snapshot(
+        self,
+        *,
+        experiment_hash: str,
+        readiness: SymbolReadiness,
+        updated_at: datetime,
+        verify_snapshot: Callable[[Connection], None],
+    ) -> tuple[SymbolReadiness, SymbolWatermark | None]:
+        """Publish precomputed readiness only after its source fence is revalidated.
+
+        This narrow collector adapter avoids keeping the lease row locked while reading
+        and hashing an entire history. The caller must verify all source generations,
+        configuration identity, and unresolved gap hashes on the supplied transaction.
+        Its engine must fence collection writes with the current collector lease. An
+        exception from the verifier aborts publication; existing generic callers keep
+        the fully locked ``recompute_symbol`` path unchanged.
+        """
+
+        _require_hash(experiment_hash, field_name="experiment hash")
+        if type(readiness) is not SymbolReadiness or type(readiness.series) is not DataSeries:
+            raise ReadinessValidationError("symbol readiness snapshot is invalid")
+        _require_utc_range(readiness.range_start_at, readiness.range_end_at)
+        _require_hash(readiness.quality_hash, field_name="quality hash")
+        updated_at = _require_utc(updated_at, field_name="updated_at")
+        if updated_at < readiness.range_end_at:
+            raise ReadinessValidationError("snapshot publication precedes its inspected range")
+        if not callable(verify_snapshot):
+            raise ReadinessValidationError("snapshot publication requires a source verifier")
+        if not self._engine.get_execution_options().get("aqa_derived_transaction"):
+            raise ReadinessValidationError("snapshot publication requires the collector boundary")
+        try:
+            with self.transaction() as connection:
+                self._lock_series_and_bars(connection, experiment_hash, readiness.series, ())
+                verify_snapshot(connection)
+                return self._persist_symbol_readiness(
+                    connection,
+                    experiment_hash=experiment_hash,
+                    readiness=readiness,
+                    updated_at=updated_at,
+                )
+        except (ReadinessIntegrityError, ReadinessPersistenceError, ReadinessValidationError):
+            raise
+        except SQLAlchemyError:
+            raise ReadinessPersistenceError("symbol snapshot could not be persisted") from None
+
+    def _persist_symbol_readiness(
+        self,
+        connection: Connection,
+        *,
+        experiment_hash: str,
+        readiness: SymbolReadiness,
+        updated_at: datetime,
+    ) -> tuple[SymbolReadiness, SymbolWatermark | None]:
+        series = readiness.series
+        current = _select_symbol_watermark(
+            connection,
+            experiment_hash=experiment_hash,
+            series=series,
+            lock=True,
+        )
+        if readiness.latest_contiguous_event is None:
+            if current is not None and (
+                current.contiguous_through == readiness.range_start_at
+                and current.quality_hash == readiness.quality_hash
+                and current.latest_bar_event_id is None
+            ):
+                return readiness, current
+            if current is not None and current.version >= MAX_SIGNED_64_BIT_INTEGER:
+                raise ReadinessIntegrityError("symbol watermark version capacity is exhausted")
+            candidate = _new_blocked_symbol_watermark(
+                experiment_hash=experiment_hash,
+                readiness=readiness,
+                version=1 if current is None else current.version + 1,
+                updated_at=updated_at,
+            )
+            if current is not None and updated_at <= current.updated_at:
+                raise ReadinessValidationError(
+                    "changed watermark recomputation must follow durable state time"
+                )
+            if current is None:
+                connection.execute(
+                    insert(aqa_symbol_watermarks).values(**_symbol_watermark_values(candidate))
+                )
+            else:
+                result = connection.execute(
+                    update(aqa_symbol_watermarks)
+                    .where(
+                        aqa_symbol_watermarks.c.symbol_watermark_id == current.symbol_watermark_id,
+                        aqa_symbol_watermarks.c.version == current.version,
+                    )
+                    .values(**_symbol_watermark_values(candidate, include_identity=False))
+                )
+                if result.rowcount != 1:
+                    raise ReadinessPersistenceError(
+                        "symbol watermark update lost its concurrency fence"
+                    )
+            self._audit_symbol_watermark(connection, candidate)
+            return readiness, candidate
+        if current is not None and (
+            current.contiguous_through == readiness.contiguous_through
+            and current.quality_hash == readiness.quality_hash
+            and current.latest_bar_event_id == readiness.latest_contiguous_event.bar_event_id
+        ):
+            return readiness, current
+        if current is not None and current.version >= MAX_SIGNED_64_BIT_INTEGER:
+            raise ReadinessIntegrityError("symbol watermark version capacity is exhausted")
+        candidate = _new_symbol_watermark(
+            experiment_hash=experiment_hash,
+            readiness=readiness,
+            version=1 if current is None else current.version + 1,
+            updated_at=updated_at,
+        )
+        if current is not None and updated_at <= current.updated_at:
+            raise ReadinessValidationError(
+                "changed watermark recomputation must follow durable state time"
+            )
+        if current is None:
+            connection.execute(
+                insert(aqa_symbol_watermarks).values(**_symbol_watermark_values(candidate))
+            )
+        else:
+            result = connection.execute(
+                update(aqa_symbol_watermarks)
+                .where(
+                    aqa_symbol_watermarks.c.symbol_watermark_id == current.symbol_watermark_id,
+                    aqa_symbol_watermarks.c.version == current.version,
+                )
+                .values(**_symbol_watermark_values(candidate, include_identity=False))
+            )
+            if result.rowcount != 1:
+                raise ReadinessPersistenceError(
+                    "symbol watermark update lost its concurrency fence"
+                )
+        self._audit_symbol_watermark(connection, candidate)
+        return readiness, candidate
 
     def recompute_active_basket(
         self,
@@ -2065,5 +2188,6 @@ __all__ = [
     "SymbolReadiness",
     "WatermarkRepository",
     "compute_symbol_readiness",
+    "compute_symbol_readiness_from_batches",
     "detect_data_gaps",
 ]

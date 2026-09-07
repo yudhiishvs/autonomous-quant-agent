@@ -81,6 +81,23 @@ class LiveBarSource(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalRepairWindow:
+    """One durable canonical gap selected for a bounded historical retry."""
+
+    gap_id: str
+    start: datetime
+    end: datetime
+
+    def __post_init__(self) -> None:
+        start = _as_utc(self.start, name="repair start")
+        end = _as_utc(self.end, name="repair end")
+        if not self.gap_id or len(self.gap_id) > 128:
+            raise ValueError("repair gap identity is invalid")
+        if not start < end or end - start > timedelta(hours=7):
+            raise ValueError("repair range must fit within one regular session")
+
+
+@dataclass(frozen=True, slots=True)
 class CollectorServiceConfig:
     """Operational controls whose defaults favor recovery over dropped data."""
 
@@ -122,6 +139,8 @@ class CollectorServiceConfig:
             raise ValueError("lease renewal must run at less than half the lease TTL")
         if self.api_symbol_batch_size > len(COLLECTION_UNIVERSE_V1.symbols):
             raise ValueError("api_symbol_batch_size cannot exceed the collection universe")
+        if not 1 <= self.database_batch_size <= 1000:
+            raise ValueError("database_batch_size must be between 1 and 1000")
         retry_values = {
             "retry_initial_seconds": self.retry_initial_seconds,
             "retry_max_seconds": self.retry_max_seconds,
@@ -159,7 +178,7 @@ def _as_utc(value: datetime, *, name: str) -> datetime:
 
 
 def _session_windows(start: datetime, end: datetime) -> tuple[tuple[datetime, datetime], ...]:
-    """Clip a UTC interval to actual XNYS regular sessions, including early closes."""
+    """Clip a UTC interval to XNAS regular sessions, including early closes."""
 
     start_utc = _as_utc(start, name="start")
     end_utc = _as_utc(end, name="end")
@@ -168,7 +187,7 @@ def _session_windows(start: datetime, end: datetime) -> tuple[tuple[datetime, da
     calendar_start = datetime.combine(start_utc.date() - timedelta(days=7), time.min)
     calendar_end = datetime.combine(end_utc.date() + timedelta(days=7), time.min)
     calendar = exchange_calendars.get_calendar(
-        "XNYS",
+        "XNAS",
         start=calendar_start,
         end=calendar_end,
     )
@@ -197,6 +216,9 @@ class CollectorService:
         clock: Callable[[], datetime] | None = None,
         random_value: Callable[[], float] | None = None,
         holder_id: str | None = None,
+        maintenance: Callable[[], object] | None = None,
+        prepare: Callable[[str], None] | None = None,
+        repair_window: Callable[[], HistoricalRepairWindow | None] | None = None,
     ) -> None:
         self.repository = repository
         self.historical_source = historical_source
@@ -214,6 +236,35 @@ class CollectorService:
         self._fatal_error: BaseException | None = None
         self._counter_lock = threading.Lock()
         self._counters: defaultdict[str, int] = defaultdict(int)
+        self._maintenance = maintenance
+        self._prepare = prepare
+        self._repair_window = repair_window
+        self._active_run_id: str | None = None
+
+    def stream_state_changed(self, state: str) -> None:
+        """Persist only actual transport authentication/subscription transitions."""
+
+        if state not in {"authenticated", "subscribed", "disconnected"}:
+            raise ValueError("unsupported stream state")
+        if self._active_run_id is None:
+            raise RuntimeError("stream state requires an active collection run")
+        self._record_event(
+            f"market_data_stream_{state}",
+            run_id=self._active_run_id,
+            details={"symbol_count": len(COLLECTION_UNIVERSE_V1.symbols)},
+        )
+
+    def _maintenance_loop(self, run_id: str) -> None:
+        while not self.stop_requested:
+            try:
+                assert self._maintenance is not None
+                self._maintenance()
+            except Exception as error:
+                self._set_fatal(error)
+                self.request_stop()
+                return
+            if self._wait(1):
+                return
 
     @property
     def stop_requested(self) -> bool:
@@ -239,6 +290,18 @@ class CollectorService:
                 raise LeaseLostError("The collector does not hold its singleton lease")
             return self._lease
 
+    def require_active_lease(self) -> LeaseToken:
+        """Expose the current fencing token to derived transactions in this process."""
+
+        if self.stop_requested:
+            raise LeaseLostError("Collector shutdown prevents further derived mutations")
+        return self._lease_token()
+
+    def validate_active_lease(self) -> None:
+        """Reject derived work after shutdown or loss of the process's lease token."""
+
+        self.require_active_lease()
+
     def _acquire_lease(self) -> LeaseToken:
         token = self.repository.try_acquire_lease(
             lease_name=self.config.lease_name,
@@ -255,6 +318,7 @@ class CollectorService:
         with self._lease_lock:
             token = self._lease
             self._lease = None
+            self._active_run_id = None
         if token is not None:
             self.repository.release_lease(token)
 
@@ -416,12 +480,14 @@ class CollectorService:
         committed_through: datetime,
         source: str,
         observations: Sequence[RawBarObservationV1],
+        window_start: datetime | None = None,
     ) -> tuple[CoverageAdvance, ...]:
         latest: dict[str, RawBarObservationV1] = {}
         for observation in observations:
             current = latest.get(observation.bar.symbol)
             if current is None or observation.bar.bar_timestamp_utc > current.bar.bar_timestamp_utc:
                 latest[observation.bar.symbol] = observation
+        checkpoints = self.repository.checkpoints(checkpoint_name=self.config.checkpoint_name)
         return tuple(
             CoverageAdvance(
                 key=CheckpointKey(
@@ -432,8 +498,18 @@ class CollectorService:
                     symbol=symbol,
                     timeframe="1m",
                 ),
-                committed_through_utc=committed_through,
-                metadata={"source": source, "interval_semantics": "half-open"},
+                committed_through_utc=max(
+                    committed_through,
+                    checkpoints[symbol].committed_through_utc or committed_through,
+                )
+                if symbol in checkpoints
+                else committed_through,
+                metadata={
+                    "source": source,
+                    "interval_semantics": "half-open",
+                    "window_end": committed_through.isoformat(),
+                    **({"window_start": window_start.isoformat()} if window_start else {}),
+                },
                 last_bar_timestamp_utc=(
                     None if symbol not in latest else latest[symbol].bar.bar_timestamp_utc
                 ),
@@ -480,6 +556,7 @@ class CollectorService:
                         committed_through=window_end,
                         source=source,
                         observations=observations,
+                        window_start=window_start,
                     ),
                     lease=self._lease_token(),
                 )
@@ -535,7 +612,12 @@ class CollectorService:
                 starts.append(_as_utc(start_if_empty, name="start_if_empty"))
             else:
                 starts.append(checkpoint.committed_through_utc - overlap)
-        return min(starts)
+        resumed = min(starts)
+        return (
+            resumed
+            if start_if_empty is None
+            else max(resumed, _as_utc(start_if_empty, name="start_if_empty"))
+        )
 
     def _reconcile_once(self, *, run_id: str, start_if_empty: datetime | None) -> None:
         end = completed_bar_cutoff(
@@ -586,10 +668,11 @@ class CollectorService:
                 self._set_fatal(exc)
                 return
 
-    def _reconciliation_loop(self, run_id: str) -> None:
+    def _reconciliation_loop(self, run_id: str, history_start: datetime | None = None) -> None:
         while not self._wait(self.config.reconciliation_interval_seconds):
             try:
-                self._reconcile_once(run_id=run_id, start_if_empty=None)
+                self._reconcile_once(run_id=run_id, start_if_empty=history_start)
+                self._repair_gap_once(run_id=run_id)
             except InterruptedError:
                 return
             except Exception as exc:
@@ -607,6 +690,64 @@ class CollectorService:
                     self._set_fatal(exc)
                     return
 
+    def _repair_gap_once(self, *, run_id: str) -> None:
+        if self._repair_window is None or self.stop_requested:
+            return
+        window = self._repair_window()
+        if window is None:
+            return
+        if self._active_run_id != run_id:
+            raise LeaseLostError("gap repair requires the current collection run")
+        self.repair_gap_window(window)
+
+    def repair_gap_window(self, window: HistoricalRepairWindow) -> None:
+        """Repair one authorized exact session window under this process's existing run.
+
+        The caller resolves a durable gap and checks its experiment/history authority. This
+        capability adds no credential or independent lease and cannot operate outside a run.
+        Derived repair verification remains the caller's next step; a successful fetch alone
+        never marks a gap resolved.
+        """
+
+        self.require_active_lease()
+        run_id = self._active_run_id
+        if run_id is None:
+            raise LeaseLostError("gap repair requires the current collection run")
+        if type(window) is not HistoricalRepairWindow:
+            raise TypeError("gap repair requires a bounded historical window")
+        if (
+            window.start.second
+            or window.start.microsecond
+            or window.end.second
+            or window.end.microsecond
+            or _session_windows(window.start, window.end) != ((window.start, window.end),)
+        ):
+            raise ValueError("gap repair must contain complete minutes within one XNAS session")
+        if window.end > completed_bar_cutoff(
+            self._clock(), lag_minutes=self.config.completed_bar_lag_minutes
+        ):
+            raise ValueError("gap repair exceeds completed history")
+        self._record_event(
+            "canonical_gap_reconciliation_started",
+            run_id=run_id,
+            details={
+                "gap_id": window.gap_id,
+                "start": window.start.isoformat(),
+                "end": window.end.isoformat(),
+            },
+        )
+        self._backfill_range(
+            start=window.start,
+            end=window.end,
+            source="historical_reconciliation",
+            run_id=run_id,
+        )
+        self._record_event(
+            "canonical_gap_reconciliation_completed",
+            run_id=run_id,
+            details={"gap_id": window.gap_id},
+        )
+
     def _live_observation(self, observation: RawBarObservationV1) -> None:
         if self.stop_requested:
             return
@@ -623,24 +764,7 @@ class CollectorService:
     def backfill(self, *, start: datetime, end: datetime | None = None) -> dict[str, int]:
         """Run a finite, lease-protected historical backfill."""
 
-        self.repository.verify_schema()
-        self.repository.register_universe()
-        lease = self._acquire_lease()
-        try:
-            run_id = self.repository.start_run(mode="backfill", lease=lease)
-        except BaseException:
-            self._release_lease()
-            raise
-        renew_thread = threading.Thread(
-            target=self._renew_lease_loop,
-            args=(run_id,),
-            name="collector-lease-renewal",
-            daemon=True,
-        )
-        renew_thread.start()
-        status = "completed"
-        error: BaseException | None = None
-        try:
+        def operation(run_id: str) -> None:
             safe_boundary = completed_bar_cutoff(
                 self._clock(),
                 lag_minutes=self.config.completed_bar_lag_minutes,
@@ -654,6 +778,59 @@ class CollectorService:
                 source="historical_backfill",
                 run_id=run_id,
             )
+
+        return self._run_finite(operation)
+
+    def collect_once(self, *, history_start: datetime) -> dict[str, int]:
+        """Resume durable REST coverage and derived work, repair one old gap, then exit.
+
+        The immutable history boundary limits reconciliation overlap. A run uses the existing
+        backfill storage mode and singleton lease, so it cannot overlap a daemon or another run.
+        Checkpoints and queued derived work survive cancellation and an empty runner filesystem.
+        """
+
+        history_start = _as_utc(history_start, name="history_start")
+
+        def operation(run_id: str) -> None:
+            self._record_event("collect_once_started", run_id=run_id)
+            self._drain_maintenance()
+            self._reconcile_once(run_id=run_id, start_if_empty=history_start)
+            self._drain_maintenance()
+            self._repair_gap_once(run_id=run_id)
+
+        return self._run_finite(operation)
+
+    def _drain_maintenance(self) -> None:
+        if self._maintenance is not None:
+            while not self.stop_requested and self._maintenance():
+                pass  # Each successful call acknowledges bounded durable work.
+        if self.stop_requested:
+            raise InterruptedError("Canonical processing interrupted")
+
+    def _run_finite(self, operation: Callable[[str], None]) -> dict[str, int]:
+        self.repository.verify_schema()
+        self.repository.register_universe()
+        lease = self._acquire_lease()
+        try:
+            run_id = self.repository.start_run(mode="backfill", lease=lease)
+            self._active_run_id = run_id
+        except BaseException:
+            self._release_lease()
+            raise
+        renew_thread = threading.Thread(
+            target=self._renew_lease_loop,
+            args=(run_id,),
+            name="collector-lease-renewal",
+            daemon=True,
+        )
+        renew_thread.start()
+        status = "completed"
+        error: BaseException | None = None
+        try:
+            if self._prepare is not None:
+                self._prepare(run_id)
+            operation(run_id)
+            self._drain_maintenance()
             fatal = self._get_fatal()
             if fatal is not None:
                 raise fatal
@@ -695,6 +872,7 @@ class CollectorService:
         lease = self._acquire_lease()
         try:
             run_id = self.repository.start_run(mode="run", lease=lease)
+            self._active_run_id = run_id
         except BaseException:
             self._release_lease()
             raise
@@ -706,13 +884,24 @@ class CollectorService:
         )
         renew_thread.start()
         reconciliation_thread: threading.Thread | None = None
+        maintenance_thread: threading.Thread | None = None
         status = "stopped"
         error: BaseException | None = None
         try:
+            if self._prepare is not None:
+                self._prepare(run_id)
+            if self._maintenance is not None:
+                maintenance_thread = threading.Thread(
+                    target=self._maintenance_loop,
+                    args=(run_id,),
+                    name="collector-canonical-processing",
+                    daemon=True,
+                )
+                maintenance_thread.start()
             self._reconcile_once(run_id=run_id, start_if_empty=start_if_empty)
             reconciliation_thread = threading.Thread(
                 target=self._reconciliation_loop,
-                args=(run_id,),
+                args=(run_id, start_if_empty),
                 name="collector-rest-reconciliation",
                 daemon=True,
             )
@@ -769,6 +958,8 @@ class CollectorService:
             workers = [renew_thread]
             if reconciliation_thread is not None:
                 workers.append(reconciliation_thread)
+            if maintenance_thread is not None:
+                workers.append(maintenance_thread)
             try:
                 self._join_workers(workers)
             except BaseException as exc:

@@ -824,3 +824,36 @@ def test_artifact_permissions_are_not_world_accessible(
     assert os.stat(directory).st_mode & 0o007 == 0
     assert os.stat(directory / "bars.parquet").st_mode & 0o007 == 0
     assert os.stat(directory / "manifest.json").st_mode & 0o007 == 0
+
+
+def test_dataset_creation_cannot_precede_completed_range(
+    experiment: ExperimentDefinition,
+) -> None:
+    with pytest.raises(DatasetValidationError, match="creation precedes"):
+        _request(experiment, created_at=_START)
+
+
+def test_freeze_rejects_observations_unavailable_at_creation(
+    tmp_path: Path, experiment: ExperimentDefinition
+) -> None:
+    original = _effective("AMD", 0, revision=2, is_correction=True)
+    late = replace(
+        original,
+        bar=replace(original.bar, receipt_timestamp_utc=_CREATED + timedelta(microseconds=1)),
+    )
+    request = _request(experiment, bars=(late,))
+    with (
+        LocalFilesystemArtifactStore(trusted_artifact_root=tmp_path.resolve()) as store,
+        pytest.raises(DatasetValidationError, match="unavailable at creation"),
+    ):
+        freeze_dataset(request, store=store)
+
+
+def test_freeze_accepts_observation_at_creation_boundary(
+    tmp_path: Path, experiment: ExperimentDefinition
+) -> None:
+    original = _effective("AMD", 0)
+    known = replace(original, bar=replace(original.bar, receipt_timestamp_utc=_CREATED))
+    with LocalFilesystemArtifactStore(trusted_artifact_root=tmp_path.resolve()) as store:
+        frozen = freeze_dataset(_request(experiment, bars=(known,)), store=store)
+    assert frozen.promotable is True

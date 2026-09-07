@@ -32,10 +32,10 @@ The physical platform inventory is:
 | Area | Tables | Current storage behavior |
 | --- | --- | --- |
 | Experiment and security identity | `aqa_experiments`, `aqa_experiment_symbols`, `aqa_security_metadata_events` | Append-only definitions and observations with explicit content or payload hashes. Repository workflows that populate these tables remain later work. |
-| Market data and readiness | `aqa_bar_identities`, `aqa_bar_events`, `aqa_bar_latest`, `aqa_data_gaps`, `aqa_symbol_watermarks`, `aqa_basket_watermarks`, `aqa_dataset_manifests` | The bar revision/latest/symbol-watermark transaction is implemented. Calendar-aware gap lifecycle, basket computation, aggregation, and dataset freezing remain Phase 3 work. |
-| Scheduling and decisions | `aqa_decision_slots`, `aqa_signal_envelopes`, `aqa_risk_latch_events`, `aqa_risk_decisions`, `aqa_execution_plans` | Physical constraints exist; the scheduler, signal, and risk repositories and services remain incomplete. |
-| Execution and reconciliation | `aqa_order_intents`, `aqa_broker_orders`, `aqa_order_events`, `aqa_fills`, `aqa_reconciliations`, `aqa_incidents` | Physical constraints exist; the generic execution repositories and services remain incomplete. |
-| Control and evidence | `aqa_jobs`, `aqa_job_attempts`, `aqa_outbox_events`, `aqa_audit_events` | The append-only audit repository and verifier are implemented. Job/outbox repositories and workers remain incomplete. |
+| Market data and readiness | `aqa_bar_identities`, `aqa_bar_events`, `aqa_bar_latest`, `aqa_data_gaps`, `aqa_symbol_watermarks`, `aqa_basket_watermarks`, `aqa_dataset_manifests` | Correction-aware bar revisions, exact aggregation, calendar-aware gaps, symbol/basket watermarks, and immutable dataset publication are implemented and offline-tested. |
+| Scheduling and decisions | `aqa_decision_slots`, `aqa_signal_envelopes`, `aqa_risk_latch_events`, `aqa_risk_decisions`, `aqa_execution_plans` | Deterministic slots/leases, strict signal envelopes, signed risk/latches, and signed plan persistence are implemented and offline-tested. |
+| Execution and reconciliation | `aqa_order_intents`, `aqa_broker_orders`, `aqa_order_events`, `aqa_fills`, `aqa_reconciliations`, `aqa_incidents` | Intent-first transitions, idempotent fills, reconciliation, ambiguity recovery, and incident persistence are implemented and offline-tested. |
+| Control and evidence | `aqa_jobs`, `aqa_job_attempts`, `aqa_outbox_events`, `aqa_audit_events` | Bounded durable jobs/outbox and the append-only audit repository/verifier are implemented and offline-tested. |
 
 ### Canonical bar revisions and symbol watermarks
 

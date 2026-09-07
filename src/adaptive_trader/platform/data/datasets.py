@@ -44,6 +44,7 @@ _UTC_TEXT_PATTERN = re.compile(
     flags=re.ASCII,
 )
 _DATASET_IDENTITY_DOMAIN = b"aqa.logical.dataset.v1\x00"
+_COLLECTION_DATASET_IDENTITY_DOMAIN = b"aqa.logical.dataset.v2\x00"
 _PARQUET_NAME = "bars.parquet"
 _MANIFEST_NAME = "manifest.json"
 _EXPECTED_ARTIFACT_MEMBERS = frozenset({_PARQUET_NAME, _MANIFEST_NAME})
@@ -139,6 +140,241 @@ class DatasetCorrectionSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class SnapshotMetadataEvidence:
+    """Scoped evidence supplied by a trusted operator or data-source adapter.
+
+    Validation proves the evidence's shape, scope and identity, not the truth of an external
+    attestation. The source document must be independently reviewed and retained outside Git.
+    Missing evidence never implies that a security is listed or free of corporate actions.
+    """
+
+    source: str
+    source_document_sha256: str
+    observed_at: datetime
+    range_start_utc: datetime
+    range_end_utc: datetime
+    symbols: tuple[str, ...]
+    listing_status: str
+    corporate_action_status: str
+
+    @classmethod
+    def from_payload(cls, payload: object) -> SnapshotMetadataEvidence:
+        """Read the closed version-one source-evidence contract without coercion."""
+
+        keys = {
+            "schema_version",
+            "source",
+            "source_document_sha256",
+            "observed_at",
+            "range_start_utc",
+            "range_end_utc",
+            "symbols",
+            "listing_status",
+            "corporate_action_status",
+        }
+        if type(payload) is not dict or set(payload) != keys:
+            raise DatasetValidationError("snapshot metadata has an unexpected contract")
+        if type(payload["schema_version"]) is not int or payload["schema_version"] != 1:
+            raise DatasetValidationError("snapshot metadata schema version is unsupported")
+        if type(payload["symbols"]) is not list or any(
+            type(symbol) is not str for symbol in payload["symbols"]
+        ):
+            raise DatasetValidationError("snapshot metadata symbols are invalid")
+        for name in (
+            "source",
+            "source_document_sha256",
+            "listing_status",
+            "corporate_action_status",
+        ):
+            if type(payload[name]) is not str:
+                raise DatasetValidationError("snapshot metadata text field is invalid")
+        times: dict[str, datetime] = {}
+        for name in ("observed_at", "range_start_utc", "range_end_utc"):
+            value = payload[name]
+            if type(value) is not str:
+                raise DatasetValidationError("snapshot metadata timestamp is invalid")
+            try:
+                times[name] = _require_utc(datetime.fromisoformat(value), field_name=name)
+            except ValueError:
+                raise DatasetValidationError("snapshot metadata timestamp is invalid") from None
+        return cls(
+            source=payload["source"],
+            source_document_sha256=payload["source_document_sha256"],
+            symbols=tuple(payload["symbols"]),
+            listing_status=payload["listing_status"],
+            corporate_action_status=payload["corporate_action_status"],
+            **times,
+        )
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.source) is not str
+            or re.fullmatch(r"[a-z][a-z0-9._-]{0,63}", self.source) is None
+        ):
+            raise DatasetValidationError("snapshot metadata source label is invalid")
+        _require_hash(self.source_document_sha256, field_name="metadata source document hash")
+        for field_name in ("observed_at", "range_start_utc", "range_end_utc"):
+            object.__setattr__(
+                self, field_name, _require_utc(getattr(self, field_name), field_name=field_name)
+            )
+        if self.range_end_utc <= self.range_start_utc or self.observed_at < self.range_end_utc:
+            raise DatasetValidationError(
+                "snapshot metadata coverage or observation time is invalid"
+            )
+        if (
+            type(self.symbols) is not tuple
+            or not self.symbols
+            or any(
+                type(symbol) is not str or re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", symbol) is None
+                for symbol in self.symbols
+            )
+            or self.symbols != tuple(sorted(set(self.symbols)))
+        ):
+            raise DatasetValidationError("snapshot metadata symbols must be uniquely sorted")
+        if type(self.listing_status) is not str or self.listing_status not in {
+            "active",
+            "unknown",
+            "invalidated",
+        }:
+            raise DatasetValidationError("snapshot listing status is invalid")
+        if type(self.corporate_action_status) is not str or self.corporate_action_status not in {
+            "clear",
+            "unknown",
+            "invalidated",
+        }:
+            raise DatasetValidationError("snapshot corporate-action status is invalid")
+
+    @property
+    def permits_promotion(self) -> bool:
+        return self.listing_status == "active" and self.corporate_action_status == "clear"
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "source": self.source,
+            "source_document_sha256": self.source_document_sha256,
+            "observed_at": self.observed_at,
+            "range_start_utc": self.range_start_utc,
+            "range_end_utc": self.range_end_utc,
+            "symbols": self.symbols,
+            "listing_status": self.listing_status,
+            "corporate_action_status": self.corporate_action_status,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionDatasetProvenance:
+    """Versioned data-collection context, separate from frozen research semantics."""
+
+    universe_version: str
+    universe_hash: str
+    members: tuple[tuple[str, str, str], ...]
+    calendar_name: str
+    calendar_version: str
+    history_start_utc: datetime
+    pending_derived_sessions: int
+    persisted_gap_state_hash: str
+    unresolved_persisted_gaps: int
+    lagging_checkpoint_symbols: tuple[str, ...]
+    metadata_evidence: SnapshotMetadataEvidence | None = None
+
+    def __post_init__(self) -> None:
+        _require_hash(self.universe_hash, field_name="collection universe hash")
+        for name in ("universe_version", "calendar_name", "calendar_version"):
+            value = getattr(self, name)
+            if (
+                type(value) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", value) is None
+            ):
+                raise DatasetValidationError(f"collection {name} is invalid")
+        if type(self.members) is not tuple or not self.members:
+            raise DatasetValidationError("collection members must be a nonempty tuple")
+        for member in self.members:
+            if (
+                type(member) is not tuple
+                or len(member) != 3
+                or type(member[0]) is not str
+                or re.fullmatch(r"[A-Z][A-Z0-9.-]{0,9}", member[0]) is None
+                or type(member[1]) is not str
+                or type(member[2]) is not str
+                or member[1] not in {"collected_equity", "benchmark", "context"}
+                or member[2] not in {"active", "benchmark", "context", "collection_only"}
+            ):
+                raise DatasetValidationError("collection member identity or role is invalid")
+        if tuple(member[0] for member in self.members) != tuple(
+            sorted({member[0] for member in self.members})
+        ):
+            raise DatasetValidationError("collection members must be uniquely sorted")
+        object.__setattr__(
+            self,
+            "history_start_utc",
+            _require_utc(self.history_start_utc, field_name="history_start_utc"),
+        )
+        if (
+            type(self.pending_derived_sessions) is not int
+            or not 0 <= self.pending_derived_sessions <= MAX_SIGNED_64_BIT_INTEGER
+        ):
+            raise DatasetValidationError("collection pending session count is invalid")
+        _require_hash(self.persisted_gap_state_hash, field_name="persisted gap state hash")
+        if (
+            type(self.unresolved_persisted_gaps) is not int
+            or not 0 <= self.unresolved_persisted_gaps <= MAX_SIGNED_64_BIT_INTEGER
+        ):
+            raise DatasetValidationError("collection persisted gap count is invalid")
+        if (
+            type(self.lagging_checkpoint_symbols) is not tuple
+            or any(type(symbol) is not str for symbol in self.lagging_checkpoint_symbols)
+            or self.lagging_checkpoint_symbols
+            != tuple(sorted(set(self.lagging_checkpoint_symbols)))
+            or not set(self.lagging_checkpoint_symbols) <= {member[0] for member in self.members}
+        ):
+            raise DatasetValidationError("collection lagging checkpoint symbols are invalid")
+        if (
+            self.metadata_evidence is not None
+            and type(self.metadata_evidence) is not SnapshotMetadataEvidence
+        ):
+            raise DatasetValidationError("collection metadata evidence is invalid")
+
+    @property
+    def permits_promotion(self) -> bool:
+        return (
+            self.pending_derived_sessions == 0
+            and self.unresolved_persisted_gaps == 0
+            and not self.lagging_checkpoint_symbols
+            and self.metadata_evidence is not None
+            and self.metadata_evidence.permits_promotion
+        )
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "universe_version": self.universe_version,
+            "universe_hash": self.universe_hash,
+            "members": tuple(
+                {
+                    "symbol": symbol,
+                    "collection_role": collection_role,
+                    "research_role": research_role,
+                    "execution_authorized": False,
+                }
+                for symbol, collection_role, research_role in self.members
+            ),
+            "calendar_name": self.calendar_name,
+            "calendar_version": self.calendar_version,
+            "history_start_utc": self.history_start_utc,
+            "pending_derived_sessions": self.pending_derived_sessions,
+            "persisted_gap_state_hash": self.persisted_gap_state_hash,
+            "unresolved_persisted_gaps": self.unresolved_persisted_gaps,
+            "lagging_checkpoint_symbols": self.lagging_checkpoint_symbols,
+            "metadata_evidence": (
+                {"listing_status": "unknown", "corporate_action_status": "unknown"}
+                if self.metadata_evidence is None
+                else self.metadata_evidence.payload()
+            ),
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class DatasetFreezeRequest:
     """Trusted metadata and current effective events for one immutable freeze.
 
@@ -158,6 +394,8 @@ class DatasetFreezeRequest:
     dirty_worktree: bool
     uv_lock_hash: str
     created_at: datetime
+    collection_provenance: CollectionDatasetProvenance | None = None
+    diagnostic_only: bool = False
 
     def __post_init__(self) -> None:
         if type(self.experiment) is not ExperimentDefinition:
@@ -184,6 +422,8 @@ class DatasetFreezeRequest:
         created_at = _require_utc(self.created_at, field_name="created_at")
         if range_end <= range_start:
             raise DatasetValidationError("dataset range must be positive")
+        if created_at < range_end:
+            raise DatasetValidationError("dataset creation precedes its completed range")
         object.__setattr__(self, "range_start_utc", range_start)
         object.__setattr__(self, "range_end_utc", range_end)
         object.__setattr__(self, "created_at", created_at)
@@ -196,6 +436,29 @@ class DatasetFreezeRequest:
         _require_hash(self.uv_lock_hash, field_name="uv.lock hash")
         if type(self.dirty_worktree) is not bool:
             raise DatasetValidationError("dataset dirty-worktree flag must be boolean")
+        if type(self.diagnostic_only) is not bool:
+            raise DatasetValidationError("dataset diagnostic-only flag must be boolean")
+        provenance = self.collection_provenance
+        if provenance is not None:
+            if type(provenance) is not CollectionDatasetProvenance:
+                raise DatasetValidationError("dataset collection provenance is invalid")
+            if (
+                provenance.calendar_name != self.experiment.market_data.exchange_calendar
+                or provenance.history_start_utc > range_start
+            ):
+                raise DatasetValidationError("dataset collection calendar or history conflicts")
+            if not set(self.symbols) <= {member[0] for member in provenance.members}:
+                raise DatasetValidationError("dataset selection is outside its collection universe")
+            evidence = provenance.metadata_evidence
+            if evidence is not None and (
+                evidence.symbols != self.symbols
+                or evidence.range_start_utc > range_start
+                or evidence.range_end_utc < range_end
+                or evidence.observed_at > created_at
+            ):
+                raise DatasetValidationError(
+                    "snapshot metadata does not cover the requested dataset"
+                )
 
 
 @dataclass(frozen=True, slots=True)
@@ -501,6 +764,10 @@ def freeze_dataset(
         and request.gap_summary.unresolved_gap_count == 0
         and all(item.bar.has_promotable_provenance for item in ordered)
         and all("complete" in item.bar.quality_flags for item in ordered)
+        and not request.diagnostic_only
+        and (
+            request.collection_provenance is None or request.collection_provenance.permits_promotion
+        )
     )
     promotable = intrinsically_promotable and not request.dirty_worktree
     status = DatasetStatus.PROMOTABLE if promotable else DatasetStatus.DIAGNOSTIC
@@ -632,6 +899,8 @@ def _validate_and_order_rows(
     observed_identities: set[tuple[str, datetime, datetime]] = set()
     for item in ordered:
         bar = item.bar
+        if bar.receipt_timestamp_utc > request.created_at:
+            raise DatasetValidationError("dataset contains observations unavailable at creation")
         if (
             bar.provider,
             bar.feed,
@@ -720,7 +989,7 @@ def _logical_header(
     row_counts: tuple[dict[str, object], ...],
     correction_summary: DatasetCorrectionSummary,
 ) -> dict[str, object]:
-    return {
+    header: dict[str, object] = {
         "adjustment": first.adjustment,
         "correction_summary": correction_summary.payload(),
         "dataset_identity_version": 1,
@@ -740,6 +1009,17 @@ def _logical_header(
         "symbols": request.symbols,
         "timeframe": first.timeframe,
     }
+    if request.collection_provenance is not None or request.diagnostic_only:
+        header.update(
+            dataset_identity_version=2,
+            diagnostic_only=request.diagnostic_only,
+            collection_provenance=(
+                None
+                if request.collection_provenance is None
+                else request.collection_provenance.payload()
+            ),
+        )
+    return header
 
 
 def _logical_dataset_hash(
@@ -747,7 +1027,11 @@ def _logical_dataset_hash(
     rows: tuple[EffectiveBar, ...],
 ) -> str:
     digest = hashlib.sha256()
-    digest.update(_DATASET_IDENTITY_DOMAIN)
+    digest.update(
+        _DATASET_IDENTITY_DOMAIN
+        if header["dataset_identity_version"] == 1
+        else _COLLECTION_DATASET_IDENTITY_DOMAIN
+    )
     _update_framed_hash(digest, canonical_json_bytes(header))
     for item in rows:
         _update_framed_hash(digest, canonical_json_bytes(_logical_row(item)))
@@ -819,6 +1103,16 @@ def _write_parquet(rows: tuple[EffectiveBar, ...], stream: BinaryIO) -> None:
         write_page_checksum=True,
         store_decimal_as_integer=False,
     )
+    stream.flush()
+    stream.seek(0)
+    try:
+        restored = pq.read_table(stream)
+    except (pa.ArrowException, OSError):
+        raise ArtifactIntegrityError("staged Parquet could not be read back") from None
+    # Compliant Parquet renames the list child from Arrow's "item" to "element".
+    # Compare every value/type and explicit schema metadata without changing legacy bytes.
+    if not restored.equals(table) or restored.schema.metadata != table.schema.metadata:
+        raise ArtifactIntegrityError("staged Parquet readback differs from canonical rows")
 
 
 def _manifest_base(
@@ -842,7 +1136,7 @@ def _manifest_base(
         "dataset_id": dataset_id,
         "dirty_worktree": dirty_worktree,
         "logical_hash": logical_hash,
-        "manifest_schema_version": 1,
+        "manifest_schema_version": logical_header["dataset_identity_version"],
         "parquet_encoding": _parquet_encoding_payload(),
         "parquet_size_bytes": parquet_size_bytes,
         "physical_hash": physical_hash,
@@ -942,7 +1236,8 @@ def _validate_manifest_envelope(
         or type(content.get("parquet_size_bytes")) is not int
         or content.get("parquet_size_bytes") != expected_parquet_size
         or type(content.get("manifest_schema_version")) is not int
-        or content.get("manifest_schema_version") != 1
+        or content.get("manifest_schema_version") != content.get("dataset_identity_version")
+        or content.get("manifest_schema_version") not in {1, 2}
         or content.get("parquet_encoding") != _parquet_encoding_payload()
     ):
         raise ArtifactIntegrityError("stored manifest envelope is invalid")

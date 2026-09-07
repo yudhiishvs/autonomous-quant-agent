@@ -6,12 +6,51 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
+from pathlib import Path
 
 from adaptive_trader.collection.postgres import normalize_postgres_url
+from adaptive_trader.platform.config import _FORBIDDEN_ALPACA_VARIABLES
+from adaptive_trader.platform.security import SecretFileVariable, load_secret_file
 
 MARKET_DATA_DATABASE_URL_ENV = "APA_MARKET_DATA_DATABASE_URL"
 MARKET_DATA_MIGRATION_DATABASE_URL_ENV = "APA_MARKET_DATA_MIGRATION_DATABASE_URL"
 MARKET_DATA_HISTORY_START_ENV = "APA_MARKET_DATA_HISTORY_START"
+CANONICAL_HISTORY_START_ENV = "AQA_MARKET_DATA_HISTORY_START"
+MARKET_DATA_DATABASE_URL_FILE_ENV = SecretFileVariable.DATABASE_URL.value
+
+
+def require_file_backed_data_environment(environment: Mapping[str, str] | None = None) -> None:
+    """Validate the new one-shot process authority before opening any secret or connection.
+
+    Compatibility commands retain their legacy inputs. Scheduled collection accepts only the
+    three data-service secret references and its immutable history setting.
+    """
+
+    values = os.environ if environment is None else environment
+    required = {
+        SecretFileVariable.DATABASE_URL.value,
+        SecretFileVariable.ALPACA_DATA_API_KEY.value,
+        SecretFileVariable.ALPACA_DATA_SECRET_KEY.value,
+    }
+    allowed = required | {
+        CANONICAL_HISTORY_START_ENV,
+        "AQA_ENABLE_PAPER_ORDERS",
+        "APA_ENABLE_PAPER_ORDERS",
+    }
+    if any(
+        value.strip()
+        and (name.startswith(("AQA_", "APA_")) or name in _FORBIDDEN_ALPACA_VARIABLES)
+        and name not in allowed
+        for name, value in values.items()
+    ):
+        raise ValueError("collect-once received unsupported configuration or credential authority")
+    if any(
+        values.get(name, "NO") != "NO"
+        for name in ("AQA_ENABLE_PAPER_ORDERS", "APA_ENABLE_PAPER_ORDERS")
+    ):
+        raise ValueError("collect-once requires paper submission to be disabled")
+    if any(not values.get(name, "").strip() for name in required):
+        raise ValueError("collect-once requires all three data-service secret file references")
 
 
 def parse_utc_boundary(value: str, *, field_name: str) -> datetime:
@@ -56,10 +95,27 @@ class CollectorEnvironment:
         environment: Mapping[str, str] | None = None,
     ) -> CollectorEnvironment:
         values = os.environ if environment is None else environment
-        database_url = values.get(MARKET_DATA_DATABASE_URL_ENV, "").strip()
+        legacy_database_url = values.get(MARKET_DATA_DATABASE_URL_ENV, "").strip()
+        database_url_file = values.get(MARKET_DATA_DATABASE_URL_FILE_ENV, "").strip()
+        if legacy_database_url and database_url_file:
+            raise ValueError("market-data database credential sources are ambiguous")
+        database_url = (
+            load_secret_file(
+                Path(database_url_file),
+                source=SecretFileVariable.DATABASE_URL,
+            ).reveal()
+            if database_url_file
+            else legacy_database_url
+        )
         if not database_url:
-            raise ValueError(f"{MARKET_DATA_DATABASE_URL_ENV} must be set")
-        raw_start = values.get(MARKET_DATA_HISTORY_START_ENV, "").strip()
+            raise ValueError(
+                f"{MARKET_DATA_DATABASE_URL_FILE_ENV} or {MARKET_DATA_DATABASE_URL_ENV} must be set"
+            )
+        legacy_start = values.get(MARKET_DATA_HISTORY_START_ENV, "").strip()
+        canonical_start = values.get(CANONICAL_HISTORY_START_ENV, "").strip()
+        if legacy_start and canonical_start:
+            raise ValueError("market-data history-start sources are ambiguous")
+        raw_start = canonical_start or legacy_start
         history_start = (
             None
             if not raw_start

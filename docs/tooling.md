@@ -1,95 +1,81 @@
 # Tooling
 
-## Detected stack
+Python 3.11+, setuptools, locked uv dependencies, Ruff, mypy, pytest/coverage, SQLAlchemy,
+psycopg/PostgreSQL, Alembic, Typer, Streamlit/FastAPI, Docker/Compose and GitHub Actions form the
+inspected stack. `pyproject.toml` and `uv.lock` own dependency constraints/resolution. CI and
+containers pin their tool/image versions; no second formatter, type checker or runtime language
+is required.
 
-- Python package under `src/adaptive_trader`, supporting Python 3.11+.
-- Setuptools build metadata, `uv` dependency resolution, and checked-in `uv.lock`.
-- Ruff formatting/linting, mypy type checking, pytest/pytest-cov tests.
-- SQLAlchemy 2, SQLite legacy state, psycopg/PostgreSQL collector state, Alembic migrations.
-- Typer CLIs, Streamlit dashboard, Docker multi-stage images, Docker Compose, GitHub Actions.
+## Canonical command surface
 
-CI and Docker pin uv 0.11.7 and Python 3.11. The lock currently resolves Ruff 0.16.2,
-mypy 2.3.0, pytest 9.1.1, pytest-cov 7.1.0, Alembic 1.19.1, SQLAlchemy 2.0.51, and
-psycopg 3.3.5. `pyproject.toml` is authoritative for constraints; `uv.lock` is authoritative
-for the complete resolution.
-
-## Canonical local commands
-
-These locked commands are authoritative. The current `Makefile` is a legacy convenience surface:
-its `install` target uses pip and it does not yet provide the complete harness required by
-`REQ-HARNESS-001`.
+The Makefile is the current harness, including bootstrap, offline checks, guarded integration,
+security, package smoke, demo, benchmark, coverage and Compose validation. It is no longer a
+pip-based legacy install wrapper.
 
 | Purpose | Command |
 | --- | --- |
-| Locked setup | `uv sync --locked --extra dev --extra dashboard` |
+| Locked setup | `make install` |
 | Lock consistency | `uv lock --check` |
-| Format files | `uv run --no-sync ruff format .` |
-| Format check | `uv run --no-sync ruff format --check .` |
-| Lint | `uv run --no-sync ruff check .` |
-| Type check | `uv run --no-sync mypy src` |
-| Offline tests | `uv run --no-sync pytest -q` |
+| Format non-AI files | `make format` |
+| Format and lint checks | `make lint` |
+| Type check source and container helpers | `make typecheck` |
+| Network-denied offline tests | `make test` |
+| Network-denied unit/component tests | `make unit` |
+| Guarded PostgreSQL integration | `make integration` |
+| Coverage and thresholds | `make coverage` |
+| Legacy synthetic/replay regressions | `make regression` |
+| Protected AI verification | `make freeze` |
+| Complete local harness | `make check` |
+| Deterministic fixture demo | `make demo` |
+| Deterministic pipeline benchmark | `make benchmark` |
+| Security suite/scans/hooks | `make security` |
+| Package build / clean installation smoke | `make package` / `make package-smoke` |
+| Compose validation | `make compose-config` |
 | Local infrastructure-secret bootstrap | `uv run --no-sync aqa secrets bootstrap-local` |
-| Branch coverage | `uv run --no-sync pytest --cov=adaptive_trader --cov-branch --cov-report=term-missing --cov-report=xml` |
-| Synthetic regression | `uv run --no-sync python -m adaptive_trader.cli backtest --config configs/backtest.yaml --synthetic` |
-| Replay regression | `uv run --no-sync python -m adaptive_trader.cli replay --config configs/replay.yaml` |
-| Compose validation | `docker compose --env-file .env.example -f docker-compose.yml config --quiet` |
-| Application image | `docker build --target application --tag adaptive-portfolio-agent:validation .` |
-| Collector image | `docker build --target market-data --tag adaptive-market-data:validation .` |
 | Diff hygiene | `git diff --check` |
 
-PostgreSQL integration requires the guarded loopback environment in
-`testing-strategy.md`. Collector migrations use the separate
-`APA_MARKET_DATA_MIGRATION_DATABASE_URL`; do not inject that URL into the long-running
-collector.
+`make check` requires a deliberately disposable PostgreSQL 16 cluster, its guarded loopback URL,
+Docker Compose, locked dependencies and scanner/advisory access. Read
+[testing strategy](testing-strategy.md) for every PostgreSQL guard, including the cluster-reset
+acknowledgement; setting a database URL alone is not authorization. Never point tests at an
+operator/shared/hosted database. A prerequisite failure is a failed/unexecuted check, not a skip
+that proves acceptance. No external Alpaca credentials are needed for ordinary verification.
 
-## CI correspondence
+`make format` uses `scripts/format_non_ai.py` to preserve the protected AI manifest. Never fix
+formatting by modifying frozen files. The full formatter check still reports actual issues.
+Migrations use a separate owner credential; long-running roles never acquire DDL authority.
 
-`.github/workflows/ci.yml` runs Python 3.11 on Ubuntu 24.04 with empty Alpaca variables and
-paper submission disabled. It installs the locked environment, runs format/lint/mypy,
-migrates PostgreSQL, runs pytest and both legacy regressions, validates Compose, builds both
-images, and starts collector smoke checks with Docker networking disabled. Actions and base
-images are pinned to immutable revisions/digests.
+## Security and automation
 
-Local commands and CI should use the same arguments. A convenience target may compose these
-commands, but it must not replace or weaken them.
+The security target uses the locked security dependency group, Bandit, architecture/safety tests,
+pre-commit hooks and hash-pinned dependency auditing. `.pre-commit-config.yaml`, `.secrets.baseline`,
+Dependabot, CodeQL, security/container/SBOM workflows and package checks exist. Advisory downloads
+and GitHub-hosted scanners are external tooling boundaries; recorded execution determines their
+result. Checked-in definitions alone are not passing scans or successful remote workflow runs.
 
-## Tool selection
+`.github/workflows/ci.yml` coordinates source, migration, offline and container verification.
+The separate scheduled market-data workflow requires an explicit repository activation variable
+and dedicated data secrets, runs `aqa data collect-once`, and uses durable PostgreSQL checkpoints.
+It is intentionally inactive without operator configuration and is not an ordinary test command.
+See [scheduled collection](scheduled_market_data.md) for activation and scheduling limitations.
 
-- Ruff is the sole formatter/primary linter; do not add a competing formatter.
-- Mypy is the sole type checker and targets Python 3.11, matching the package floor, Ruff, Docker,
-  and CI. `.python-version` makes Python 3.11 the default interpreter family for clean local uv
-  environments, and the locked Python 3.11 dependency set is the canonical static-analysis path.
-- Pytest is the sole test runner. Use plugins only for distinct needs such as coverage or
-  async behavior.
-- Alembic owns PostgreSQL schema evolution; `metadata.create_all` is not an operational
-  migration mechanism.
-- Docker validates the actual image boundary; Compose config validation must not start a
-  broker-connected service.
+## Current verification boundary
 
-## Tools not yet selected
+The current baseline recorded 2,015 passing offline tests and one failure; that non-AI failure
+received a correction with 49 focused tests passing. Dataset causality checks passed 62 tests.
+The initial fresh PostgreSQL attempt was refused by the missing disposable-cluster guard.
+Final full-check, PostgreSQL, container, scanner and package results remain pending in the
+[active execution plan](execution-plans/platform-core.md). No fresh success is inferred from older
+runs, installed tools or valid configuration.
 
-The following tools are intentionally deferred, not silently treated as unnecessary:
 
-- Secret scanning, dependency vulnerability analysis, CodeQL or equivalent static security
-  analysis, container scanning, and SBOM generation remain `NOT_IMPLEMENTED` until Phase 8 can
-  add pinned CI implementations, failure policy, and a documented advisory exception process as
-  one verified delivery boundary. Selecting overlapping scanners earlier would create output with
-  no established owner or triage path.
-- A project pre-commit configuration remains `NOT_IMPLEMENTED` until the canonical fast command
-  surface is complete. CI already enforces current required checks; a hook must call the same
-  commands rather than add editor-only correctness.
-- The deterministic benchmark runner remains `NOT_IMPLEMENTED` until the platform operations it
-  must measure exist in Phase 9. Adding a runner now would benchmark only legacy paths and could
-  not satisfy the required workload contract.
-
-The local Docker client is installed, but the daemon was unavailable during Phase 0, so fresh
-local image and PostgreSQL 16 runtime validation remain unavailable. GitHub Actions is currently
-configured to verify the PostgreSQL 16 and existing image boundaries. These are environment
-limitations, not reasons to select a different build or database tool.
-
-Add the smallest nonredundant tool set through the dependency and review policies; never invent
-an action revision, image digest, scan result, or vulnerability-free claim.
-
-No additional runtime language, message broker, orchestration platform, or cloud resource is
-justified by the current implementation. Essential verification must remain available from
-the command line and CI rather than depending on an editor extension.
+The canonical `make coverage` first requires the disposable PostgreSQL preflight, then
+runs the socket-denied offline suite and appends the guarded PostgreSQL suite to the
+same branch data. `make coverage-report` enforces the unchanged 74 percent repository
+and 85 percent platform floors and writes XML/HTML evidence. `make coverage-offline`
+collects offline evidence alone; `make coverage-postgres` appends guarded database
+evidence. Neither partial collection establishes the combined gate. `make check`
+executes PostgreSQL through coverage once. CI retains separate offline and PostgreSQL
+jobs, uploads their actual hidden `.coverage` files, and requires both successful jobs
+and both artifacts before combining data in the dependent coverage gate. Missing
+PostgreSQL prerequisites or coverage artifacts fail verification; they are not skips.

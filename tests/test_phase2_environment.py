@@ -217,6 +217,8 @@ def test_docker_context_excludes_credentials_and_mutable_state(project_root: Pat
         "!data/fixtures/**",
         "!docs/",
         "!docs/**",
+        "!docker/",
+        "!docker/**",
         "!migrations/",
         "!migrations/**",
         "!scripts/",

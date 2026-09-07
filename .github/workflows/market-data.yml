@@ -1,0 +1,80 @@
+name: Scheduled market data
+
+on:
+  schedule:
+    - cron: '2-57/5 9-17 * * 1-5'
+      timezone: America/New_York
+  workflow_dispatch:
+    inputs:
+      activate:
+        description: Perform external data collection with the configured data credentials
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.repository }}-canonical-market-data
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: >-
+      vars.AQA_ENABLE_SCHEDULED_DATA_COLLECTION == 'true' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'schedule' ||
+      (github.event_name == 'workflow_dispatch' && inputs.activate == true))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out reviewed default branch
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+        with:
+          version: '0.11.7'
+          enable-cache: false
+
+      - name: Install locked dependencies
+        run: uv sync --locked
+
+      - name: Collect and reconcile completed history
+        shell: bash
+        env:
+          AQA_DATABASE_URL: ${{ secrets.AQA_DATABASE_URL }}
+          AQA_ALPACA_DATA_API_KEY: ${{ secrets.AQA_ALPACA_DATA_API_KEY }}
+          AQA_ALPACA_DATA_SECRET_KEY: ${{ secrets.AQA_ALPACA_DATA_SECRET_KEY }}
+          AQA_MARKET_DATA_HISTORY_START: ${{ vars.AQA_MARKET_DATA_HISTORY_START }}
+          AQA_ENABLE_PAPER_ORDERS: 'NO'
+          PGSSLROOTCERT: /etc/ssl/certs/ca-certificates.crt
+        run: |
+          set -euo pipefail
+          set +x
+          umask 077
+          for name in AQA_DATABASE_URL AQA_ALPACA_DATA_API_KEY AQA_ALPACA_DATA_SECRET_KEY; do
+            if [[ -z "${!name}" ]]; then
+              echo 'Required data secret is unavailable.' >&2
+              exit 1
+            fi
+          done
+          secret_dir=$(mktemp -d "${RUNNER_TEMP}/aqa-market-data.XXXXXXXX")
+          trap 'rm -rf -- "$secret_dir"' EXIT
+          printf '%s' "$AQA_DATABASE_URL" > "$secret_dir/database_url"
+          printf '%s' "$AQA_ALPACA_DATA_API_KEY" > "$secret_dir/api_key"
+          printf '%s' "$AQA_ALPACA_DATA_SECRET_KEY" > "$secret_dir/secret_key"
+          chmod 600 "$secret_dir/database_url" "$secret_dir/api_key" "$secret_dir/secret_key"
+          unset AQA_DATABASE_URL AQA_ALPACA_DATA_API_KEY AQA_ALPACA_DATA_SECRET_KEY
+          export AQA_DATABASE_URL_FILE="$secret_dir/database_url"
+          export AQA_ALPACA_DATA_API_KEY_FILE="$secret_dir/api_key"
+          export AQA_ALPACA_DATA_SECRET_KEY_FILE="$secret_dir/secret_key"
+          uv run --no-sync aqa data collect-once

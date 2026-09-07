@@ -70,21 +70,20 @@ documenting them does not claim that they are reachable today.
 - **Attack/failure sequence:** A caller omits, guesses, replays, or malforms a bearer token and
   invokes a control route; weak parsing, comparison, or route authorization accepts it.
 - **Impact:** Unauthorized operational mutation or disclosure without trustworthy attribution.
-- **Preventive controls:** **Current:** no platform FastAPI control service or trade-mutation route
-  exists. **Planned:** bounded strict request schemas, startup rejection of short tokens,
-  constant-time comparison, default-deny route authorization, private binding, and no direct trade
-  mutation route.
-- **Detective controls:** **Current:** static architecture and configuration tests constrain generic
-  platform authority. **Planned:** bounded authentication-failure metrics and audited control
-  attempts without token material.
-- **Recovery controls:** **Current:** local secret bootstrap preserves rather than overwrites the
-  operator token. **Planned:** rotate the token, stop the API, inspect audit history, and restart only
-  after authorization state is known.
-- **Verification test:** Planned security-matrix cases 1–4 and 41 in Section 31; no executable API
-  authentication test exists yet.
-- **Residual risk:** A stolen valid single-operator token is full operator authority; the unresolved
-  read-only dashboard/token design could become a confused-deputy path.
-- **Owner/status:** API/security maintainer — `NOT_IMPLEMENTED`.
+- **Preventive controls:** **Current:** bounded strict request schemas, startup rejection of short
+  tokens, constant-time digest comparison, default-deny route authorization, private binding, no
+  direct trade mutation route, and a distinct derived dashboard read scope.
+- **Detective controls:** **Current:** bounded authentication-failure/rate-limit metrics, safe error
+  envelopes, audit-backed control operations, and route-inventory tests without token material.
+- **Recovery controls:** **Current:** stop the API, rotate the owner-private operator-token file,
+  restart control-api so it atomically rotates the derived dashboard bearer, and inspect audit/job
+  state before resuming.
+- **Verification test:** `tests/unit/test_platform_control_api.py` covers malformed tokens,
+  authenticated route inventory, constant-time comparison use, and read-only scope denial.
+- **Residual risk:** A stolen valid operator bearer retains bounded operator authority until
+  rotation; loopback/private binding is not a distributed denial-of-service control.
+- **Owner/status:** API/security maintainer — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` (deployment
+  exposure unverified).
 
 ### AQA-TM-002 — Secret disclosure or path substitution
 
@@ -101,20 +100,21 @@ documenting them does not claim that they are reachable today.
 - **Preventive controls:** **Current:** a closed seven-variable file-reference inventory; rejection
   of generic Alpaca variables; descriptor-relative, no-symlink, owner/mode/size/content checks;
   redacted immutable wrappers; rejected pickling; an exact nine-file owner-private bootstrap that
-  creates no Alpaca secrets and serializes threads/processes. **Planned:** service-scoped mounts and
-  launchers that remove unrelated ambient authority.
+  creates no Alpaca secrets and serializes threads/processes; service-scoped Compose mounts; and a
+  launcher that materializes only the selected role URL in a process-private file.
 - **Detective controls:** **Current:** sentinel, rendering, hostile-path, race, mode, bootstrap
-  collision, partial-write, and ambient-environment tests. **Planned:** deployed mount and process
-  inventory checks.
+  collision, partial-write, ambient-environment, entrypoint-permission, and declarative credential
+  matrix tests. **Planned:** deployed mount and process inventory checks.
 - **Recovery controls:** **Current:** unsafe or ambiguous file state fails closed; bootstrap never
-  replaces an existing secret. **Planned:** stop affected services, revoke/rotate external
-  credentials, replace local secrets through the rotation runbook, and verify no durable leak.
+  replaces an existing secret; stop affected services, revoke or rotate external credentials,
+  replace local secrets through the rotation runbook, and verify no durable leak.
 - **Verification test:** `tests/unit/test_platform_security.py`,
   `tests/unit/test_platform_secret_bootstrap.py`, and
-  `tests/unit/test_platform_runtime_settings.py`.
+  `tests/unit/test_platform_runtime_settings.py`; container process tests live in
+  `tests/safety/test_container_entrypoint.py` and `test_devsecops_configuration.py`.
 - **Residual risk:** Host/root compromise defeats file permissions; advisory locking can be
   ineffective on unsupported filesystems; legacy processes can still inherit environment secrets.
-- **Owner/status:** Platform security maintainer — `PARTIALLY_IMPLEMENTED`.
+- **Owner/status:** Platform security maintainer — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ### AQA-TM-003 — Configuration authority escalation
 
@@ -383,17 +383,19 @@ documenting them does not claim that they are reachable today.
   oversized bodies, high-cardinality labels, or repeated job requests cross an insufficiently
   bounded route.
 - **Impact:** Service exhaustion, internal access, data mutation, secret leakage, or audit flooding.
-- **Preventive controls:** **Current:** the target API is absent and generic configuration has no
-  network authority. **Planned:** strict Pydantic schemas, size/rate bounds, fixed route inventory,
-  parameter binding, confined paths, no caller URLs, bounded metric labels, and idempotent jobs.
-- **Detective controls:** **Current:** architecture checks. **Planned:** safe rejection logs, bounded
-  counters, audited job identity, and route-inventory tests.
-- **Recovery controls:** **Current:** no reachable platform route. **Planned:** reject without detail,
-  cancel/expire abusive jobs, rotate token if exposed, and restart from durable job state.
-- **Verification test:** Section 31 cases 4–11, 36, 38, and 41 are planned.
+- **Preventive controls:** **Current:** strict Pydantic schemas, request and pagination bounds,
+  fixed route inventory, parameterized queries, no caller-supplied URLs, bounded metric labels,
+  independent read/mutation rate limits, and idempotent jobs.
+- **Detective controls:** **Current:** safe rejection envelopes, bounded counters, audited job
+  identity, route-inventory tests, and secret-sentinel tests.
+- **Recovery controls:** **Current:** reject without sensitive detail, rotate the operator token if
+  exposed, and resume idempotent work from durable job state.
+- **Verification test:** `tests/unit/test_platform_control_api.py`, architecture boundary tests,
+  job tests, and observability tests cover Section 31 cases 4–11, 36, 38, and 41.
 - **Residual risk:** Single-process resource exhaustion and abuse by a holder of the valid operator
   token require deployment-level limits in addition to application validation.
-- **Owner/status:** API maintainer — `NOT_IMPLEMENTED`.
+- **Owner/status:** API maintainer — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` (deployment load
+  testing pending).
 
 ### AQA-TM-014 — Compromised dashboard becomes a confused deputy
 
@@ -405,20 +407,23 @@ documenting them does not claim that they are reachable today.
 - **Attack/failure sequence:** The dashboard directly imports persistence/broker code, exposes data,
   or uses a full operator token to call control mutations despite presenting a read-only UI.
 - **Impact:** Unauthorized control, credential disclosure, or data exfiltration.
-- **Preventive controls:** **Current:** the legacy dashboard does not construct a broker; its
-  documented shell launcher and Compose path strip legacy paper variables, but `app.py` itself can
-  inherit ambient variables and reads SQLite directly. **Planned:** API-only read models, no
-  database or broker imports, loopback/private bind, and a distinct server-enforced read-only
-  authority.
-- **Detective controls:** **Current:** legacy dashboard/reporting tests and documented authority gap.
-  **Planned:** import-boundary, route-scope, response-schema, and credential-sentinel tests.
-- **Recovery controls:** **Current:** stop the local dashboard and inspect host state. **Planned:**
-  revoke its scoped credential and preserve an audited incident.
-- **Verification test:** Existing dashboard/reporting tests cover legacy behavior; Section 31 cases
-  5 and 21 and the target API authorization tests remain.
-- **Residual risk:** The specification names one operator token, which cannot provide server-enforced
-  read-only dashboard authority; this design conflict is unresolved.
-- **Owner/status:** API/dashboard/security maintainers — `BLOCKED`.
+- **Preventive controls:** **Current:** the platform dashboard uses API-only read models, imports no
+  database or broker modules, joins only the private control network, mounts no base operator
+  secret, and receives a domain-separated HMAC bearer through a read-only dedicated volume. The
+  API enforces that bearer's `read_only` scope.
+- **Detective controls:** **Current:** import-boundary, route-scope, response-schema, credential
+  separation, entrypoint permission/symlink, and secret-sentinel tests.
+- **Recovery controls:** **Current:** stop the dashboard and API, rotate the operator token, restart
+  control-api to atomically rotate the derived bearer, inspect audit/job state, and then restart the
+  dashboard.
+- **Verification test:** `tests/unit/test_platform_dashboard.py`,
+  `tests/unit/test_platform_control_api.py`, `tests/safety/test_container_entrypoint.py`, and
+  `tests/safety/test_devsecops_configuration.py` cover Section 31 cases 5 and 21 plus mutation-scope
+  denial.
+- **Residual risk:** Docker/host administrators can inspect the named volume; dashboard compromise
+  can disclose read models and consume read-rate capacity until credential rotation.
+- **Owner/status:** API/dashboard/security maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`
+  (deployment exposure unverified).
 
 ### AQA-TM-015 — Compromised container crosses service boundaries
 
@@ -431,20 +436,23 @@ documenting them does not claim that they are reachable today.
 - **Attack/failure sequence:** The container reads another service's secret, imports forbidden code,
   reaches the broker/database with excess authority, or writes shared artifacts.
 - **Impact:** Lateral movement, credential theft, unauthorized order attempts, or durable corruption.
-- **Preventive controls:** **Current:** a standalone collector package/import boundary omits trading
-  clients and uses separate data credential names; tracked paper submission is disabled.
-  **Planned:** one service per image, exact secret mounts, non-root/read-only filesystems, dropped
-  capabilities, service networks, health checks, and least-privilege database roles.
-- **Detective controls:** **Current:** collector import/static tests and Compose configuration
-  validation. **Planned:** runtime mount/network/UID/capability tests and container scanning.
+- **Preventive controls:** **Current:** a data-only collector target omits the trading SDK; Compose
+  uses process-specific secret mounts, numeric non-root users, read-only filesystems, dropped
+  capabilities, separate internal/provider networks, health checks, resource limits, and
+  least-privilege database roles. Tracked paper submission is disabled.
+- **Detective controls:** **Current:** collector import/static tests, declarative container-isolation
+  tests, Compose validation, and a pinned Trivy image-scan workflow. A completed scan on a deployed
+  image remains external evidence.
 - **Recovery controls:** **Current:** stop the affected container and rotate exposed credentials.
   **Planned:** isolate network, rebuild from pinned images, restore verified state, and record an
   incident before resuming.
-- **Verification test:** `tests/test_collection_credentials.py`, architecture tests, and current
-  Compose validation; full runtime isolation matrix is absent.
+- **Verification test:** `tests/test_collection_credentials.py`, architecture tests,
+  `tests/safety/test_devsecops_configuration.py`, and Compose validation. Host-runtime isolation is
+  not proven by static configuration.
 - **Residual risk:** Compose networks are not outbound firewalls; host/root and container-runtime
   compromise remain outside application containment.
-- **Owner/status:** Infrastructure/security maintainers — `PARTIALLY_IMPLEMENTED`.
+- **Owner/status:** Infrastructure/security maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`
+  (remote image-scan evidence pending).
 
 ### AQA-TM-016 — CI or dependency supply-chain compromise
 
@@ -456,21 +464,22 @@ documenting them does not claim that they are reachable today.
 - **Attack/failure sequence:** Malicious code executes during install/test/build, modifies artifacts,
   exfiltrates available secrets, or publishes an unreviewed image/package.
 - **Impact:** Compromised releases, developer machines, runtime containers, or repository history.
-- **Preventive controls:** **Current:** locked `uv.lock` installation, least-privilege validation CI,
-  no Alpaca secrets, offline tests, and pinned project dependencies. **Planned:** immutable action
-  pinning throughout, secret/dependency/static/container scans, SBOMs, safe update policy, and no
-  publishing without explicit authorization.
-- **Detective controls:** **Current:** format, lint, type, test, migration, replay, and Compose/image
-  validation gates. **Planned:** CodeQL, vulnerability, secret, and image scan gates with retained
-  non-sensitive reports.
+- **Preventive controls:** **Current:** locked `uv.lock` installation, least-privilege workflows,
+  no Alpaca secrets, offline tests, immutable action pins, bounded Dependabot updates, and no image
+  publishing or release signing. Dependency/security tools are in a dedicated locked group.
+- **Detective controls:** **Current:** format, lint, type, test, migration, replay, Compose, Gitleaks,
+  pip-audit, Bandit, CodeQL, Trivy, and SBOM workflow gates. A checked-in gate is not evidence of a
+  successful future remote run.
 - **Recovery controls:** **Current:** revert a bad dependency/workflow through normal review and
   rebuild from the lock. **Planned:** revoke exposed credentials, quarantine artifacts, regenerate
   the lock after review, and issue a security advisory when applicable.
-- **Verification test:** `.github/workflows/` and CI workflow tests/static review; Section 31 case 43
-  remains incomplete for the full scan set.
+- **Verification test:** `.github/workflows/`, `.github/dependabot.yml`,
+  `.pre-commit-config.yaml`, and `tests/safety/test_devsecops_configuration.py`; remote scan results
+  remain external evidence.
 - **Residual risk:** Locking preserves reproducibility, not trust; registry/action-owner compromise
   and malicious transitive code remain possible.
-- **Owner/status:** Maintainers/security — `PARTIALLY_IMPLEMENTED`.
+- **Owner/status:** Maintainers/security — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` (remote workflow
+  evidence pending).
 
 ### AQA-TM-017 — Availability loss through unbounded work or dependency failure
 
@@ -485,19 +494,20 @@ documenting them does not claim that they are reachable today.
 - **Impact:** Missed collection/decision windows, stale state, unavailable controls, or unsafe
   assumptions about service health.
 - **Preventive controls:** **Current:** collector timeouts, page/observation bounds, capped retries,
-  externally stoppable streaming, lease fencing, and completed-bar/session bounds. **Planned:** job
-  budgets, API request/rate limits, worker deadlines, readiness/liveness contracts, and supervised
-  restart policy for every target service.
-- **Detective controls:** **Current:** collector run/failure events and readiness correlation.
-  **Planned:** bounded Prometheus labels, stale-job/slot/watermark alerts, and service health APIs.
-- **Recovery controls:** **Current:** stop on permanent failure, release lease, and resume with
-  overlap/idempotent persistence. **Planned:** degraded read-only mode and documented restart/replay
-  procedures across the full platform.
-- **Verification test:** `tests/test_collection_alpaca.py`, `tests/test_collection_service.py`, and
-  PostgreSQL lease tests; target API/job/health cases are absent.
+  externally stoppable streaming, lease fencing, completed-bar/session bounds, durable bounded jobs,
+  API request/rate limits, health contracts, and Compose resource/restart bounds.
+- **Detective controls:** **Current:** collector run/failure events and readiness correlation, bounded
+  Prometheus labels, stale job/slot/watermark metrics, and service health/readiness API routes.
+- **Recovery controls:** **Current:** stop on permanent failure, release leases, resume with
+  overlap/idempotent persistence, reclaim expired jobs, and follow documented restart/replay
+  procedures. A failed safety dependency keeps consequential work unavailable.
+- **Verification test:** `tests/test_collection_alpaca.py`, `tests/test_collection_service.py`,
+  PostgreSQL lease tests, platform job/observability/control API tests, and declarative container
+  health tests.
 - **Residual risk:** External provider and hosted database availability cannot be guaranteed;
   process-wide resource isolation and target service supervision are not implemented.
-- **Owner/status:** Operations and service maintainers — `PARTIALLY_IMPLEMENTED`.
+- **Owner/status:** Operations and service maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`
+  (deployment load and supervision evidence pending).
 
 ### AQA-TM-018 — Backup loss or corrupted recovery
 
@@ -512,25 +522,29 @@ documenting them does not claim that they are reachable today.
 - **Impact:** Permanent evidence loss, wrong positions, duplicate side effects, or an unverifiable
   operational history.
 - **Preventive controls:** **Current:** collector content identities, immutable rows, schema-head
-  checks, and repository exclusion of local data/secrets. **Planned:** documented logical PostgreSQL
-  backup with versioned retention and encryption under operator control.
-- **Detective controls:** **Current:** schema and collector integrity verification. **Planned:** an
-  automated restore into a fresh PostgreSQL 16 database verifying migration head, row/hash/audit,
-  slot, intent, fill, reconciliation, and absence of fixture secrets.
-- **Recovery controls:** **Current:** no executed complete platform restore procedure. **Planned:**
-  keep services fail-closed, restore a verified generation, reconcile external paper state, and
-  record any evidence gap as an incident.
-- **Verification test:** `REQ-OPS-004` restore smoke test is `NOT_IMPLEMENTED`.
+  checks, repository exclusion of local data/secrets, documented logical backup/restore commands,
+  exact loopback/disposable-database guards, and credential-shaped fixture rejection.
+- **Detective controls:** **Current:** the restore smoke creates a fresh database, runs/checks
+  migrations, and verifies row counts, content hashes, audit root, slots, intents, fills,
+  reconciliation, and absence of fixture secrets. Its real PostgreSQL path has not run in this
+  environment.
+- **Recovery controls:** **Current:** keep services fail-closed, restore a verified generation,
+  reconcile external paper state, and record any evidence gap as an incident. Backup encryption,
+  retention, and storage generation remain operator controls.
+- **Verification test:** guard behavior is covered by
+  `tests/unit/test_backup_restore_smoke_guard.py`; the real procedure is
+  `tests/integration/test_platform_backup_restore.py` and skips without the explicit disposable
+  PostgreSQL environment.
 - **Residual risk:** Backup availability, encryption, retention, and database-owner access are the
   deployment operator's responsibility; a restore cannot reconstruct unrecorded broker effects.
-- **Owner/status:** Deployment operator/persistence maintainer — `NOT_IMPLEMENTED`.
+- **Owner/status:** Deployment operator/persistence maintainer — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ## Threat-to-test index
 
 | Threat | Current executable evidence | Required remaining evidence |
 | --- | --- | --- |
-| AQA-TM-001 | No reachable platform API | Security matrix 1–4, 41 |
-| AQA-TM-002 | `tests/unit/test_platform_security.py`; `test_platform_secret_bootstrap.py`; `test_platform_runtime_settings.py` | Service mount/process sentinel tests |
+| AQA-TM-001 | Control API authentication, authorization, safe-error, and route-inventory tests | Deployed exposure and token-rotation exercise |
+| AQA-TM-002 | Secret loader/bootstrap/runtime tests; container entrypoint and credential-matrix tests | Deployed mount and process inventory |
 | AQA-TM-003 | `test_platform_profiles.py`; `test_platform_runtime_settings.py`; `test_static_repository_safety.py` | Service-consumption integration tests |
 | AQA-TM-004 | `test_platform_configuration_boundary.py` | Security matrix 12–18, 22–23, 40 |
 | AQA-TM-005 | `test_collection_alpaca.py`; `test_collection_contracts.py`; `test_collection_service.py` | Gap/readiness and credentialed external validation |
@@ -541,12 +555,12 @@ documenting them does not claim that they are reachable today.
 | AQA-TM-010 | `test_live_safety_matrix.py` | Target security matrix 28–30, 44 |
 | AQA-TM-011 | Canonical, experiment, profile, and runtime path unit tests | Dataset/signal manifest verification |
 | AQA-TM-012 | Collector append-only trigger tests | Security matrix 37 and `aqa audit verify` |
-| AQA-TM-013 | No reachable platform API | Security matrix 4–11, 36, 38, 41 |
-| AQA-TM-014 | Legacy dashboard/reporting tests | API-backed dashboard import/auth/sentinel tests |
-| AQA-TM-015 | Collector import/static tests; Compose config validation | Runtime container isolation and scan tests |
-| AQA-TM-016 | Existing locked offline CI gates | Security matrix 43 and SBOM/scan gates |
-| AQA-TM-017 | Collector bound/retry/stop/lease tests | API/job/health/restart tests |
-| AQA-TM-018 | Collector schema/integrity tests | Fresh PostgreSQL 16 restore smoke test |
+| AQA-TM-013 | Control API request, route, job, and metric tests | Deployment load/abuse validation |
+| AQA-TM-014 | Dashboard import/client tests; derived-token scope, entrypoint, and Compose isolation tests | Deployed credential-rotation exercise |
+| AQA-TM-015 | Collector import/static tests; Compose/runtime-boundary tests and local locked image probes | Completed remote Trivy scan and deployed isolation review |
+| AQA-TM-016 | Locked offline CI, pre-commit, local dependency/static scans, and SBOM generation | Completed remote Gitleaks, Trivy, and CodeQL runs |
+| AQA-TM-017 | Collector bounds/retry/lease plus platform job, API, observability, and container-health tests | Deployment load and restart drill |
+| AQA-TM-018 | Restore guard unit tests and a guarded PostgreSQL integration procedure | Completed fresh PostgreSQL 16 restore smoke run |
 
 Paths in this table are relative to `tests/` unless shown otherwise. A planned case is not evidence
 of a current control.
@@ -557,12 +571,11 @@ of a current control.
 - Credentialed Alpaca data and paper behavior remains externally unvalidated.
 - Ordinary test socket denial covers current common Python TCP paths, not every process or native
   network path.
-- The target API, API-backed dashboard, signed signal/risk/execution path, audit chain, service-role
-  matrix, forced flatten, and backup/restore proof are not implemented.
-- Compose network separation is not an outbound firewall, and target container hardening has not
-  been runtime-verified.
-- The single-token/read-only-dashboard authorization conflict must be resolved before the target API
-  and dashboard can be considered safely implemented.
+- A completed signed signal/risk/execution deployment, forced-flatten drill, and backup/restore
+  proof remain external operational evidence.
+- Compose network separation is not an outbound firewall. Local offline probes verified numeric
+  non-root operation, immutable code ownership, data-only dependencies, and the dashboard token
+  volume; the target host/container runtime remains a deployment trust boundary.
 - Locally installed Python plugins remain operator-trusted; arbitrary Python sandboxing is
   `INTENTIONALLY_DEFERRED`.
 - Availability, encryption at rest, physical access, database backups, and host firewalling remain
