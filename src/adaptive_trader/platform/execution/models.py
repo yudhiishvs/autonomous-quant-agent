@@ -208,6 +208,9 @@ class ExecutionPlan:
     target_version: int
     forced_flat: bool
     target_quantities: tuple[Position, ...]
+    current_positions: tuple[Position, ...]
+    reference_prices: tuple[tuple[str, Decimal], ...]
+    equity: Decimal
     created_at: datetime
     deadline_at: datetime
     content_hash: str
@@ -222,7 +225,15 @@ class ExecutionPlan:
             raise ExecutionValidationError("target version must be between one and 999999")
         if type(self.forced_flat) is not bool:
             raise ExecutionValidationError("forced-flat flag must be boolean")
-        _positions(self.target_quantities, allow_empty=False)
+        targets = _positions(self.target_quantities, allow_empty=False)
+        current = _positions(self.current_positions, allow_empty=False)
+        prices = _reference_prices(self.reference_prices)
+        target_symbols = tuple(position.symbol for position in targets)
+        if tuple(position.symbol for position in current) != target_symbols:
+            raise ExecutionValidationError("plan current positions do not match target symbols")
+        if tuple(symbol for symbol, _ in prices) != target_symbols:
+            raise ExecutionValidationError("plan reference prices do not match target symbols")
+        _positive_decimal(self.equity, field_name="planning equity")
         created_at = _instant(self.created_at, field_name="plan creation time")
         deadline_at = _instant(self.deadline_at, field_name="plan deadline")
         if created_at >= deadline_at:
@@ -235,6 +246,9 @@ class ExecutionPlan:
             target_version=self.target_version,
             forced_flat=self.forced_flat,
             target_quantities=self.target_quantities,
+            current_positions=self.current_positions,
+            reference_prices=self.reference_prices,
+            equity=self.equity,
             created_at=created_at,
             deadline_at=deadline_at,
         )
@@ -252,6 +266,9 @@ class ExecutionPlan:
         target_version: int,
         forced_flat: bool,
         target_quantities: tuple[Position, ...],
+        current_positions: tuple[Position, ...],
+        reference_prices: tuple[tuple[str, Decimal], ...],
+        equity: Decimal,
         created_at: datetime,
         deadline_at: datetime,
     ) -> ExecutionPlan:
@@ -265,6 +282,9 @@ class ExecutionPlan:
             target_version=target_version,
             forced_flat=forced_flat,
             target_quantities=target_quantities,
+            current_positions=current_positions,
+            reference_prices=reference_prices,
+            equity=equity,
             created_at=created_at,
             deadline_at=deadline_at,
         )
@@ -277,6 +297,9 @@ class ExecutionPlan:
             target_version=target_version,
             forced_flat=forced_flat,
             target_quantities=target_quantities,
+            current_positions=current_positions,
+            reference_prices=reference_prices,
+            equity=equity,
             created_at=created_at,
             deadline_at=deadline_at,
             content_hash=digest,
@@ -511,6 +534,12 @@ class BrokerOrder:
         if next_updated_at < self.updated_at:
             raise ExecutionValidationError("order update time cannot move backward")
         next_sequence = self.last_event_sequence + 1
+        if (
+            self.broker_order_id is not None
+            and broker_order_id is not None
+            and broker_order_id != self.broker_order_id
+        ):
+            raise ExecutionValidationError("broker order ID cannot change once assigned")
         next_broker_order_id = (
             broker_order_id if broker_order_id is not None else self.broker_order_id
         )
@@ -744,6 +773,7 @@ class ReconciliationReceipt:
     execution_plan_id: str | None
     correlation_id: str
     account_id_hash: str
+    account_observed_at: datetime
     started_at: datetime
     completed_at: datetime
     status: ReconciliationStatus
@@ -753,8 +783,11 @@ class ReconciliationReceipt:
     observed_cash: Decimal
     expected_equity: Decimal
     observed_equity: Decimal
+    mark_prices: tuple[tuple[str, Decimal], ...]
     fill_hashes: tuple[str, ...]
     order_hashes: tuple[str, ...]
+    require_flat: bool
+    required_flat_at: datetime | None
     discrepancies: tuple[ReconciliationDiscrepancy, ...]
     content_hash: str
 
@@ -767,10 +800,16 @@ class ReconciliationReceipt:
             _content_id(self.execution_plan_id, prefix="execution")
         _identifier(self.correlation_id, field_name="correlation ID")
         _hash(self.account_id_hash, field_name="account ID hash")
+        account_observed_at = _instant(
+            self.account_observed_at,
+            field_name="account observation time",
+        )
         started_at = _instant(self.started_at, field_name="reconciliation start")
         completed_at = _instant(self.completed_at, field_name="reconciliation completion")
         if completed_at < started_at:
             raise ExecutionValidationError("reconciliation completion precedes start")
+        if not started_at <= account_observed_at <= completed_at:
+            raise ExecutionValidationError("account observation must occur during reconciliation")
         if type(self.status) is not ReconciliationStatus:
             raise ExecutionValidationError("reconciliation status is invalid")
         _positions(self.expected_positions, allow_empty=True)
@@ -782,8 +821,17 @@ class ReconciliationReceipt:
             (self.observed_equity, "observed equity"),
         ):
             _decimal(value, field_name=field_name)
+        _mark_prices(self.mark_prices)
         _hash_tuple(self.fill_hashes, field_name="fill hashes")
         _hash_tuple(self.order_hashes, field_name="order hashes")
+        if type(self.require_flat) is not bool:
+            raise ExecutionValidationError("required-flat flag must be boolean")
+        required_flat_at = _optional_instant(
+            self.required_flat_at,
+            field_name="required-flat deadline",
+        )
+        if self.require_flat != (required_flat_at is not None):
+            raise ExecutionValidationError("required-flat deadline and flag disagree")
         if type(self.discrepancies) is not tuple or any(
             type(item) is not ReconciliationDiscrepancy for item in self.discrepancies
         ):
@@ -808,6 +856,7 @@ class ReconciliationReceipt:
         execution_plan_id: str | None,
         correlation_id: str,
         account_id_hash: str,
+        account_observed_at: datetime,
         started_at: datetime,
         completed_at: datetime,
         expected_positions: tuple[Position, ...],
@@ -816,8 +865,11 @@ class ReconciliationReceipt:
         observed_cash: Decimal,
         expected_equity: Decimal,
         observed_equity: Decimal,
+        mark_prices: tuple[tuple[str, Decimal], ...],
         fill_hashes: tuple[str, ...],
         order_hashes: tuple[str, ...],
+        require_flat: bool,
+        required_flat_at: datetime | None,
         discrepancies: tuple[ReconciliationDiscrepancy, ...],
     ) -> ReconciliationReceipt:
         """Create a deterministic signed reconciliation receipt."""
@@ -830,6 +882,7 @@ class ReconciliationReceipt:
             "execution_plan_id": execution_plan_id,
             "correlation_id": correlation_id,
             "account_id_hash": account_id_hash,
+            "account_observed_at": account_observed_at,
             "started_at": started_at,
             "completed_at": completed_at,
             "status": status,
@@ -839,11 +892,14 @@ class ReconciliationReceipt:
             "observed_cash": observed_cash,
             "expected_equity": expected_equity,
             "observed_equity": observed_equity,
+            "mark_prices": mark_prices,
             "fill_hashes": fill_hashes,
             "order_hashes": order_hashes,
+            "require_flat": require_flat,
+            "required_flat_at": required_flat_at,
             "discrepancies": ordered,
         }
-        digest = sha256_hex({"schema": "reconciliation-v1", **_receipt_values(values)})
+        digest = sha256_hex({"schema": "reconciliation-v2", **_receipt_values(values)})
         return cls(
             reconciliation_id=DeterministicId(prefix="reconciliation", digest=digest).value,
             content_hash=digest,
@@ -924,19 +980,27 @@ def _execution_plan_digest(
     target_version: int,
     forced_flat: bool,
     target_quantities: tuple[Position, ...],
+    current_positions: tuple[Position, ...],
+    reference_prices: tuple[tuple[str, Decimal], ...],
+    equity: Decimal,
     created_at: datetime,
     deadline_at: datetime,
 ) -> str:
     return sha256_hex(
         {
             "correlation_id": correlation_id,
+            "current_positions": tuple(
+                (position.symbol, position.quantity) for position in current_positions
+            ),
             "created_at": created_at,
             "deadline_at": deadline_at,
+            "equity": equity,
             "experiment_hash": experiment_hash,
             "forced_flat": forced_flat,
             "risk_decision_hash": risk_decision_hash,
             "risk_decision_id": risk_decision_id,
-            "schema": "execution-plan-v1",
+            "reference_prices": reference_prices,
+            "schema": "execution-plan-v2",
             "target_quantities": tuple(
                 (position.symbol, position.quantity) for position in target_quantities
             ),
@@ -1026,7 +1090,7 @@ def _fill_digest(fill: Fill) -> str:
 def _reconciliation_digest(receipt: ReconciliationReceipt) -> str:
     return sha256_hex(
         {
-            "schema": "reconciliation-v1",
+            "schema": "reconciliation-v2",
             **_receipt_values(
                 {
                     field: getattr(receipt, field)
@@ -1042,6 +1106,7 @@ def _receipt_values(values: dict[str, object]) -> dict[str, object]:
     raw_discrepancies = values["discrepancies"]
     raw_expected_positions = values["expected_positions"]
     raw_observed_positions = values["observed_positions"]
+    raw_mark_prices = values["mark_prices"]
     if not isinstance(raw_discrepancies, tuple):
         raise ExecutionValidationError("reconciliation discrepancies must be immutable")
     if not isinstance(raw_expected_positions, tuple) or not isinstance(
@@ -1049,6 +1114,8 @@ def _receipt_values(values: dict[str, object]) -> dict[str, object]:
         tuple,
     ):
         raise ExecutionValidationError("reconciliation positions must be immutable")
+    if not isinstance(raw_mark_prices, tuple):
+        raise ExecutionValidationError("reconciliation mark prices must be immutable")
     discrepancies = cast(tuple[ReconciliationDiscrepancy, ...], raw_discrepancies)
     expected_positions = cast(tuple[Position, ...], raw_expected_positions)
     observed_positions = cast(tuple[Position, ...], raw_observed_positions)
@@ -1060,6 +1127,7 @@ def _receipt_values(values: dict[str, object]) -> dict[str, object]:
         "observed_positions": tuple(
             (position.symbol, position.quantity) for position in observed_positions
         ),
+        "mark_prices": raw_mark_prices,
         "discrepancies": tuple(
             (
                 discrepancy.code,
@@ -1071,6 +1139,21 @@ def _receipt_values(values: dict[str, object]) -> dict[str, object]:
             for discrepancy in discrepancies
         ),
     }
+
+
+def _mark_prices(value: object) -> None:
+    if type(value) is not tuple or any(type(item) is not tuple or len(item) != 2 for item in value):
+        raise ExecutionValidationError("mark prices must be immutable symbol-price pairs")
+    prices = cast(tuple[tuple[object, object], ...], value)
+    symbols: list[str] = []
+    for symbol, price in prices:
+        if type(symbol) is not str:
+            raise ExecutionValidationError("mark price symbol is invalid")
+        _symbol(symbol)
+        _positive_decimal(price, field_name="mark price")
+        symbols.append(symbol)
+    if tuple(symbols) != tuple(sorted(set(symbols))):
+        raise ExecutionValidationError("mark prices must be unique and ordered")
 
 
 def _validate_effect(intent: OrderIntent) -> None:
@@ -1104,6 +1187,19 @@ def _positions(value: object, *, allow_empty: bool) -> tuple[Position, ...]:
     if not allow_empty and not positions:
         raise ExecutionValidationError("positions cannot be empty")
     return positions
+
+
+def _reference_prices(value: object) -> tuple[tuple[str, Decimal], ...]:
+    if type(value) is not tuple or any(type(item) is not tuple or len(item) != 2 for item in value):
+        raise ExecutionValidationError("reference prices must be immutable symbol-price pairs")
+    prices = value
+    symbols: list[str] = []
+    for symbol, price in prices:
+        symbols.append(_symbol(symbol))
+        _positive_decimal(price, field_name="reference price")
+    if tuple(symbols) != tuple(sorted(set(symbols))):
+        raise ExecutionValidationError("reference prices must be unique and alphabetically ordered")
+    return prices
 
 
 def _discrepancy_key(

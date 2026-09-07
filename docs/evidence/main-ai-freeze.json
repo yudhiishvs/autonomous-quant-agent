@@ -1,0 +1,379 @@
+{
+  "baseline_head": "5659f93ef17c439a121cc584eee000bc34154e4b",
+  "baseline_branch": "feature/market-data-platform",
+  "entries": [
+    {
+      "path": "src/adaptive_trader/strategies/__init__.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "f86a1119ba7971e8aab4a8ae3f5582dc5fe5abe2a44d558df2a8fc8afe9fd6f8",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/strategies/mean_reversion.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "e82af14a9699a634022f740f226d4759a89c2fcb26ca4a243847c845cd09a951",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/strategies/momentum.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "f894c258a3314d2b18e1bd2c73b423b6886cad4b58284178fb34f2783ca191cc",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/strategies/base.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "3af96c3cdec7d4e687d156a493f109297834173a99eb05c448548718a5eada63",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/allocator.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "a49dd4966a89ae16f1c9a49230caa38e49a621e453a89b5e4945546754ee04ee",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/backtest.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "bb484ff265fa720f55fed0862a9699c6c93308b37f54d08ea99252d1d845057b",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/config.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "34670094953313b6203c9253ba5e7ed32ad780dbfd37cfde464f4754e9f7258c",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/data.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "aacb697a3adc182d349187cbf94b42945127c921bca548353d006ae5519363ec",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/decision_engine.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "a47f3836bef1b2f96afd4fb4b579042936e6e3c0506a836b395a9f7e9fc4774f",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/features.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "c0fa74e9f7bed977140e03db684f46a67e925f26a733ca1247dcd14961dd60c7",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/metrics.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "fd387f82c743a745178b36f59acf493bcd0d4a2cef78776819061f599fc8cb6b",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/models.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "6d9641234f0b4535dcdcc6588faed691613cf9f10c51ddcadc63dbe6e01417cc",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/regimes.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "69240cf4121364040025d0f912b0977a2573dc54fd4dc0158962f1fc54944558",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/reporting.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "2f6b5c190d20b059429b65911e1631fe06aa3882ec270408b10400b26972f207",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/risk.py",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "31cc12e576148980a88ca5ecc20c40361fdb0e00a6d416e55ff9b2c78893ab69",
+      "git_state": "clean"
+    },
+    {
+      "path": "docs/methodology.md",
+      "reason": "Research intelligence and established research bundle",
+      "sha256": "f34e4ae184564149fbeb29ee8521aaea97d28c51820e54537062de73fb0192b1",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/cli.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "d5a03474e39bf410db915c7bd1207977f1e4f831d9c71b56d385390d9496739a",
+      "git_state": "M src/adaptive_trader/cli.py"
+    },
+    {
+      "path": "src/adaptive_trader/live.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "61cb4336b20dc871ca4cdc47e4ecd23cce95e90e1e126c3d4d5a0c8728d7cffb",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/replay.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "d5b82ec337395f5318df8f6a63745913f1daffce66f257bae644af98b3a62a1f",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/market_data_live.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "fec1922318a601d19d19d7f0fe69ea3cccbd9f7682c1382dc7b390e7ba8e008a",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/forward_reporting.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "90b72546a61547cfb12f38b5e946d4d2f97c2fb57e0e281c343b561583d69040",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/observer_evidence.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "57a3cbcdf37ab28a1b5e89c46ec0961efca53c6e2a693b321265b2135daac36e",
+      "git_state": "M src/adaptive_trader/observer_evidence.py"
+    },
+    {
+      "path": "src/adaptive_trader/persistence.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "a86fee0a0b846970061e7200cf268783a60a01bceb6d8720081ceb9d8c18b3f8",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/live_models.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "63ae8baa75bffb14e7ffda0f5283b53a43da8afaf75201572bfe946d4c5a7731",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/validate_real_data_dry_run.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "d1cb01a54af472d400ab524ca10a83090c8268529ef37c4b9c6d22adb5dbeffd",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/generate_phase2_quality_evidence.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "806ea1e8db0bef38150dbc38e9640526099d19c55738bf955a6a3a4bd0338cf5",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/audit_observer_session.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "82a765833642f657b72a44a297155e092729c45dacfed9f0937b4fa26b649bab",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/summarize_observer_evidence.py",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "158c0e60d3f86525ceaef876803378ebbad1dd53117184736a6de6f4ae3014bd",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/run_observer.sh",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "2bc188ae79af21e0e9f27cda54d9f0d337d59cba766d506ced1fd319ac977be3",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/run_full_observer_session.sh",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "8fbc45cc38c6433d4b794f30feec4b8958f3ebcfb0369693194e39c7c954fb1c",
+      "git_state": "clean"
+    },
+    {
+      "path": "scripts/run_paper.sh",
+      "reason": "Mixed research orchestration and evidence",
+      "sha256": "af481585c3db6f07757c460c222148f6280ae6a61eb843ce155bbaeca5f7247a",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/backtest.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "8ca880f497fe5d35fb4d005b88f5e93ba848eae5f8cf4bc95ce7d9994fed98dd",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/observer.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "7c99d2b71c8692a8f9d28f2d0535495c8922bfb6d770cb15aee054a36d657efa",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/paper.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "25a26632433869a27fb11d2b9de25d289af91447fa0857cf1b8cd3f03e0511ab",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/replay.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "6c401dfdaa8a4e915184452d49fa9628443b49631d246665bb019b09377b4834",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/experiments/semiconductor_network_intraday_v1.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "93afebf2966801da323b9d8705b3fe6743263ca4f94e558caf0849769b992135",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/platform/paper.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "6cc8eabd32bc32f1762a45567dee72c93345aa7833f95064056d546f686d32fe",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/platform/offline.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "3c197252aaea0cea46d8418977baab2f76f277b3421250c11b7777c4739e64f5",
+      "git_state": "clean"
+    },
+    {
+      "path": "configs/platform/shadow.yaml",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "1ca44d165b2fb6e0bf7ae2b83fedb8bf89b405ec3a9ceefd3102f9654abab4e9",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/platform/config.py",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "ef39bba832d827ac97785db57246466f3583b94f86650a7942488a27d8258031",
+      "git_state": "M src/adaptive_trader/platform/config.py"
+    },
+    {
+      "path": "src/adaptive_trader/platform/universe.py",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "57b022ebd30bc17a97be3d08cd81bbf6fc6bd79fed8d52c04f2faf336d5b01bc",
+      "git_state": "clean"
+    },
+    {
+      "path": "src/adaptive_trader/platform/domain.py",
+      "reason": "Research parameters, universe and immutable experiment identity",
+      "sha256": "e6ce1c8787b2d08a8cd1c6c5eedad4a512907d196a737285b38745168836b673",
+      "git_state": "M src/adaptive_trader/platform/domain.py"
+    },
+    {
+      "path": "tests/research/test_backtest_execution_honesty.py",
+      "reason": "Research characterization tests",
+      "sha256": "c9ff655b0a06c9180c14aac80a126231d510a2a53a9c67296573e30c1328f0e5",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/research/test_undefined_metric_reporting.py",
+      "reason": "Research characterization tests",
+      "sha256": "97f6c09de2de6f170ae79126c36fe62d0f6f50425037e7e806c92ee222dd59cf",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/research/test_historical_outputs.py",
+      "reason": "Research characterization tests",
+      "sha256": "7b44d71c797f96950be652c6f4ac77d14177739bbffb9c3df1e8140df52c75dc",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/research/test_forward_decision_engine.py",
+      "reason": "Research characterization tests",
+      "sha256": "b4e6196e5cc97844a97dc147f1d0da995f9399f9535804bc495bcff115c14253",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/research/test_risk_safety_semantics.py",
+      "reason": "Research characterization tests",
+      "sha256": "e43770984a71ff9174cc72e458a1e364658c52413952d3be80683991a8ca8294",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_allocator.py",
+      "reason": "Research characterization tests",
+      "sha256": "0b16a3eff465ecec89c3bb6dc154359938f06524aa6d941d6a9b0f4e6983c260",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_backtest.py",
+      "reason": "Research characterization tests",
+      "sha256": "765592b36b523e000ab5785f27af72adf7dcd44c2ea234de62eb179135bbf941",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_strategies.py",
+      "reason": "Research characterization tests",
+      "sha256": "579ecd37e8f96e797a816a47bc9af4355742ea02456a71f5d48a592c248ab1aa",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_regimes.py",
+      "reason": "Research characterization tests",
+      "sha256": "c7a97afbf00db37484e773e7c600ce2fee2f0487ce37b8fddeee6f5310571009",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_no_lookahead.py",
+      "reason": "Research characterization tests",
+      "sha256": "28dec091c342203fcbb0e3b96aa0a24646d9066dd96bcd8c985ce592c3134066",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_metrics.py",
+      "reason": "Research characterization tests",
+      "sha256": "5979ca212e1ad9d6f41a24e0669fdf7d14bbe29ef4e0790f87d232a955f4c647",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_data.py",
+      "reason": "Research characterization tests",
+      "sha256": "fb5badb07644abccfbac679c084e8510f885ae3dc21084bf3e3b671f9b021dcf",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_risk.py",
+      "reason": "Research characterization tests",
+      "sha256": "442f08f9c97583aa2731db765cf512ca1e356812e5a8f87d61186504507d5148",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_config_safety.py",
+      "reason": "Research characterization tests",
+      "sha256": "8b4d8f7702d9f4363480b730c5754a5a8df30479863964cad3d2f669edcda7c5",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_integration.py",
+      "reason": "Research characterization tests",
+      "sha256": "da4b5d799fd79f83183766a2f53643639da97017791a4f5f1e814f2d6da52f45",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_cli_modes.py",
+      "reason": "Research characterization tests",
+      "sha256": "94b730cf3ba7cd68f434a5c0fa940d443caef7cde1cae2dec3de49d2bbbd6fe7",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_dashboard_and_forward_reporting.py",
+      "reason": "Research characterization tests",
+      "sha256": "03de6390c7896e44bc6842e80e93e531cef1e8f0aaf713a7a93a8f081d842b1e",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_live_replay_service.py",
+      "reason": "Research characterization tests",
+      "sha256": "06f679b6c8e3fd9ee577ce0b30482982275c35a62aee7881e08546fbcccde57c",
+      "git_state": "clean"
+    },
+    {
+      "path": "tests/test_phase2_observer_evidence.py",
+      "reason": "Research characterization tests",
+      "sha256": "6a9962abc5041a76a3510f2c8621931107a861696ed4424edee58c8457f8587f",
+      "git_state": "M tests/test_phase2_observer_evidence.py"
+    }
+  ],
+  "preserve_existing_without_reading": [
+    "outputs/**",
+    "runtime/**",
+    "data/raw/**",
+    "data/cache/**"
+  ],
+  "dependency_freeze": "Existing AI dependency selections in pyproject.toml/uv.lock cannot change to simplify data work."
+}

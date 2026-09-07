@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from adaptive_trader.platform.canonical import canonical_json_bytes
 from adaptive_trader.platform.config import BrokerAdapter, ExecutionMode, load_experiment
 from adaptive_trader.platform.data.calendar import XnasExchangeCalendar
 from adaptive_trader.platform.execution import (
@@ -23,13 +27,16 @@ from adaptive_trader.platform.execution import (
     PaperClientOrder,
     PaperGateContext,
     Position,
+    SubmissionAuthoritySnapshot,
     SubmissionSafetySnapshot,
     authorize_paper_intent,
+    create_alpaca_paper_broker,
     transition_is_permitted,
 )
 from adaptive_trader.platform.execution.planner import plan_signed_orders
 from adaptive_trader.platform.hashing import sha256_hex
 from adaptive_trader.platform.scheduling import build_session_schedule
+from adaptive_trader.platform.security import SecretFileVariable, load_secret_file
 from adaptive_trader.platform.signals import (
     AlwaysFlatSignalProvider,
     DecisionContext,
@@ -73,13 +80,32 @@ def _long_plan():
     )
 
 
+def _submission_authority(
+    repository: MemoryExecutionRepository,
+    broker: DeterministicFakePaperBroker,
+    client_order_id: str,
+) -> SubmissionAuthoritySnapshot:
+    safety = _safety()
+    return SubmissionAuthoritySnapshot.create(
+        ledger=repository.submission_ledger_snapshot(client_order_id),
+        safety=safety,
+        account=broker.account(observed_at=safety.evaluated_at),
+        positions=broker.positions(),
+        open_client_order_ids=broker.open_client_order_ids(),
+    )
+
+
 def _persisted_service(
     *,
     scenario: FakeBrokerScenario = FakeBrokerScenario.FULL_FILL,
 ):
     result = _long_plan()
     repository = MemoryExecutionRepository()
-    broker = DeterministicFakePaperBroker(initial_time=NOW, default_scenario=scenario)
+    broker = DeterministicFakePaperBroker(
+        initial_time=NOW,
+        initial_cash=Decimal("1000"),
+        default_scenario=scenario,
+    )
     broker.set_mark_prices((("AAA", Decimal("100")),))
     service = ExecutionService(repository=repository, broker=broker)
     service.persist(result)
@@ -134,7 +160,7 @@ def test_fake_broker_failure_scenarios_are_deterministic(
 
 
 def test_delayed_update_becomes_a_deterministic_fill_on_refresh() -> None:
-    result, repository, _broker, service = _persisted_service(
+    result, repository, broker, service = _persisted_service(
         scenario=FakeBrokerScenario.DELAYED_UPDATE
     )
     client_id = result.intents[0].client_order_id
@@ -148,6 +174,10 @@ def test_delayed_update_becomes_a_deterministic_fill_on_refresh() -> None:
     assert first.state is OrderState.PENDING
     assert refreshed.state is OrderState.FILLED
     assert len(repository.fills()) == 1
+    assert (
+        DeterministicFakePaperBroker.from_snapshot(broker.snapshot()).snapshot()
+        == broker.snapshot()
+    )
 
 
 def test_duplicate_execution_update_is_idempotent() -> None:
@@ -201,7 +231,11 @@ def test_timeout_before_acceptance_remains_reconciliation_required() -> None:
 def test_restart_after_submission_marker_never_resubmits_unknown_intent() -> None:
     result, repository, broker, _service = _persisted_service()
     client_id = result.intents[0].client_order_id
-    repository.record_submission_started(client_id, started_at=NOW)
+    repository.record_submission_started(
+        client_id,
+        started_at=NOW,
+        authority=_submission_authority(repository, broker, client_id),
+    )
     assert repository.has_ambiguous_order()
 
     restarted_repository = MemoryExecutionRepository.from_state(repository.export_state())
@@ -223,7 +257,11 @@ def test_restart_after_submission_marker_never_resubmits_unknown_intent() -> Non
 def test_restart_after_broker_side_effect_recovers_fills_by_client_id() -> None:
     result, repository, broker, _service = _persisted_service()
     intent = result.intents[0]
-    repository.record_submission_started(intent.client_order_id, started_at=NOW)
+    repository.record_submission_started(
+        intent.client_order_id,
+        started_at=NOW,
+        authority=_submission_authority(repository, broker, intent.client_order_id),
+    )
     broker.submit(intent, submitted_at=NOW)
 
     restarted_repository = MemoryExecutionRepository.from_state(repository.export_state())
@@ -252,6 +290,75 @@ def test_stale_intent_inputs_block_before_broker_side_effect() -> None:
     assert broker.positions() == ()
 
 
+def test_broker_position_change_blocks_stale_plan_before_submission() -> None:
+    result, repository, broker, service = _persisted_service()
+    intent = result.intents[0]
+    broker.submit(intent, submitted_at=NOW)
+
+    outcome = service.submit_one(intent.client_order_id, safety=_safety())
+
+    assert not outcome.submitted
+    assert "positions_changed" in outcome.reason_codes
+    assert "account_cash_changed" in outcome.reason_codes
+    assert repository.get_order(intent.client_order_id).state is OrderState.INTENT_COMMITTED
+
+
+def test_broker_open_order_change_blocks_stale_plan_before_submission() -> None:
+    result, repository, broker, service = _persisted_service(
+        scenario=FakeBrokerScenario.DELAYED_UPDATE
+    )
+    intent = result.intents[0]
+    broker.submit(intent, submitted_at=NOW)
+
+    outcome = service.submit_one(intent.client_order_id, safety=_safety())
+
+    assert not outcome.submitted
+    assert outcome.reason_codes == ("open_orders_changed",)
+    assert repository.get_order(intent.client_order_id).state is OrderState.INTENT_COMMITTED
+
+
+def test_newer_unbound_timestamps_cannot_refresh_old_signed_inputs() -> None:
+    result, _repository, broker, service = _persisted_service()
+    newer = NOW + timedelta(seconds=10)
+    fabricated = replace(
+        _safety(now=newer),
+        security_observed_at=newer,
+        reconciliation_observed_at=newer,
+        price_observed_at=newer,
+    )
+
+    outcome = service.submit_one(
+        result.intents[0].client_order_id,
+        safety=fabricated,
+    )
+
+    assert not outcome.submitted
+    assert outcome.reason_codes == (
+        "planning_price_snapshot_mismatch",
+        "reconciliation_snapshot_mismatch",
+        "security_snapshot_mismatch",
+    )
+    assert broker.positions() == ()
+
+
+def test_reused_submission_authority_cannot_claim_twice() -> None:
+    result, repository, broker, _service = _persisted_service()
+    client_order_id = result.intents[0].client_order_id
+    authority = _submission_authority(repository, broker, client_order_id)
+
+    repository.record_submission_started(
+        client_order_id,
+        started_at=NOW,
+        authority=authority,
+    )
+    with pytest.raises(ExecutionValidationError, match="submission authority became stale"):
+        repository.record_submission_started(
+            client_order_id,
+            started_at=NOW,
+            authority=authority,
+        )
+
+
 def test_entry_disabled_blocks_opening_but_not_forced_reduction() -> None:
     result, repository, broker, service = _persisted_service()
     outcome = service.submit_one(
@@ -272,7 +379,7 @@ def test_short_proceeds_are_restricted_and_cover_releases_them() -> None:
         )
     )
     repository = MemoryExecutionRepository()
-    broker = DeterministicFakePaperBroker(initial_time=NOW)
+    broker = DeterministicFakePaperBroker(initial_time=NOW, initial_cash=Decimal("1000"))
     broker.set_mark_prices((("AAA", Decimal("100")),))
     service = ExecutionService(repository=repository, broker=broker)
     service.persist(open_result)
@@ -280,10 +387,10 @@ def test_short_proceeds_are_restricted_and_cover_releases_them() -> None:
 
     short_account = broker.account(observed_at=NOW)
     assert broker.positions() == (Position("AAA", Decimal(-1)),)
-    assert short_account.cash == Decimal("100100.00")
+    assert short_account.cash == Decimal("1100.00")
     assert short_account.restricted_short_proceeds == Decimal("100")
-    assert short_account.buying_power == Decimal("100000.00")
-    assert short_account.equity == Decimal("100000.00")
+    assert short_account.buying_power == Decimal("1000.00")
+    assert short_account.equity == Decimal("1000.00")
 
     close_result = plan_signed_orders(
         planning_request(
@@ -295,7 +402,7 @@ def test_short_proceeds_are_restricted_and_cover_releases_them() -> None:
     service.submit_one(close_result.intents[0].client_order_id, safety=_safety())
     flat_account = broker.account(observed_at=NOW)
     assert broker.positions() == ()
-    assert flat_account.cash == Decimal("100000.00")
+    assert flat_account.cash == Decimal("1000.00")
     assert flat_account.restricted_short_proceeds == 0
 
 
@@ -348,14 +455,107 @@ class _PaperClientProbe:
         return ()
 
 
-def test_paper_adapter_is_inert_without_independent_gate_context() -> None:
+class _UnregisteredBroker:
+    """Structurally valid broker that must never gain submission authority."""
+
+    paper_only = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def submit(self, intent: Any, *, submitted_at: datetime) -> Any:
+        del intent, submitted_at
+        self.calls += 1
+        raise AssertionError("unregistered broker submit must remain unreachable")
+
+    def lookup(self, client_order_id: str, *, observed_at: datetime) -> Any:
+        del client_order_id, observed_at
+        self.calls += 1
+        raise AssertionError("unregistered broker lookup must remain unreachable")
+
+    def cancel(self, client_order_id: str, *, canceled_at: datetime) -> Any:
+        del client_order_id, canceled_at
+        self.calls += 1
+        raise AssertionError("unregistered broker cancel must remain unreachable")
+
+    def account(self, *, observed_at: datetime) -> Any:
+        del observed_at
+        self.calls += 1
+        raise AssertionError("unregistered broker account must remain unreachable")
+
+    def positions(self) -> Any:
+        self.calls += 1
+        raise AssertionError("unregistered broker positions must remain unreachable")
+
+    def open_client_order_ids(self) -> Any:
+        self.calls += 1
+        raise AssertionError("unregistered broker orders must remain unreachable")
+
+
+def test_unregistered_broker_cannot_reach_submit_or_cancel_side_effects() -> None:
+    result = _long_plan()
+    repository = MemoryExecutionRepository()
+    broker = _UnregisteredBroker()
+    trusted = DeterministicFakePaperBroker(initial_time=NOW, initial_cash=Decimal("1000"))
+    trusted.set_mark_prices((("AAA", Decimal("100")),))
+    ExecutionService(repository=repository, broker=trusted).persist(result)
+    before = repository.get_order(result.intents[0].client_order_id)
+
+    with pytest.raises(ExecutionValidationError, match="closed allowlist"):
+        ExecutionService(repository=repository, broker=broker)
+
+    assert repository.get_order(result.intents[0].client_order_id) == before
+    assert broker.calls == 0
+
+
+def test_injected_paper_facade_cannot_gain_execution_authority() -> None:
     result = _long_plan()
     repository = MemoryExecutionRepository()
     probe = _PaperClientProbe()
-    service = ExecutionService(
-        repository=repository,
-        broker=AlpacaPaperBrokerAdapter(probe),
+    trusted = DeterministicFakePaperBroker(initial_time=NOW)
+    ExecutionService(repository=repository, broker=trusted).persist(result)
+
+    with pytest.raises(ExecutionValidationError, match="factory-owned authority"):
+        ExecutionService(repository=repository, broker=AlpacaPaperBrokerAdapter(probe))
+
+    assert probe.calls == 0
+
+
+def test_paper_adapter_is_inert_without_independent_gate_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _long_plan()
+    repository = MemoryExecutionRepository()
+    probe = _PaperClientProbe()
+    api_key_path = tmp_path / "paper_api_key"
+    secret_key_path = tmp_path / "paper_secret_key"
+    api_key_path.write_text("test-api-key\n", encoding="utf-8")
+    secret_key_path.write_text("test-secret-key\n", encoding="utf-8")
+    api_key_path.chmod(0o600)
+    secret_key_path.chmod(0o600)
+
+    def fake_trading_client(*, api_key: str, secret_key: str, paper: bool) -> _PaperClientProbe:
+        assert api_key == "test-api-key"  # pragma: allowlist secret
+        assert secret_key == "test-secret-key"  # pragma: allowlist secret
+        assert paper is True
+        return probe
+
+    monkeypatch.setattr(
+        "adaptive_trader.platform.execution.alpaca_paper.TradingClient",
+        fake_trading_client,
     )
+    broker = create_alpaca_paper_broker(
+        api_key=load_secret_file(
+            api_key_path,
+            source=SecretFileVariable.ALPACA_PAPER_API_KEY,
+        ),
+        secret_key=load_secret_file(
+            secret_key_path,
+            source=SecretFileVariable.ALPACA_PAPER_SECRET_KEY,
+        ),
+    )
+    service = ExecutionService(repository=repository, broker=broker)
     service.persist(result)
 
     outcome = service.submit_one(result.intents[0].client_order_id, safety=_safety())
@@ -474,3 +674,155 @@ def test_fake_snapshot_rejects_noncanonical_or_malformed_input() -> None:
         DeterministicFakePaperBroker.from_snapshot(b"{}")
     with pytest.raises(ExecutionValidationError):
         DeterministicFakePaperBroker.from_snapshot(b"not-json")
+    noncanonical = json.dumps(json.loads(_filled_snapshot_broker().snapshot()), indent=2).encode()
+    with pytest.raises(ExecutionValidationError, match="canonical"):
+        DeterministicFakePaperBroker.from_snapshot(noncanonical)
+
+
+def _filled_snapshot_broker() -> DeterministicFakePaperBroker:
+    result = _long_plan()
+    broker = DeterministicFakePaperBroker(initial_time=NOW, initial_cash=Decimal("1000"))
+    broker.set_mark_prices((("AAA", Decimal("100")),))
+    broker.submit(result.intents[0], submitted_at=NOW)
+    return broker
+
+
+def _mutated_snapshot(
+    broker: DeterministicFakePaperBroker,
+    mutate: Callable[[dict[str, Any]], None],
+    *,
+    refresh_digest: bool = True,
+) -> bytes:
+    document: dict[str, Any] = json.loads(broker.snapshot())
+    state: dict[str, Any] = document["payload"]
+    mutate(state)
+    if refresh_digest:
+        document["payload_sha256"] = sha256_hex(state)
+    return canonical_json_bytes(document)
+
+
+def _replace_path(path: tuple[str | int, ...], value: object) -> Callable[[dict[str, Any]], None]:
+    def mutate(state: dict[str, Any]) -> None:
+        target: Any = state
+        for component in path[:-1]:
+            target = target[component]
+        target[path[-1]] = value
+
+    return mutate
+
+
+def test_fake_snapshot_v2_digest_rejects_canonical_payload_modification() -> None:
+    broker = _filled_snapshot_broker()
+    tampered = _mutated_snapshot(
+        broker,
+        _replace_path(("cash",), "999999999"),
+        refresh_digest=False,
+    )
+
+    with pytest.raises(ExecutionValidationError, match="digest"):
+        DeterministicFakePaperBroker.from_snapshot(tampered)
+
+
+def test_fake_snapshot_v2_envelope_binds_initial_state_and_payload() -> None:
+    document = json.loads(_filled_snapshot_broker().snapshot())
+
+    assert document["schema"] == "deterministic-fake-paper-broker-snapshot-v2"
+    assert document["payload"]["schema"] == "deterministic-fake-paper-broker-state-v2"
+    assert document["payload"]["initial_cash"] == "1000"
+    assert document["payload_sha256"] == sha256_hex(document["payload"])
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("initial_cash",), "900"),
+        (("cash",), "999999999"),
+        (("positions", 0, 1), "2"),
+        (("restricted",), [["AAA", "1"]]),
+        (("marks",), []),
+        (("orders", 0, "cumulative_filled_quantity"), "0"),
+        (("orders", 0, "average_fill_price"), None),
+        (("orders", 0, "state"), "ACCEPTED"),
+        (("orders", 0, "broker_order_id"), "fake_order_invalid"),
+        (("orders", 0, "symbol"), "BBB"),
+        (("orders", 0, "updated_at"), "2099-01-01T00:00:00Z"),
+        (("fills", 0, "event_sequence"), 2),
+        (("event_sequence",), 2),
+    ],
+)
+def test_fake_snapshot_v2_rejects_resigned_inconsistent_state(
+    path: tuple[str | int, ...],
+    value: object,
+) -> None:
+    tampered = _mutated_snapshot(
+        _filled_snapshot_broker(),
+        _replace_path(path, value),
+    )
+
+    with pytest.raises(ExecutionValidationError):
+        DeterministicFakePaperBroker.from_snapshot(tampered)
+
+
+def test_fake_snapshot_v2_maps_invalid_enums_and_symbols_to_domain_error() -> None:
+    invalid_side = _mutated_snapshot(
+        _filled_snapshot_broker(),
+        _replace_path(("orders", 0, "side"), "NOT_A_SIDE"),
+    )
+    invalid_symbol = _mutated_snapshot(
+        _filled_snapshot_broker(),
+        _replace_path(("positions", 0, 0), "not a symbol"),
+    )
+
+    for payload in (invalid_side, invalid_symbol):
+        with pytest.raises(ExecutionValidationError):
+            DeterministicFakePaperBroker.from_snapshot(payload)
+
+
+def test_fake_snapshot_v2_round_trips_short_cover_accounting() -> None:
+    broker = DeterministicFakePaperBroker(initial_time=NOW, initial_cash=Decimal("1000"))
+    broker.set_mark_prices((("AAA", Decimal("100")),))
+    opening = plan_signed_orders(
+        planning_request(
+            current=(("AAA", Decimal(0)),),
+            target_weights=(("AAA", Decimal("-0.10")),),
+        )
+    )
+    broker.submit(opening.intents[0], submitted_at=NOW)
+    short_snapshot = DeterministicFakePaperBroker.from_snapshot(broker.snapshot())
+    assert short_snapshot.positions() == (Position("AAA", Decimal(-1)),)
+    assert short_snapshot.account(observed_at=NOW).restricted_short_proceeds == Decimal("100")
+
+    closing = plan_signed_orders(
+        planning_request(
+            current=(("AAA", Decimal(-1)),),
+            target_weights=(("AAA", Decimal(0)),),
+        )
+    )
+    broker.submit(closing.intents[0], submitted_at=NOW + timedelta(seconds=1))
+    restored = DeterministicFakePaperBroker.from_snapshot(broker.snapshot())
+
+    assert restored.snapshot() == broker.snapshot()
+    assert restored.positions() == ()
+    assert restored.account(observed_at=NOW + timedelta(seconds=1)).cash == Decimal("1000")
+    assert restored.account(
+        observed_at=NOW + timedelta(seconds=1)
+    ).restricted_short_proceeds == Decimal(0)
+
+
+def test_fake_snapshot_v2_round_trips_partial_fill_then_cancel() -> None:
+    result = _long_plan()
+    broker = DeterministicFakePaperBroker(
+        initial_time=NOW,
+        initial_cash=Decimal("1000"),
+        default_scenario=FakeBrokerScenario.PARTIAL_FILL,
+    )
+    broker.set_mark_prices((("AAA", Decimal("100")),))
+    intent = result.intents[0]
+    broker.submit(intent, submitted_at=NOW)
+    broker.cancel(intent.client_order_id, canceled_at=NOW + timedelta(seconds=1))
+
+    restored = DeterministicFakePaperBroker.from_snapshot(broker.snapshot())
+
+    assert restored.snapshot() == broker.snapshot()
+    assert restored.positions() == (Position("AAA", Decimal("0.5")),)
+    assert restored.open_client_order_ids() == ()

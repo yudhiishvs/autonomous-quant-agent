@@ -340,6 +340,8 @@ def _audit_read_relation(
 ) -> Table:
     if connection.dialect.name != "postgresql":
         return aqa_audit_events
+    if writer is AuditWriter.MIGRATION:
+        return aqa_audit_events
     if writer is None or writer is AuditWriter.CONTROL:
         return _POSTGRES_AUDIT_EVENTS_VIEW
     return _POSTGRES_WRITER_AUDIT_VIEWS[writer]

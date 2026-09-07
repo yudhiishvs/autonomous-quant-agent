@@ -7,10 +7,12 @@ design or a roadmap item.
 
 | Document | Authority |
 | --- | --- |
-| `../README.md` | Product context, research proposal, quickstart, and public status |
+| `../README.md` | Product context, public status, architecture summary, and offline quickstart |
 | `requirements.md` | Normalized requirement identifiers, implementation locations, and evidence |
 | `execution-plans/PLANS.md` | Required structure and maintenance rules for execution plans |
 | `execution-plans/platform-core.md` | Active milestones, decisions, progress, evidence, and limitations |
+| `implementation_status.md` | Concise implemented, unvalidated, deferred, and unsupported capability map |
+| `resume_evidence.md` | Reproducible engineering facts that may be cited without performance claims |
 
 ## Architecture and data
 
@@ -18,9 +20,10 @@ design or a roadmap item.
 | --- | --- |
 | `../ARCHITECTURE.md` | Current dual-system architecture and target platform boundaries |
 | `architecture.md` | Detailed legacy portfolio-application architecture |
-| `data_dictionary.md` | Implemented legacy SQLite schema and export contracts |
+| `data_dictionary.md` | Legacy and platform persistence, lineage, and evidence contracts |
 | `market_data_runbook.md` | Implemented collector schema, activation, recovery, and credentials |
 | `adr/README.md` | Architectural decision record index |
+| `strategy_extension.md` | Minimal provider contract, registration path, and authority boundary |
 
 The root architecture is the cross-system map. The lowercase architecture and data
 dictionary remain the legacy application's detailed references; they are not descriptions
@@ -41,6 +44,7 @@ of the target generic platform.
 | `performance.md` | Measured-workflow policy and current sensitive paths |
 | `observability.md` | Current logs, durable events, health semantics, and target gaps |
 | `tooling.md` | Detected stack, exact local/CI tools, and command surface |
+| `developer_guide.md` | Supported environment, repository map, extension workflow, and quality gates |
 
 Root contributor policy is in `../CONTRIBUTING.md`; private vulnerability reporting is in
 `../SECURITY.md`; repository-wide operating instructions are in `../AGENTS.md`.
@@ -53,6 +57,11 @@ Root contributor policy is in `../CONTRIBUTING.md`; private vulnerability report
 | `live_paper_runbook.md` | Legacy observer and paper-gate operating procedure |
 | `market_data_runbook.md` | Collector migration, first activation, monitoring, and recovery |
 | `methodology.md` | Legacy research calculations, timing, risk, and reporting conventions |
+| `operations.md` | Platform modes, preflight, topology, health, shutdown, and paper safety |
+| `demo_runbook.md` | Credential-free vertical slice, deterministic evidence, and recovery checks |
+| `backup_restore.md` | Guarded PostgreSQL logical backup and fresh-database restore verification |
+| `failure_modes.md` | Platform failure effects, fail-closed behavior, restart rules, and escalation |
+| `secret_rotation.md` | File-backed secret rotation and post-rotation validation |
 
 ## Status interpretation
 

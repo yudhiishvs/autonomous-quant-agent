@@ -10,6 +10,10 @@ from adaptive_trader.platform.storage.engine import (
     create_platform_engine,
     create_platform_read_only_engine,
 )
+from adaptive_trader.platform.storage.experiments import (
+    ExperimentPersistenceError,
+    ExperimentRepository,
+)
 from adaptive_trader.platform.storage.repositories import AuditRepository, verify_audit_chain
 from adaptive_trader.platform.storage.transactions import (
     PostgresAdvisoryLockNamespace,
@@ -22,6 +26,8 @@ __all__ = [
     "DatasetManifestPersistenceError",
     "DatasetManifestRegistration",
     "DatasetManifestRepository",
+    "ExperimentPersistenceError",
+    "ExperimentRepository",
     "PostgresAdvisoryLockNamespace",
     "PostgresAdvisoryLockRequest",
     "SerializedTransactionCoordinator",

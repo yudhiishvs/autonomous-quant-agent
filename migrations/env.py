@@ -18,6 +18,7 @@ from adaptive_trader.platform.storage.migration_roles import (
     migration_role_revision_sets,
     restore_referential_integrity_owner_privileges,
 )
+from adaptive_trader.platform.storage.schema_drift import include_postgres_object
 from adaptive_trader.platform.storage.tables import metadata as platform_metadata
 
 config = context.config
@@ -90,6 +91,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
+        include_object=include_postgres_object,
         version_table_schema=VERSION_TABLE_SCHEMA,
     )
     with context.begin_transaction():
@@ -123,6 +125,7 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             include_schemas=True,
+            include_object=include_postgres_object,
             version_table_schema=VERSION_TABLE_SCHEMA,
             compare_type=True,
         )

@@ -31,6 +31,7 @@ from adaptive_trader.collection.schema import collection_universes
 from adaptive_trader.collection.schema import metadata as collection_metadata
 from adaptive_trader.platform.hashing import sha256_hex
 from adaptive_trader.platform.storage.market_data import BarIdentity
+from adaptive_trader.platform.storage.schema_drift import include_postgres_object
 from adaptive_trader.platform.storage.tables import (
     PLATFORM_SCHEMA,
     PLATFORM_TABLE_NAMES,
@@ -109,6 +110,7 @@ def _metadata_differences(engine: Engine) -> list[Any]:
             opts={
                 "compare_type": True,
                 "include_name": _include_owned_name,
+                "include_object": include_postgres_object,
                 "include_schemas": True,
                 "version_table_schema": COLLECTION_SCHEMA,
             },
@@ -336,7 +338,7 @@ def test_upgrade_from_empty_database_creates_both_schemas(empty_database: str) -
     try:
         current, expected = database_revision(empty_database)
         inspector = inspect(engine)
-        assert current == expected == "20260905_0007"
+        assert current == expected == "20260906_0015"
         assert frozenset(inspector.get_table_names(schema=PLATFORM_SCHEMA)) == PLATFORM_TABLE_NAMES
         assert "collection_universes" in inspector.get_table_names(schema=COLLECTION_SCHEMA)
         assert _metadata_differences(engine) == []
@@ -645,7 +647,7 @@ def test_downgrade_refusal_preserves_platform_state(empty_database: str) -> None
                 .select_from(aqa_experiments)
                 .where(aqa_experiments.c.experiment_hash == experiment_hash)
             )
-        assert current == expected == "20260905_0007"
+        assert current == expected == "20260906_0015"
         assert retained_rows == 1
         assert (
             frozenset(inspect(engine).get_table_names(schema=PLATFORM_SCHEMA))
@@ -762,6 +764,10 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
                     approved_targets={},
                     before_exposure={},
                     after_exposure={},
+                    account_snapshot={},
+                    planning_positions=[],
+                    planning_prices=[],
+                    security_metadata=[],
                     source_timestamps={},
                     active_latches=[],
                     required_latch_event_ids=[],
@@ -780,10 +786,16 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
                     execution_plan_id="plan-1",
                     risk_decision_id="risk-1",
                     experiment_hash=digest,
+                    risk_decision_hash="f" * 64,
+                    correlation_id="correlation-1",
                     target_version=1,
                     forced_flat=False,
                     targets={},
+                    current_positions=[["TEST", "0"]],
+                    reference_prices=[["TEST", "10"]],
+                    equity=Decimal("100"),
                     created_at=instant,
+                    deadline_at=later,
                     payload_hash="c" * 64,
                     signature="d" * 64,
                     content_hash="e" * 64,
@@ -793,18 +805,26 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
                 aqa_order_intents.insert().values(
                     order_intent_id="intent-valid",
                     execution_plan_id="plan-1",
+                    risk_decision_id="risk-1",
+                    experiment_hash=digest,
+                    correlation_id="correlation-1",
                     client_order_id="client-valid",
                     symbol="TEST",
-                    side="buy",
-                    effect="open",
-                    phase="entry",
+                    side="BUY",
+                    effect="OPEN_LONG",
+                    phase="ENTRY",
                     sequence=0,
+                    target_version=1,
                     quantity=Decimal("1"),
                     notional=Decimal("10"),
                     reference_price=Decimal("10"),
-                    order_type="market",
-                    time_in_force="day",
+                    final_target_quantity=Decimal("1"),
+                    forced_flat=False,
+                    order_type="MARKET",
+                    time_in_force="DAY",
                     created_at=instant,
+                    deadline_at=later,
+                    target_hash="e" * 64,
                     payload_hash="f" * 64,
                     content_hash="0" * 64,
                 )
@@ -812,7 +832,8 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
             connection.execute(
                 aqa_broker_orders.insert().values(
                     client_order_id="client-valid",
-                    state="planned",
+                    order_intent_id="intent-valid",
+                    state="INTENT_COMMITTED",
                     updated_at=instant,
                     cumulative_filled_quantity=Decimal("0"),
                     last_event_sequence=0,
@@ -848,18 +869,26 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
                 aqa_order_intents.insert().values(
                     order_intent_id="intent-nan",
                     execution_plan_id="plan-1",
+                    risk_decision_id="risk-1",
+                    experiment_hash=digest,
+                    correlation_id="correlation-1",
                     client_order_id="client-nan",
                     symbol="TEST",
-                    side="buy",
-                    effect="open",
-                    phase="entry",
+                    side="BUY",
+                    effect="OPEN_LONG",
+                    phase="ENTRY",
                     sequence=1,
+                    target_version=1,
                     quantity=Decimal("NaN"),
                     notional=Decimal("10"),
                     reference_price=Decimal("10"),
-                    order_type="market",
-                    time_in_force="day",
+                    final_target_quantity=Decimal("1"),
+                    forced_flat=False,
+                    order_type="MARKET",
+                    time_in_force="DAY",
                     created_at=instant,
+                    deadline_at=later,
+                    target_hash="3" * 64,
                     payload_hash="4" * 64,
                     content_hash="5" * 64,
                 )
@@ -872,7 +901,7 @@ def test_postgresql_rejects_nonfinite_market_and_execution_numerics(
                     client_order_id="client-valid",
                     broker_execution_id="execution-nan",
                     symbol="TEST",
-                    side="buy",
+                    side="BUY",
                     quantity=Decimal("NaN"),
                     price=Decimal("10"),
                     fee=Decimal("0"),

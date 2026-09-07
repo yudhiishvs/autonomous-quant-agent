@@ -15,10 +15,12 @@ from adaptive_trader.platform.canonical import canonical_json_bytes
 from adaptive_trader.platform.data.calendar import ExchangeCalendar
 from adaptive_trader.platform.data.datasets import (
     ArtifactStore,
+    CollectionDatasetProvenance,
     DatasetFreezeRequest,
     DatasetStatus,
     DatasetValidationError,
     FrozenDataset,
+    SnapshotMetadataEvidence,
     freeze_dataset,
 )
 from adaptive_trader.platform.domain import AuditPayload, AuditWriter, require_utc_instant
@@ -119,8 +121,8 @@ class DatasetManifestRepository:
                 statement = select(aqa_dataset_manifests).where(
                     aqa_dataset_manifests.c.dataset_id == frozen.dataset_id
                 )
-                if connection.dialect.name == "postgresql":
-                    statement = statement.with_for_update()
+                # The dataset advisory lock serializes registration. Row locking would
+                # require UPDATE authority on this append-only collector table.
                 existing = connection.execute(statement).mappings().one_or_none()
                 if existing is not None:
                     _require_same_manifest(existing, values)
@@ -182,8 +184,26 @@ def _manifest_values(frozen: FrozenDataset) -> dict[str, Any]:
     if type(frozen) is not FrozenDataset:
         raise DatasetValidationError("dataset registration requires a frozen dataset")
     document = frozen.manifest
-    if frozenset(document) != _EXPECTED_MANIFEST_KEYS:
+    expected_keys = _EXPECTED_MANIFEST_KEYS
+    if document.get("manifest_schema_version") == 2:
+        expected_keys = expected_keys | {"collection_provenance", "diagnostic_only"}
+    if frozenset(document) != expected_keys:
         raise DatasetValidationError("dataset manifest has an unexpected contract")
+    if (
+        type(document.get("manifest_schema_version")) is not int
+        or document["manifest_schema_version"] not in {1, 2}
+        or document.get("dataset_identity_version") != document["manifest_schema_version"]
+    ):
+        raise DatasetValidationError("dataset manifest version is invalid")
+    if document["manifest_schema_version"] == 2 and (
+        type(document.get("diagnostic_only")) is not bool
+        or (document["diagnostic_only"] and frozen.promotable)
+        or (
+            document.get("collection_provenance") is not None
+            and type(document["collection_provenance"]) is not dict
+        )
+    ):
+        raise DatasetValidationError("dataset collection extension is invalid")
     if canonical_json_bytes(document) != frozen.manifest_bytes:
         raise DatasetValidationError("dataset manifest is not canonically encoded")
     manifest_hash = document.get("manifest_hash")
@@ -218,6 +238,8 @@ def _manifest_values(frozen: FrozenDataset) -> dict[str, Any]:
         raise DatasetValidationError("dataset manifest timestamps are invalid") from None
     if created_at != frozen.created_at or range_end <= range_start:
         raise DatasetValidationError("dataset manifest time range is invalid")
+    if document["manifest_schema_version"] == 2:
+        _validate_collection_extension(document, created_at, range_start, range_end)
     if type(document.get("schema_version")) is not int or document["schema_version"] < 1:
         raise DatasetValidationError("dataset schema version is invalid")
     if type(document.get("dirty_worktree")) is not bool:
@@ -263,6 +285,80 @@ def _manifest_values(frozen: FrozenDataset) -> dict[str, Any]:
     }
     values["content_hash"] = sha256_hex(("dataset_manifest_record_v1", values))
     return values
+
+
+def _validate_collection_extension(
+    document: dict[str, Any], created_at: datetime, range_start: datetime, range_end: datetime
+) -> None:
+    payload = document["collection_provenance"]
+    if payload is None:
+        if not document["diagnostic_only"]:
+            raise DatasetValidationError("dataset collection extension is empty")
+        return
+    keys = {
+        "schema_version",
+        "universe_version",
+        "universe_hash",
+        "members",
+        "calendar_name",
+        "calendar_version",
+        "history_start_utc",
+        "pending_derived_sessions",
+        "persisted_gap_state_hash",
+        "unresolved_persisted_gaps",
+        "lagging_checkpoint_symbols",
+        "metadata_evidence",
+    }
+    if (
+        set(payload) != keys
+        or type(payload["schema_version"]) is not int
+        or payload["schema_version"] != 1
+    ):
+        raise DatasetValidationError("dataset collection provenance contract is invalid")
+    if (
+        type(payload["members"]) is not list
+        or type(payload["lagging_checkpoint_symbols"]) is not list
+    ):
+        raise DatasetValidationError("dataset collection members or checkpoint state is invalid")
+    members: list[tuple[str, str, str]] = []
+    for member in payload["members"]:
+        if (
+            type(member) is not dict
+            or set(member) != {"symbol", "collection_role", "research_role", "execution_authorized"}
+            or member["execution_authorized"] is not False
+        ):
+            raise DatasetValidationError("dataset collection member grants invalid authority")
+        members.append((member["symbol"], member["collection_role"], member["research_role"]))
+    metadata_payload = payload["metadata_evidence"]
+    metadata = (
+        None
+        if metadata_payload == {"listing_status": "unknown", "corporate_action_status": "unknown"}
+        else SnapshotMetadataEvidence.from_payload(metadata_payload)
+    )
+    provenance = CollectionDatasetProvenance(
+        universe_version=payload["universe_version"],
+        universe_hash=payload["universe_hash"],
+        members=tuple(members),
+        calendar_name=payload["calendar_name"],
+        calendar_version=payload["calendar_version"],
+        history_start_utc=_utc_text(payload["history_start_utc"], field_name="history_start_utc"),
+        pending_derived_sessions=payload["pending_derived_sessions"],
+        persisted_gap_state_hash=payload["persisted_gap_state_hash"],
+        unresolved_persisted_gaps=payload["unresolved_persisted_gaps"],
+        lagging_checkpoint_symbols=tuple(payload["lagging_checkpoint_symbols"]),
+        metadata_evidence=metadata,
+    )
+    if provenance.history_start_utc > range_start or (
+        document["promotable"] and not provenance.permits_promotion
+    ):
+        raise DatasetValidationError("dataset collection evidence cannot authorize promotion")
+    if metadata is not None and (
+        list(metadata.symbols) != document["symbols"]
+        or metadata.range_start_utc > range_start
+        or metadata.range_end_utc < range_end
+        or metadata.observed_at > created_at
+    ):
+        raise DatasetValidationError("dataset metadata does not cover its registered snapshot")
 
 
 def _utc_text(value: object, *, field_name: str) -> datetime:

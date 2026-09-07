@@ -35,7 +35,11 @@ from adaptive_trader.platform.storage.tables import (
     aqa_risk_decisions,
     aqa_signal_envelopes,
 )
-from adaptive_trader.platform.storage.transactions import SerializedTransactionCoordinator
+from adaptive_trader.platform.storage.transactions import (
+    PostgresAdvisoryLockNamespace,
+    PostgresAdvisoryLockRequest,
+    SerializedTransactionCoordinator,
+)
 
 _SUPPORTED_DIALECTS = frozenset({"postgresql", "sqlite"})
 _REQUIRED_SLOT_COLUMNS = frozenset(
@@ -249,11 +253,68 @@ class DecisionSlotRepository:
         instant = _utc(recorded_at, field_name="recorded_at")
         try:
             with self.transaction() as connection:
+                if schedule.slots:
+                    # Serialize competing creators before inspecting absent rows. Existing rows
+                    # are locked before audit streams, matching ordinary transition lock order.
+                    self._transactions.acquire_postgres_advisory_lock(
+                        connection,
+                        PostgresAdvisoryLockRequest.for_resource(
+                            PostgresAdvisoryLockNamespace.EXPERIMENT,
+                            schedule.slots[0].experiment_hash,
+                        ),
+                    )
+                    statement = (
+                        select(self._table)
+                        .where(
+                            self._table.c.slot_id.in_(
+                                tuple(slot.slot_id for slot in schedule.slots)
+                            )
+                        )
+                        .order_by(self._table.c.slot_id)
+                    )
+                    if connection.dialect.name == "postgresql":
+                        statement = statement.with_for_update()
+                    existing_slots = {
+                        row["slot_id"]: _slot_from_row(row)
+                        for row in connection.execute(statement).mappings()
+                    }
+                    self._transactions.acquire_postgres_advisory_locks(
+                        connection,
+                        tuple(
+                            PostgresAdvisoryLockRequest.for_resource(
+                                PostgresAdvisoryLockNamespace.AUDIT, f"aqa_scheduler:{slot.slot_id}"
+                            )
+                            for slot in schedule.slots
+                        ),
+                    )
+                else:
+                    existing_slots = {}
                 created: list[DecisionSlot] = []
                 for slot in schedule.slots:
-                    existing = self._get_on_connection(connection, slot.slot_id, for_update=True)
+                    existing = existing_slots.get(slot.slot_id)
                     if existing is not None:
-                        if existing != slot:
+                        # A restart recreates the original schedule while durable slots may
+                        # already be claimed or terminal. Compare the immutable contract,
+                        # including deadlines, without resetting any transition state.
+                        if any(
+                            getattr(existing, field) != getattr(slot, field)
+                            for field in (
+                                "slot_id",
+                                "experiment_id",
+                                "experiment_version",
+                                "experiment_hash",
+                                "signal_provider_id",
+                                "signal_provider_version",
+                                "session_date",
+                                "source_interval_start",
+                                "source_interval_end",
+                                "ready_at",
+                                "deadline_at",
+                                "required_completion_at",
+                                "decision_type",
+                                "correlation_id",
+                            )
+                        ):
                             raise SlotPersistenceError(
                                 "deterministic slot identity already has different content"
                             )
@@ -406,20 +467,26 @@ class DecisionSlotRepository:
                 slot.state is SlotState.CLAIMED
                 and slot.lease_expires_at is not None
                 and slot.lease_expires_at > instant
+                and not _completion_deadline_missed(slot, now=instant)
             ):
                 return None
             return self._claim_locked(connection, slot=slot, owner=owner, now=instant)
 
     def renew_lease(self, slot_id: str, *, owner: str, now: datetime) -> DecisionSlot:
-        """Renew an unexpired owned lease without extending the decision deadline."""
+        """Renew an owned lease within its decision or forced-proof lifecycle."""
 
         _require_owner(owner)
         instant = _utc(now, field_name="now")
         with self._safe_transaction() as connection:
             slot = self._require_on_connection(connection, slot_id, for_update=True)
             _require_owned_claim(slot, owner=owner)
-            if instant >= slot.deadline_at:
-                return self._expire_locked(connection, slot=slot, now=instant)
+            if _completion_deadline_missed(slot, now=instant):
+                return self._expire_locked(
+                    connection,
+                    slot=slot,
+                    now=instant,
+                    reason_code=_completion_deadline_reason(slot),
+                )
             _require_live_claim(slot, now=instant)
             return self._transition(
                 connection,
@@ -440,6 +507,14 @@ class DecisionSlotRepository:
         instant = _utc(now, field_name="now")
         with self._safe_transaction() as connection:
             slot = self._require_on_connection(connection, slot_id, for_update=True)
+            _require_owned_claim(slot, owner=owner)
+            if _completion_deadline_missed(slot, now=instant):
+                return self._expire_locked(
+                    connection,
+                    slot=slot,
+                    now=instant,
+                    reason_code=_completion_deadline_reason(slot),
+                )
             _require_owned_live_claim(slot, owner=owner, now=instant)
             if not self._materialization_probe.exists(connection, slot_id=slot.slot_id):
                 if instant >= slot.deadline_at:
@@ -489,7 +564,12 @@ class DecisionSlotRepository:
         instant = _utc(now, field_name="now")
         with self._safe_transaction() as connection:
             slot = self._require_on_connection(connection, slot_id, for_update=True)
-            _require_owned_live_claim(slot, owner=owner, now=instant)
+            _require_owned_claim(slot, owner=owner)
+            if not (
+                slot.decision_type is DecisionType.FORCED_FLAT
+                and instant > slot.required_completion_at
+            ):
+                _require_live_claim(slot, now=instant)
             return self._transition(
                 connection,
                 slot,
@@ -512,7 +592,14 @@ class DecisionSlotRepository:
                     self._table.c.state == SlotState.CLAIMED.value,
                     or_(
                         self._table.c.lease_expires_at <= instant,
-                        self._table.c.deadline_at <= instant,
+                        and_(
+                            self._table.c.decision_type != DecisionType.FORCED_FLAT.value,
+                            self._table.c.deadline_at <= instant,
+                        ),
+                        and_(
+                            self._table.c.decision_type == DecisionType.FORCED_FLAT.value,
+                            self._table.c.required_completion_at < instant,
+                        ),
                     ),
                 )
                 .order_by(self._table.c.deadline_at, self._table.c.slot_id)
@@ -542,7 +629,25 @@ class DecisionSlotRepository:
             return ClaimResult(ClaimStatus.NOT_AVAILABLE, slot)
         if slot.state is SlotState.CLAIMED:
             assert slot.lease_expires_at is not None
-            if now >= slot.deadline_at:
+            if _completion_deadline_missed(slot, now=now):
+                expired = self._expire_locked(
+                    connection,
+                    slot=slot,
+                    now=now,
+                    reason_code=_completion_deadline_reason(slot),
+                )
+                return ClaimResult(ClaimStatus.DEADLINE_ELAPSED, expired)
+            if slot.lease_expires_at > now:
+                return ClaimResult(ClaimStatus.LEASE_HELD, slot)
+            if slot.decision_type is DecisionType.FORCED_FLAT and now >= slot.deadline_at:
+                expired = self._expire_locked(
+                    connection,
+                    slot=slot,
+                    now=now,
+                    reason_code="forced_flat_lease_expired_after_submission_cutoff",
+                )
+                return ClaimResult(ClaimStatus.DEADLINE_ELAPSED, expired)
+            if slot.decision_type is not DecisionType.FORCED_FLAT and now >= slot.deadline_at:
                 if self._materialization_probe.exists(connection, slot_id=slot.slot_id):
                     completed = self._transition(
                         connection,
@@ -555,9 +660,10 @@ class DecisionSlotRepository:
                     return ClaimResult(ClaimStatus.MATERIALIZED, completed)
                 expired = self._expire_locked(connection, slot=slot, now=now)
                 return ClaimResult(ClaimStatus.DEADLINE_ELAPSED, expired)
-            if slot.lease_expires_at > now:
-                return ClaimResult(ClaimStatus.LEASE_HELD, slot)
-            if self._materialization_probe.exists(connection, slot_id=slot.slot_id):
+            if (
+                slot.decision_type is not DecisionType.FORCED_FLAT
+                and self._materialization_probe.exists(connection, slot_id=slot.slot_id)
+            ):
                 completed = self._transition(
                     connection,
                     slot,
@@ -603,13 +709,14 @@ class DecisionSlotRepository:
         *,
         slot: DecisionSlot,
         now: datetime,
+        reason_code: str | None = None,
     ) -> DecisionSlot:
         state = (
             SlotState.FAILED
             if slot.decision_type is DecisionType.FORCED_FLAT
             else SlotState.EXPIRED
         )
-        reason = (
+        reason = reason_code or (
             "forced_flat_submission_deadline_elapsed"
             if slot.decision_type is DecisionType.FORCED_FLAT
             else "decision_deadline_elapsed"
@@ -791,6 +898,18 @@ def _slot_from_row(row: RowMapping) -> DecisionSlot:
         content_hash=row["content_hash"],
         version=row["version"],
     )
+
+
+def _completion_deadline_missed(slot: DecisionSlot, *, now: datetime) -> bool:
+    if slot.decision_type is DecisionType.FORCED_FLAT:
+        return now > slot.required_completion_at
+    return now >= slot.deadline_at
+
+
+def _completion_deadline_reason(slot: DecisionSlot) -> str | None:
+    if slot.decision_type is DecisionType.FORCED_FLAT:
+        return "forced_flat_required_completion_deadline_missed"
+    return None
 
 
 def _allowed_next_states(state: SlotState) -> frozenset[SlotState]:

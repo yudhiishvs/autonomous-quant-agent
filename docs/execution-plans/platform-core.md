@@ -1,5 +1,159 @@
 # Platform core execution plan
 
+## Current assignment — complete non-AI architecture, 2026-09-06
+
+The latest complete non-AI directive supersedes the historical live-activation prerequisites,
+commit delegation, and Phase Zero gating recorded below. Work is local code, tests, infrastructure
+and documentation only. No commit, push, deployment, Alpaca request, account inspection or external
+activation is authorized. Existing dirty files are the baseline and must be preserved.
+
+Main AI is `OUT_OF_SCOPE_FROZEN_AI`. The original 61-file manifest remains immutable;
+`docs/evidence/non-ai-freeze-baseline.json` adds inventory and dependency fingerprints. Verify with
+`uv run --no-sync python scripts/verify_main_ai_freeze.py` before and after changes.
+
+Active work: finite scheduled REST catch-up and durable readiness; integrated offline workers and
+restart/flatten accounting; safe artifact publication and read-only dashboard; executable local/CI
+quality and security gates; PostgreSQL migration/role evidence; current operational documentation.
+The final command ledger will be `docs/evidence/non-ai-architecture-verification.md`.
+
+Baseline execution: 1,919 passed, four failed, nine skipped and five demo setup errors under the
+Python socket-denial wrapper. This is a baseline observation, not acceptance evidence. All provider
+adapters remain `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` without external calls.
+
+Everything below this current-assignment entry is historical unless explicitly reaffirmed here.
+
+### Current implementation and verification checkpoint
+
+The data, scheduler/strategy/shadow, reversal/execution, durable status, role/migration, health,
+backup/restore and packaging corrections are implemented. All 61 protected files, inventory and
+dependency fingerprints still match the inherited baseline. An earlier attempted change to the
+protected mixed configuration module was detected and restored byte-for-byte before continuing.
+
+Independent reviews found and corrected dataset receipt causality; premature reversal completion;
+PostgreSQL advisory lock ordering and timezone normalization; incomplete restore ACLs; unsafe
+health filesystem and shutdown paths; orphan execution evidence on restart; broker event identity
+and cancellation identity; historical symbol alias contradictions; and application-image resource
+discovery. The paper order snapshot cap receives a final fail-closed regression. The known strict
+provider average-price precision limitation is documented in operations.
+
+The settled canonical `make check` passed end to end: 3,039 socket-denied offline tests,
+160 explicitly guarded PostgreSQL tests, 82.19% repository and 85.69% platform branch-enabled
+coverage with the unchanged 74%/85% floors and two-decimal enforcement. Nine PostgreSQL modules
+were deferred in the offline phase; the real database stage had no skips. Packaging, installed
+CLI/demo, replay, configured security/dependency checks, Compose, benchmarks, diff hygiene and
+final frozen-byte verification passed. All three final images build; the public image CLI
+creates 4,290 minute rows and 208 non-promotable dataset rows. All 173 requirement IDs are indexed.
+
+The strict image security gate remains **BLOCKED**: each target reports 54 OS package findings
+(51 HIGH/3 CRITICAL), no scanner-reported fixed versions, and zero Python findings after removal
+of unused global build tools. No scanner threshold, dependency lock or coverage threshold was
+weakened. Passing local checks do not override this activation blocker. The paper adapter's
+strict average-price precision limitation is documented; model approval remains frozen/default-deny.
+
+Exact commands, benchmark receipts, intermediate failures and final results are recorded in
+`docs/evidence/non-ai-architecture-verification.md`. No commit, push, deployment, provider/account
+access or real order occurred. Cleanup removes only task-created disposable verification services
+and large temporary image exports; the earlier unrelated containers and inherited work remain.
+
+## Active override — 2026-09-06 live-data-first assignment
+
+The current assignment freezes the main AI and blocks every unrelated implementation
+milestone until the canonical 29-symbol Alpaca/IEX/raw one-minute collector is deployed,
+authenticated, subscribed, reconciled, restart-tested and continuously supervised on an
+authorized host. Existing implementation and status tables below are historical context;
+their labels are not new acceptance evidence. No real-money execution is authorized.
+
+### Main AI Freeze Manifest
+
+`docs/evidence/main-ai-freeze.json` records 61 protected files, reasons, working-tree SHA-256
+hashes, and pre-existing Git state at HEAD `5659f93ef17c439a121cc584eee000bc34154e4b`.
+The baseline is the existing working tree, including inherited changes, not clean HEAD.
+Existing `outputs/`, `runtime/`, raw data and research artifacts are also preserved;
+new checks must write into disposable temporary locations. No training is permitted.
+Verify every manifest hash at each milestone. Preserve research dependency versions.
+
+### Scope, design and compatibility
+
+Reuse `collection.CollectorService` and its fixed transports, raw observation evidence,
+fenced leases, durable coverage checkpoints, bounded REST recovery and shutdown. Connect
+its winning current observations atomically to `platform.storage.market_data`; canonical
+bars, aggregates, gaps and research readiness must have one owner. A durable projection
+queue is preferred to process-local timestamps so a crash cannot omit a historical bucket.
+Keep the 29-symbol intake contract separate from the frozen 11-symbol research/context
+contract; the 18 exploratory symbols never gain research or execution authority.
+
+Retaining two independently deployed collectors is rejected. Rewriting the established
+lifecycle would discard verified recovery behavior. Changes are additive at persistence
+boundaries, with explicit migrations, runtime least privilege and recoverable projections.
+Raw/canonical/checkpoint writes must roll back together; derived processing must replay
+idempotently after interruption. Use canonical XNAS session semantics for derived data.
+
+### Superseded requirements and authority
+
+- Older prohibitions on credentialed market-data validation and cloud resources are
+  superseded solely for the authorized data deployment. No new spending is authorized.
+- Research exclusion means excluded from research, not removed from the 29-symbol intake.
+- Main-AI scope is preserved frozen, not claimed implemented by this assignment.
+- Existing commit/publication authorization is not expanded. Preserve all inherited work.
+- Phase Zero takes precedence over the previous platform milestone ordering and cosmetic
+  harness cleanup. The baseline demo failures remain recorded until post-data work is allowed.
+
+### Ordered milestones and acceptance
+
+1. [x] Reconnaissance, baseline snapshot, frozen manifest and data architecture audit.
+2. [ ] Canonical intake/persistence convergence and durable derived processing.
+3. [ ] Data-only deployment, configuration, health/freshness and recovery runbook.
+4. [ ] Focused unit/contract/property, disposable PostgreSQL, migration, restore,
+   container and security checks; adversarial review with no unresolved HIGH/BLOCKER.
+5. [ ] Real host/database/provider activation, catch-up, exact subscription, controlled
+   restart and failure recovery, backup proof and non-secret evidence.
+6. [ ] Verify live service health and frozen hashes; only then pass Phase Zero and continue.
+
+### Baseline evidence and unresolved inputs
+
+Executed from the existing checkout using `UV_CACHE_DIR=/private/tmp/aqa-uv-cache`:
+`uv run --no-sync pytest -q -m 'not postgres'` → 1806 passed, 4 failed, 5 errors,
+8 skipped (92.07s). Failures include inherited Compose/image contract drift,
+migration-head expectations, service CLI expectations, and offline-demo canonical
+serialization. `uv run --no-sync ruff check .` → four inherited demo findings.
+`uv run --no-sync mypy src docker` → one inherited demo type error. These are not
+passing checks. The first default-cache uv invocation failed on sandbox cache access;
+the writable temporary cache allowed verification. No source edit preceded this baseline.
+
+The initial Docker probe reported no running local daemon. Docker Desktop was subsequently
+started with authorization, and the task created only disposable `aqa-phasezero-pg` on
+`127.0.0.1:55432`; this is local verification, not an always-on deployment. No existing always-on host,
+hosted database or supplied data-secret paths have been established. The operator was
+asked for target identifiers and secret-file paths only; local data engineering continues.
+Live activation remains BLOCKED until those external inputs exist. This is not a claim
+that local engineering is complete. No live-data success message has been emitted.
+
+### Local data checkpoint — 2026-09-06
+
+- Canonical raw/current/checkpoint intake, V2 receipt evidence, bounded legacy import,
+  leased derived session replay, XNAS aggregation/gaps and all supported live entry points
+  now converge through the existing collection lifecycle. Source corrections preserve raw
+  history and revise only the changed economic canonical bars and their aggregates.
+- The restricted PostgreSQL collector role completed a synthetic 29-symbol × 15-minute
+  backfill, idempotent restart and one constituent correction: 435 minute bars plus 11
+  aggregates; canonical events remained 446 on replay and became 448 after correction.
+- Latest focused data PostgreSQL run: **53 passed in 23.81s**, including legacy migration
+  ownership handoff, checkpoint/raw/canonical rollback, stale leases, operational health,
+  full lifecycle and disposable backup/restore. Earlier combined platform run: 126 passed,
+  four failed; two old head fixtures were corrected and passed the latest run. The inherited
+  non-data order/reconciliation schema comparison and scheduler-view expected grant mismatch
+  remain outside Phase Zero. They are not reported as passing.
+- Focused offline data/runtime/deployment/CI tests: **288 passed in 7.14s** at that source
+  checkpoint. Final snapshot/batched-reader changes require their own subsequent checks.
+- Isolated locked security tools: targeted Bandit `-ll -ii` found no findings or scan errors;
+  `pip-audit` reported no known vulnerabilities in the market-data runtime export. The
+  secret scanner's two findings were inspected environment-variable names in credentials.py.
+- All 61 AI hashes and all 143 third-party lock records remain unchanged; pyproject.toml
+  matches task-start bytes. No research artifact was regenerated, commit created or push made.
+- Remaining local work: snapshot operational command, final shared-reader/performance review,
+  current-source image rebuild and evidence reconciliation. External host, persistent DB,
+  mounted data secrets and historical start date remain required for actual activation.
+
 Status: `PARTIALLY_IMPLEMENTED`
 
 Active branch: `feature/market-data-platform`
@@ -65,19 +219,14 @@ The Phase 0 current/target matrix is:
 
 The generic `adaptive_trader.platform` package now contains canonical serialization, hashing,
 universe roles, strict experiment/profile loading, immutable `ExperimentSpec`/`PlatformConfig`
-composition, broker-free static CLI validation through both new aliases, descriptor-relative
-owner-private secret loading, opaque secret-file references, and strict `RuntimeSettings` composed
-from an explicitly injected environment and exact service/mode authority matrix. The exact
-experiment and all three profiles are present. Local infrastructure-secret bootstrap is also
-implemented. The platform database engine, exact 25-table SQLAlchemy metadata, additive schema/bar
-history/authorization migrations, fixed PostgreSQL role and safe-view matrix, atomic
-bar/latest/eligible-symbol-watermark repository, and append-only audit repository/read-only CLI
-verifier are implemented. The migration role is a trusted deployment-only schema owner with
-ordinary business DML self-revoked but ownership/grant authority retained; no runtime service
-receives it. Service command adoption, the remaining atomic repositories, aggregation, basket
-watermarks, scheduler, jobs/outbox, private API, API-backed dashboard, offline vertical slice,
-PostgreSQL restore proof, and the complete delivery/security harness remain incomplete. Final
-current-revision PostgreSQL 16 and published-CI evidence for Phase 2 is pending.
+composition, file-backed service-scoped secret references, PostgreSQL and SQLite repositories,
+canonical market-data lineage, deterministic aggregation and watermarks, durable scheduling,
+registered signal providers, signed risk, signed execution planning, a fake broker, reconciliation,
+jobs/outbox, a private control API, an API-backed dashboard, structured observability, and the
+credential-free offline vertical slice. Local infrastructure-secret bootstrap and read-only audit
+verification are also implemented. Credentialed provider and paper adapters remain deliberately
+unconnected, and PostgreSQL restore, container runtime, package-install, image-scan, SBOM, and
+published-current-revision evidence must not be upgraded beyond their actually executed gates.
 
 ## 4. Requirements being addressed
 
@@ -487,19 +636,29 @@ commit count is planned.
   composition, local bootstrap, repository hygiene, Python 3.11 typing, initial STRIDE register,
   and current/target security architecture are in place. Later service command consumption,
   process mounts, and feature-specific commands belong to their implementation phases.
-- [ ] `PARTIALLY_IMPLEMENTED` — Phase 2 has the redacted database-engine boundary, exact 25-table
-  metadata, additive schema/bar-history/authorization migrations, SQLite compatibility, fixed
-  PostgreSQL authorization/login roles with scoped grants and safe views, the atomic
-  bar/latest/eligible-symbol-watermark repository, and the append-only audit repository/read-only
-  verifier. The remaining atomic repositories and final current-revision PostgreSQL 16/published
-  evidence remain incomplete.
-- [ ] `NOT_IMPLEMENTED` — Phase 3 canonical data/dataset pipeline.
-- [ ] `NOT_IMPLEMENTED` — Phase 4 scheduler and signal boundary.
-- [ ] `NOT_IMPLEMENTED` — Phase 5 signed risk and latches.
-- [ ] `NOT_IMPLEMENTED` — Phase 6 signed execution and recovery.
-- [ ] `NOT_IMPLEMENTED` — Phase 7 control plane and observability.
-- [ ] `NOT_IMPLEMENTED` — Phase 8 container and delivery/security gates.
-- [ ] `NOT_IMPLEMENTED` — Phase 9 public offline vertical slice and recovery evidence.
+- [x] `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` — Phase 2 provides the schema, migrations, role and
+  safe-view matrix, transactional repositories, SQLite compatibility, and audit chain. Local
+  PostgreSQL client/runtime availability still limits fresh-database and restore evidence.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 3 provides canonical data lineage, corrections, gaps,
+  deterministic aggregation, basket watermarks, and immutable dataset manifests; credentialed
+  provider validation is intentionally excluded.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 4 provides deterministic durable slots and leases,
+  registered signal-provider boundaries, strict envelopes, and default-deny provider approval.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 5 provides signed portfolio mathematics, eligibility and
+  freshness controls, constraints, durable latches, and deterministic risk receipts.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 6 provides signed execution plans, close-first reversals,
+  deterministic client IDs, durable intents, fake-broker recovery, reconciliation, accounting,
+  and forced flatten; the paper adapter remains unconnected.
+- [x] `IMPLEMENTED_AND_VERIFIED` — Phase 7 provides durable jobs/outbox, authenticated allowlisted
+  control queries, API-backed presentation, structured redaction, bounded metrics, and associated
+  import and behavior tests.
+- [x] `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` — Phase 8 defines the separated container topology,
+  pre-commit and delivery/security workflows, dependency update policy, scans, and SBOM gates;
+  local daemon and remote-current-revision evidence are recorded separately.
+- [x] `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` — Phase 9 provides the public command and documentation
+  surface, extension example, deterministic twice-run demo and evidence manifest, benchmark, and
+  guarded PostgreSQL backup/restore smoke path; PostgreSQL restore and clean-install gates retain
+  explicit external-validation status.
 - [ ] `NOT_IMPLEMENTED` — Phase 10 final reviews and traceability.
 
 ## 24. Decisions made
@@ -507,21 +666,21 @@ commit count is planned.
 | Decision | Rationale | Status |
 | --- | --- | --- |
 | Continue on `feature/market-data-platform` from `5690205`. | Explicit maintainer direction preserves the committed collector work. | IMPLEMENTED_AND_VERIFIED |
-| Build a separate signed platform path under `adaptive_trader.platform`. | Protects legacy long-only contracts and follows the required public namespace. | PARTIALLY_IMPLEMENTED |
+| Build a separate signed platform path under `adaptive_trader.platform`. | Protects legacy long-only contracts and follows the required public namespace. | IMPLEMENTED_AND_VERIFIED |
 | Treat the flagship basket as versioned configuration. | Keeps algorithms reusable and makes symbol authority hashable/testable. | IMPLEMENTED_AND_VERIFIED |
 | Keep the strict experiment file as a reusable definition and compose signal-provider and execution-mode identity through the selected profile. | Reconciles one exact experiment document across offline, shadow, and paper modes while ensuring `ExperimentSpec` includes the remaining required identity. | IMPLEMENTED_AND_VERIFIED |
-| Treat experiment market-data provider as the intended external series and runtime source as separate provenance. | Offline fixture bars must remain labeled `fixture` and non-promotable; composed configuration now binds definition and adapter identity and requires Alpaca/IEX/raw for external modes, while bar/dataset provenance remains Phase 3 work. | PARTIALLY_IMPLEMENTED |
-| Retain Python, `uv`, PostgreSQL/SQLite, Typer, and Streamlit; add the required FastAPI boundary. | Preserves the implemented stack while adding the specified private API; FastAPI is not currently installed. | PARTIALLY_IMPLEMENTED |
-| Use PostgreSQL jobs/outbox, not a message broker. | Current workload needs transactional durability more than another distributed dependency. | NOT_IMPLEMENTED |
-| Treat `aqa_migrate` as a trusted deployment-only schema owner, not a runtime sandbox. | Schema ownership and grant authority are required for governed migrations and cannot be neutralized by self-revoking DML; ordinary business DML is still explicitly revoked and no runtime service receives the role. | PARTIALLY_IMPLEMENTED pending final Phase 2 evidence |
-| Expose full audit reads only to control/read-only verification paths and scope ordinary writer reads by actor/stream. | A writer must verify its own chain without gaining visibility into unrelated service evidence; row policies and security-barrier views align database and domain writer authority. | PARTIALLY_IMPLEMENTED pending final Phase 2 evidence |
-| Move dashboard reads behind the API. | Removes database authority from presentation code. | NOT_IMPLEMENTED |
-| Use only file-backed secrets in new services. | The reusable loader prevents unsafe file acceptance and ordinary serialization, while runtime composition selects opaque references through an exact service/mode matrix; service command adoption and mounts remain. | PARTIALLY_IMPLEMENTED |
-| Keep paper submission unreachable by default. | Current legacy configuration disables submission; the target adds its independent default-deny verifier, and this program performs no connection. | PARTIALLY_IMPLEMENTED |
-| Reuse collector behavior selectively rather than rename it into place. | Current symbol, secret, schema, and readiness contracts differ materially. | NOT_IMPLEMENTED |
+| Treat experiment market-data provider as the intended external series and runtime source as separate provenance. | Fixture bars remain labeled `fixture` and non-promotable; external modes bind the intended provider/feed while canonical bars and manifests retain runtime provenance. | IMPLEMENTED_AND_VERIFIED |
+| Retain Python, `uv`, PostgreSQL/SQLite, Typer, and Streamlit; add the required FastAPI boundary. | Preserves the implemented stack while adding the private typed control API. | IMPLEMENTED_AND_VERIFIED |
+| Use PostgreSQL jobs/outbox, not a message broker. | Current workload needs transactional durability more than another distributed dependency. | IMPLEMENTED_NOT_EXTERNALLY_VALIDATED |
+| Treat `aqa_migrate` as a trusted deployment-only schema owner, not a runtime sandbox. | Schema ownership and grant authority are required for governed migrations and cannot be neutralized by self-revoking DML; ordinary business DML is explicitly revoked and no runtime service receives the role. | IMPLEMENTED_NOT_EXTERNALLY_VALIDATED |
+| Expose full audit reads only to control/read-only verification paths and scope ordinary writer reads by actor/stream. | A writer verifies its own chain without gaining visibility into unrelated service evidence; row policies and security-barrier views align database and domain writer authority. | IMPLEMENTED_NOT_EXTERNALLY_VALIDATED |
+| Move dashboard reads behind the API. | Removes database authority from presentation code. | IMPLEMENTED_AND_VERIFIED |
+| Use only file-backed secrets in new services. | Runtime composition selects opaque references through an exact service/mode matrix and container definitions mount only the applicable secret files. | IMPLEMENTED_AND_VERIFIED |
+| Keep paper submission unreachable by default. | Paper submission requires independent gates; offline and shadow paths construct no broker and this program performs no connection. | IMPLEMENTED_AND_VERIFIED |
+| Reuse collector behavior selectively rather than rename it into place. | Current symbol, secret, schema, and readiness contracts differ materially. | IMPLEMENTED_AND_VERIFIED |
 | Use `docs/adr/` as the single decision-record authority. | Core specifies this path; the harness's conceptual `docs/design-decisions/` directory is omitted to avoid two mutable indexes. | IMPLEMENTED_AND_VERIFIED |
-| Treat unsupported early-close sessions as entry-ineligible and fail closed for forced-risk reduction. | The fixed regular-session timetable cannot be assumed safe on a shortened session. | NOT_IMPLEMENTED |
-| Resolve dashboard read-only authorization before implementing the private API. | The exact secret list has one operator token, while a shared bearer token could authorize control mutations after dashboard compromise. | NOT_IMPLEMENTED |
+| Treat unsupported early-close sessions as entry-ineligible and fail closed for forced-risk reduction. | The fixed regular-session timetable cannot be assumed safe on a shortened session. | IMPLEMENTED_AND_VERIFIED |
+| Resolve dashboard read-only authorization before implementing the private API. | Dashboard reads use a dedicated read-only interface and cannot reach control mutations or persistence directly. | IMPLEMENTED_AND_VERIFIED |
 | Continue natural commits without a separate approval pause after each internal review. | After approving the first two boundaries, the maintainer explicitly delegated continued work on this feature branch and requested no further approval prompts; coherent boundaries, full diff review, configured identity, and verification remain mandatory. | PARTIALLY_IMPLEMENTED |
 | Fast-forward reviewed feature-branch checkpoints without repeated publication prompts. | The maintainer explicitly requested uninterrupted continuation after authorizing the feature branch push; history rewrite, force-push, pull-request merge, and publication outside this branch remain excluded. | PARTIALLY_IMPLEMENTED |
 
@@ -852,26 +1011,16 @@ paper or real-money order was submitted during this baseline.
 
 Current outcome: `PARTIALLY_IMPLEMENTED`.
 
-Phases 0 and 1 are implemented with recorded evidence: the generic project/domain boundary,
-canonical identity/time/numeric primitives, universe, experiment, profiles, static validation,
-secret-file and service-scoped runtime settings, local bootstrap, initial security architecture,
-and STRIDE register. Phase 2 is in progress with a redacted platform database engine, exact
-25-table metadata, additive schema/bar-history/authorization migrations, a fixed PostgreSQL
-role/grant/safe-view boundary, an atomic bar/latest/eligible-symbol-watermark repository, and an
-append-only audit repository with read-only CLI verification. The existing collector and legacy
-regression suite provide reusable code and characterization, but they do not satisfy the complete
-generic platform contract. The remaining Phase 2 repositories, service command/mount integration,
-and feature commands are assigned to their dependent later phases; the incomplete parts of Phases
-2–10 remain as listed in the progress checklist.
-The current Phase 2 migration/role/repository changes have not yet completed their final
-current-revision PostgreSQL 16 and published-CI verification. Target container runtime, image scan,
-SBOM, clean-package install, twice-run demo, and backup/restore evidence remain unavailable until
-their implementation exists and the required services are available. GitHub Actions run
-`33974704565` passed for pushed commit `d214e3a`; that run validates the digest-pinned PostgreSQL 16
-and image boundaries plus all published Phase 1 foundations. The current Phase 2 implementation is
-still an uncommitted worktree candidate.
-Every credentialed external adapter remains unvalidated;
-credentialed external validation is intentionally prohibited in this program.
+Phases 0–7 have executable repository implementations and offline evidence for their local
+contracts. Phase 8 has checked-in container and delivery/security gates, while results that require
+a container daemon, vulnerability databases, or a current remote workflow run remain external
+evidence. Phase 9 provides the public CLI and documentation surface, provider example,
+credential-free deterministic vertical slice, immutable evidence, benchmark harness, and guarded
+PostgreSQL backup/restore proof. The backup/restore path is not reported as passing because the
+local PostgreSQL client utilities were unavailable.
 
-This section must be replaced with exact implemented outcomes, remaining requirement statuses,
-final hashes, review findings, and external limitations after Phase 10; it cannot prove completion.
+Phase 10 final independent reviews, traceability closure, and the exact final verification ledger
+remain incomplete. Every credentialed external adapter remains unvalidated by design: no Alpaca
+data or paper connection, real credential-file read, paper submission, or real-money path is part
+of this implementation evidence. Requirement-level remaining work and validation boundaries are
+authoritative in `docs/requirements.md`.

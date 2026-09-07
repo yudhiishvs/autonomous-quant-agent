@@ -38,6 +38,7 @@ SERVICE_SOURCES = {
     RuntimeService.CONTROL_API: frozenset(
         {SecretFileVariable.DATABASE_URL, SecretFileVariable.OPERATOR_TOKEN}
     ),
+    RuntimeService.JOB_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.MARKET_DATA_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.SCHEDULER_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.STRATEGY_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
@@ -72,6 +73,7 @@ SOURCE_FIELDS = {
 SERVICE_MODES = {
     RuntimeService.MIGRATE: frozenset(ExecutionMode),
     RuntimeService.CONTROL_API: frozenset(ExecutionMode),
+    RuntimeService.JOB_WORKER: frozenset(ExecutionMode),
     RuntimeService.MARKET_DATA_WORKER: frozenset({ExecutionMode.OFFLINE}),
     RuntimeService.SCHEDULER_WORKER: frozenset(ExecutionMode),
     RuntimeService.STRATEGY_WORKER: frozenset(ExecutionMode),
@@ -153,6 +155,7 @@ def test_runtime_service_and_setting_inventories_are_exact() -> None:
     assert {service.value for service in RuntimeService} == {
         "migrate",
         "control-api",
+        "job-worker",
         "market-data-worker",
         "scheduler-worker",
         "strategy-worker",

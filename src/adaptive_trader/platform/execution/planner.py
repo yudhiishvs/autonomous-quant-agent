@@ -67,6 +67,25 @@ class ExecutionPlanningRequest:
             raise ExecutionValidationError("reference prices must be positive finite Decimals")
         if type(self.equity) is not Decimal or not self.equity.is_finite() or self.equity <= 0:
             raise ExecutionValidationError("planning equity must be a positive finite Decimal")
+        authorized_positions = tuple(
+            Position(position.symbol, position.quantity)
+            for position in self.risk_decision.planning_positions
+        )
+        authorized_prices = tuple(
+            (price.symbol, price.price) for price in self.risk_decision.planning_prices
+        )
+        if self.current_positions != authorized_positions:
+            raise ExecutionValidationError(
+                "planning positions do not match the signed risk snapshot"
+            )
+        if self.reference_prices != authorized_prices:
+            raise ExecutionValidationError("planning prices do not match the signed risk snapshot")
+        if self.equity != self.risk_decision.account_snapshot.equity:
+            raise ExecutionValidationError(
+                "planning equity does not match the signed risk snapshot"
+            )
+        if any(not price.validated for price in self.risk_decision.planning_prices):
+            raise ExecutionValidationError("planning prices are not validated for execution")
         if type(self.target_version) is not int or not 1 <= self.target_version <= 999_999:
             raise ExecutionValidationError("target version must be between one and 999999")
         if type(self.forced_flat) is not bool:
@@ -88,9 +107,31 @@ class ExecutionPlanningRequest:
 class ExecutionPlanningResult:
     """A plan and its atomically persistable first-stage intents."""
 
+    risk_decision: RiskDecision
     plan: ExecutionPlan
     intents: tuple[OrderIntent, ...]
     reversal_symbols: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.risk_decision) is not RiskDecision:
+            raise ExecutionValidationError("planning result risk decision is invalid")
+        if type(self.plan) is not ExecutionPlan:
+            raise ExecutionValidationError("planning result plan is invalid")
+        if type(self.intents) is not tuple or any(
+            type(intent) is not OrderIntent for intent in self.intents
+        ):
+            raise ExecutionValidationError("planning result intents are invalid")
+        if type(self.reversal_symbols) is not tuple:
+            raise ExecutionValidationError("planning result reversal symbols are invalid")
+        if (
+            self.plan.risk_decision_id != self.risk_decision.risk_decision_id
+            or self.plan.risk_decision_hash != self.risk_decision.content_hash
+            or self.plan.experiment_hash != self.risk_decision.experiment_hash
+            or self.plan.correlation_id != self.risk_decision.correlation_id
+        ):
+            raise ExecutionValidationError("planning result is not bound to its risk decision")
+        if any(intent.execution_plan_id != self.plan.execution_plan_id for intent in self.intents):
+            raise ExecutionValidationError("planning result contains an intent from another plan")
 
     @property
     def reversal_barrier_required(self) -> bool:
@@ -168,6 +209,9 @@ def plan_signed_orders(request: ExecutionPlanningRequest) -> ExecutionPlanningRe
         target_version=request.target_version,
         forced_flat=request.forced_flat,
         target_quantities=targets,
+        current_positions=request.current_positions,
+        reference_prices=request.reference_prices,
+        equity=request.equity,
         created_at=request.created_at,
         deadline_at=request.deadline_at,
     )
@@ -228,6 +272,7 @@ def plan_signed_orders(request: ExecutionPlanningRequest) -> ExecutionPlanningRe
         if not request.forced_flat and intent.notional < MINIMUM_ORDER_NOTIONAL:
             raise ExecutionValidationError("non-flattening intent is below minimum notional")
     return ExecutionPlanningResult(
+        risk_decision=decision,
         plan=plan,
         intents=intents,
         reversal_symbols=tuple(sorted(reversal_symbols)),

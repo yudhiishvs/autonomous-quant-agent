@@ -41,7 +41,12 @@ _HASH = re.compile(r"^[0-9a-f]{64}$", flags=re.ASCII)
 
 @dataclass(frozen=True, slots=True)
 class ReconciliationRequest:
-    """Complete trusted local and sanitized broker state for one comparison."""
+    """Complete trusted local and sanitized broker state for one comparison.
+
+    ``fills`` contains only deltas produced by the current execution plan and is applied to
+    its signed position/cash baseline. ``order_fills`` contains the complete persisted fill
+    evidence for every durable order included in the comparison, including active prior plans.
+    """
 
     experiment_hash: str
     slot_id: str | None
@@ -52,6 +57,7 @@ class ReconciliationRequest:
     baseline_positions: tuple[Position, ...]
     baseline_cash: Decimal
     fills: tuple[Fill, ...]
+    order_fills: tuple[Fill, ...]
     intents: tuple[OrderIntent, ...]
     durable_orders: tuple[BrokerOrder, ...]
     broker_orders: tuple[BrokerOrder, ...]
@@ -79,6 +85,7 @@ class ReconciliationRequest:
             raise ExecutionValidationError("short eligibility must be a subset of active symbols")
         _tuple_of(self.baseline_positions, Position, "baseline positions")
         _tuple_of(self.fills, Fill, "fills")
+        _tuple_of(self.order_fills, Fill, "order fills")
         _tuple_of(self.intents, OrderIntent, "intents")
         _tuple_of(self.durable_orders, BrokerOrder, "durable orders")
         _tuple_of(self.broker_orders, BrokerOrder, "broker orders")
@@ -119,6 +126,18 @@ class ReconciliationRequest:
             ) from None
         if completed_at < started_at:
             raise ExecutionValidationError("reconciliation completion precedes start")
+        if not started_at <= self.broker_account.observed_at <= completed_at:
+            raise ExecutionValidationError(
+                "broker account observation must occur during reconciliation"
+            )
+        if any(fill.occurred_at > completed_at for fill in (*self.fills, *self.order_fills)):
+            raise ExecutionValidationError("reconciliation cannot include a future fill")
+        if any(intent.created_at > completed_at for intent in self.intents):
+            raise ExecutionValidationError("reconciliation cannot include a future intent")
+        if any(
+            order.updated_at > completed_at for order in (*self.durable_orders, *self.broker_orders)
+        ):
+            raise ExecutionValidationError("reconciliation cannot include a future order state")
         if (
             type(self.live_endpoint_detected) is not bool
             or type(self.paper_false_detected) is not bool
@@ -178,7 +197,9 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
     if request.paper_false_detected:
         discrepancies.append(_difference(DiscrepancyCode.PAPER_FALSE_DETECTED))
 
-    duplicate_execution_ids = _duplicates(tuple(fill.broker_execution_id for fill in request.fills))
+    duplicate_execution_ids = set(
+        _duplicates(tuple(fill.broker_execution_id for fill in request.fills))
+    ) | set(_duplicates(tuple(fill.broker_execution_id for fill in request.order_fills)))
     discrepancies.extend(
         _difference(DiscrepancyCode.DUPLICATE_EXECUTION_ID) for _ in duplicate_execution_ids
     )
@@ -255,17 +276,15 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
         duplicate_code=DiscrepancyCode.DUPLICATE_CLIENT_ORDER_ID,
         discrepancies=discrepancies,
     )
+    traceable_shorts = _traceable_short_inventory(
+        intents=intent_map,
+        orders=durable,
+        fills=request.order_fills,
+    )
     for symbol, quantity in sorted(expected_map.items()):
         if quantity >= 0:
             continue
-        traceable = any(
-            intent.symbol == symbol
-            and intent.position_effect in {PositionEffect.OPEN_SHORT, PositionEffect.INCREASE_SHORT}
-            and intent.client_order_id in durable
-            and any(fill.client_order_id == intent.client_order_id for fill in request.fills)
-            for intent in request.intents
-        )
-        if not traceable:
+        if abs(traceable_shorts.get(symbol, Decimal(0)) - abs(quantity)) > QUANTITY_TOLERANCE:
             discrepancies.append(
                 _difference(
                     DiscrepancyCode.UNTRACEABLE_SHORT_POSITION,
@@ -300,6 +319,20 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
         duplicate_code=DiscrepancyCode.DUPLICATE_CLIENT_ORDER_ID,
         discrepancies=discrepancies,
     )
+    if request.require_flat:
+        for client_id, local_order in durable.items():
+            open_intent = intent_map.get(client_id)
+            if (
+                open_intent is not None
+                and open_intent.position_effect.opens_exposure
+                and not local_order.state.terminal
+            ):
+                discrepancies.append(
+                    _difference(
+                        DiscrepancyCode.REQUIRED_FLAT_NOT_PROVEN,
+                        client_order_id=client_id,
+                    )
+                )
     for client_id, unknown_candidate in observed_orders.items():
         if client_id not in intent_map:
             discrepancies.append(
@@ -321,7 +354,7 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
                 fill.quantity
                 for fill in {
                     fill.broker_execution_id: fill
-                    for fill in request.fills
+                    for fill in request.order_fills
                     if fill.client_order_id == client_id
                 }.values()
             ),
@@ -337,7 +370,13 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
                 )
             )
         matching_broker_order = observed_orders.get(client_id)
-        if local_order.state is OrderState.INTENT_COMMITTED:
+        order_intent = intent_map.get(client_id)
+        is_current_plan = (
+            order_intent is not None and order_intent.execution_plan_id == request.execution_plan_id
+        )
+        if local_order.state.terminal and not is_current_plan and matching_broker_order is None:
+            continue
+        if local_order.state is OrderState.INTENT_COMMITTED and matching_broker_order is None:
             continue
         if local_order.state.ambiguous:
             discrepancies.append(
@@ -367,6 +406,13 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
                 )
             )
         if local_order.state is not matching_broker_order.state:
+            discrepancies.append(
+                _difference(
+                    DiscrepancyCode.ORDER_STATE_MISMATCH,
+                    client_order_id=client_id,
+                )
+            )
+        if local_order.broker_order_id != matching_broker_order.broker_order_id:
             discrepancies.append(
                 _difference(
                     DiscrepancyCode.ORDER_STATE_MISMATCH,
@@ -411,6 +457,7 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
         execution_plan_id=request.execution_plan_id,
         correlation_id=request.correlation_id,
         account_id_hash=request.broker_account.account_id_hash,
+        account_observed_at=request.broker_account.observed_at,
         started_at=request.started_at,
         completed_at=request.completed_at,
         expected_positions=expected_positions,
@@ -423,12 +470,17 @@ def reconcile(request: ReconciliationRequest) -> ReconciliationReceipt:
         observed_cash=request.broker_account.cash,
         expected_equity=expected_equity,
         observed_equity=request.broker_account.equity,
-        fill_hashes=tuple(sorted({fill.content_hash for fill in request.fills})),
+        mark_prices=request.mark_prices,
+        fill_hashes=tuple(
+            sorted({fill.content_hash for fill in (*request.fills, *request.order_fills)})
+        ),
         order_hashes=tuple(
             sorted(
                 {order.content_hash for order in (*request.durable_orders, *request.broker_orders)}
             )
         ),
+        require_flat=request.require_flat,
+        required_flat_at=request.required_flat_at,
         discrepancies=ordered,
     )
 
@@ -464,6 +516,7 @@ def reconcile_and_persist(
         )
     repository.record_reconciliation_bundle(
         receipt,
+        request=request,
         latch_event=latch_event,
         incident=incident,
     )
@@ -553,6 +606,50 @@ def _duplicates(values: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(sorted(duplicates))
 
 
+def _traceable_short_inventory(
+    *,
+    intents: dict[str, OrderIntent],
+    orders: dict[str, BrokerOrder],
+    fills: tuple[Fill, ...],
+) -> dict[str, Decimal]:
+    """Rebuild remaining short inventory only from a complete owned evidence chain."""
+
+    inventory: dict[str, Decimal] = {}
+    unique = {
+        fill.broker_execution_id: fill
+        for fill in sorted(
+            fills,
+            key=lambda item: (item.occurred_at, item.broker_execution_id),
+        )
+    }
+    for fill in unique.values():
+        intent = intents.get(fill.client_order_id)
+        order = orders.get(fill.client_order_id)
+        if (
+            intent is None
+            or order is None
+            or order.order_intent_id != intent.order_intent_id
+            or fill.symbol != intent.symbol
+            or fill.side is not intent.side
+        ):
+            continue
+        if intent.position_effect in {
+            PositionEffect.OPEN_SHORT,
+            PositionEffect.INCREASE_SHORT,
+        }:
+            inventory[fill.symbol] = inventory.get(fill.symbol, Decimal(0)) + fill.quantity
+        elif intent.position_effect in {
+            PositionEffect.REDUCE_SHORT,
+            PositionEffect.CLOSE_SHORT,
+            PositionEffect.FORCED_FLAT_SHORT,
+        }:
+            inventory[fill.symbol] = max(
+                Decimal(0),
+                inventory.get(fill.symbol, Decimal(0)) - fill.quantity,
+            )
+    return inventory
+
+
 def _tuple_of(value: object, expected_type: type[object], description: str) -> None:
     if type(value) is not tuple or any(type(item) is not expected_type for item in value):
         raise ExecutionValidationError(f"{description} must be an immutable validated tuple")
@@ -565,12 +662,25 @@ def reconciliation_input_hash(request: ReconciliationRequest) -> str:
         raise ExecutionValidationError("reconciliation hash requires a validated request")
     return sha256_hex(
         {
+            "account_buying_power": request.broker_account.buying_power,
+            "account_cash": request.broker_account.cash,
+            "account_equity": request.broker_account.equity,
             "account_id_hash": request.broker_account.account_id_hash,
+            "account_observed_at": request.broker_account.observed_at,
+            "account_restricted_short_proceeds": (request.broker_account.restricted_short_proceeds),
             "broker_order_hashes": tuple(order.content_hash for order in request.broker_orders),
+            "broker_positions": tuple(
+                (position.symbol, position.quantity) for position in request.broker_positions
+            ),
             "completed_at": request.completed_at,
             "durable_order_hashes": tuple(order.content_hash for order in request.durable_orders),
-            "fill_hashes": tuple(fill.content_hash for fill in request.fills),
-            "schema": "reconciliation-input-v1",
+            "expected_account_id_hash": request.expected_account_id_hash,
+            "mark_prices": request.mark_prices,
+            "order_fill_hashes": tuple(fill.content_hash for fill in request.order_fills),
+            "plan_fill_hashes": tuple(fill.content_hash for fill in request.fills),
+            "require_flat": request.require_flat,
+            "required_flat_at": request.required_flat_at,
+            "schema": "reconciliation-input-v3",
             "started_at": request.started_at,
         }
     )

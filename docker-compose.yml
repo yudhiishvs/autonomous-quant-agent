@@ -1,123 +1,532 @@
-x-trader-environment: &trader-environment
-  APA_ALPACA_PAPER_API_KEY: ${APA_ALPACA_PAPER_API_KEY:-}
-  APA_ALPACA_PAPER_SECRET_KEY: ${APA_ALPACA_PAPER_SECRET_KEY:-}
-  APA_ENABLE_PAPER_ORDERS: ${APA_ENABLE_PAPER_ORDERS:-NO}
+name: autonomous-quant-agent
 
-x-trader-volumes: &trader-volumes
-  - apa-runtime:/app/runtime
-  - apa-outputs:/app/outputs
-  - apa-data-cache:/app/data/cache
-  - ./configs:/app/configs:ro
+x-platform-image: &platform-image
+  image: ${AQA_PLATFORM_IMAGE:-autonomous-quant-agent:local}
+  build:
+    context: .
+    target: platform
+    args:
+      AQA_SOURCE_URL: ${AQA_SOURCE_URL:-https://github.com/yudhiishvs/autonomous-quant-agent}
+      AQA_VCS_REF: ${AQA_VCS_REF:-local}
+      AQA_VERSION: ${AQA_VERSION:-0.1.0}
 
-x-market-data-environment: &market-data-environment
-  APA_ALPACA_DATA_API_KEY: ${APA_ALPACA_DATA_API_KEY:-}
-  APA_ALPACA_DATA_SECRET_KEY: ${APA_ALPACA_DATA_SECRET_KEY:-}
-  APA_MARKET_DATA_DATABASE_URL: ${APA_MARKET_DATA_DATABASE_URL:-}
-  APA_MARKET_DATA_HISTORY_START: ${APA_MARKET_DATA_HISTORY_START:-}
+x-runtime-security: &runtime-security
+  init: true
+  user: "10001:10001"
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  restart: on-failure:5
+  stop_grace_period: 30s
+  deploy:
+    resources:
+      limits:
+        cpus: "1.00"
+        memory: 768M
+        pids: 256
+
+x-offline-environment: &offline-environment
+  AQA_CONFIG: configs/platform/offline.yaml
+  AQA_ARTIFACT_ROOT: outputs/artifacts
+  AQA_API_BASE_URL: http://control-api:8000
+  AQA_LOG_FORMAT: json
+  AQA_ENABLE_PAPER_ORDERS: "NO"
+  AQA_API_DOCS_ENABLED: "NO"
+
+x-worker-healthcheck: &worker-healthcheck
+  interval: 30s
+  timeout: 5s
+  start_period: 20s
+  retries: 3
 
 services:
-  market-data-collector:
-    profiles: ["market-data"]
-    build:
-      context: .
-      target: market-data
-    image: adaptive-market-data:local
-    init: true
+  postgres:
+    image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+    user: "999:999"
+    read_only: true
     cap_drop:
       - ALL
     security_opt:
       - no-new-privileges:true
-    read_only: true
     tmpfs:
-      - /tmp:size=128m
+      - /tmp:size=128m,mode=1777
+      - /var/run/postgresql:size=16m,mode=1777
+    restart: unless-stopped
     stop_grace_period: 60s
-    restart: unless-stopped
-    command: ["python", "-m", "adaptive_trader.collection", "run"]
-    environment: *market-data-environment
+    deploy:
+      resources:
+        limits:
+          cpus: "1.50"
+          memory: 1536M
+          pids: 256
+    environment:
+      POSTGRES_DB: aqa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - source: postgres_password
+        target: postgres_password
+        uid: "999"
+        gid: "999"
+        mode: 0400
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    networks:
+      - database
     healthcheck:
-      test: ["CMD", "python", "-m", "adaptive_trader.collection", "ready"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 3
+      test: [CMD-SHELL, "pg_isready -U postgres -d aqa || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 6
 
-  trader:
-    build:
-      context: .
-      target: application
-    image: adaptive-portfolio-agent:local
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:size=128m
-    stop_grace_period: 45s
-    restart: unless-stopped
-    command: ["python", "-m", "adaptive_trader.cli", "observe", "--config", "configs/observer.yaml"]
-    environment: *trader-environment
-    volumes: *trader-volumes
-    healthcheck:
-      test: ["CMD", "python", "-m", "adaptive_trader.cli", "status", "--config", "configs/observer.yaml"]
-      interval: 30s
-      timeout: 10s
-      start_period: 45s
-      retries: 3
-
-  dashboard:
-    image: adaptive-portfolio-agent:local
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:size=128m
-    stop_grace_period: 20s
-    restart: unless-stopped
+  database-bootstrap:
+    <<: [*platform-image, *runtime-security]
+    restart: "no"
     command:
       - python
-      - -m
-      - streamlit
-      - run
-      - app.py
-      - --server.address=0.0.0.0
-      - --server.port=8501
-      - --server.headless=true
+      - scripts/bootstrap_postgres_roles.py
+      - --admin-database-url-file
+      - /tmp/aqa/database-url
     environment:
-      APA_DASHBOARD_CONFIG: configs/observer.yaml
-    ports:
-      - "8501:8501"
+      CONTAINER_DATABASE_ROLE: postgres
+    secrets:
+      - source: postgres_password
+        target: /app/secrets/postgres_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_migrate_password
+        target: /app/secrets/aqa_migrate_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_collector_password
+        target: /app/secrets/aqa_collector_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_scheduler_password
+        target: /app/secrets/aqa_scheduler_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_strategy_password
+        target: /app/secrets/aqa_strategy_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_execution_password
+        target: /app/secrets/aqa_execution_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_control_password
+        target: /app/secrets/aqa_control_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: aqa_readonly_password
+        target: /app/secrets/aqa_readonly_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  migrate:
+    <<: [*platform-image, *runtime-security]
+    restart: "no"
+    command: [aqa, db, migrate, --database-url-file, /tmp/aqa/database-url]
+    environment:
+      CONTAINER_DATABASE_ROLE: aqa_migrate
+      AQA_CONFIG: configs/platform/offline.yaml
+      AQA_LOG_FORMAT: json
+      AQA_ENABLE_PAPER_ORDERS: "NO"
+      AQA_API_DOCS_ENABLED: "NO"
+    secrets:
+      - source: aqa_migrate_password
+        target: /app/secrets/aqa_migrate_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+
+  control-api:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, api, serve, --host, 0.0.0.0, --port, "8000"]
+    environment:
+      <<: *offline-environment
+      CONTAINER_DATABASE_ROLE: aqa_control
+      CONTAINER_DERIVE_DASHBOARD_READ_TOKEN: "YES"
+      AQA_OPERATOR_TOKEN_FILE: /run/secrets/operator_token
+    secrets:
+      - source: aqa_control_password
+        target: /app/secrets/aqa_control_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: operator_token
+        target: operator_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
     volumes:
-      - apa-runtime:/app/runtime:ro
-      - apa-outputs:/app/outputs:ro
-      - ./configs:/app/configs:ro
+      - platform-artifacts:/app/outputs/artifacts:ro
+      - dashboard-auth:/app/runtime/dashboard-auth
+    ports:
+      - 127.0.0.1:8000:8000
+    networks:
+      - control
+      - database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5).read()"
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).read()
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 4
+
+  job-worker:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, service, run, job-worker]
+    environment:
+      <<: *offline-environment
+      CONTAINER_DATABASE_ROLE: aqa_control
+    secrets:
+      - source: aqa_control_password
+        target: /app/secrets/aqa_control_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    volumes:
+      - platform-artifacts:/app/outputs/artifacts
+    networks:
+      - database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      <<: *worker-healthcheck
+      test: [CMD, aqa, service, health, job-worker]
+
+  market-data-worker:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, service, run, market-data-worker]
+    environment:
+      <<: *offline-environment
+      CONTAINER_DATABASE_ROLE: aqa_collector
+    secrets:
+      - source: aqa_collector_password
+        target: /app/secrets/aqa_collector_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      <<: *worker-healthcheck
+      test: [CMD, aqa, service, health, market-data-worker]
+
+  scheduler-worker:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, service, run, scheduler-worker]
+    environment:
+      <<: *offline-environment
+      CONTAINER_DATABASE_ROLE: aqa_scheduler
+    secrets:
+      - source: aqa_scheduler_password
+        target: /app/secrets/aqa_scheduler_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      market-data-worker:
+        condition: service_healthy
+    healthcheck:
+      <<: *worker-healthcheck
+      test: [CMD, aqa, service, health, scheduler-worker]
+
+  strategy-worker:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, service, run, strategy-worker]
+    environment:
+      <<: *offline-environment
+      CONTAINER_DATABASE_ROLE: aqa_strategy
+    secrets:
+      - source: aqa_strategy_password
+        target: /app/secrets/aqa_strategy_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      scheduler-worker:
+        condition: service_healthy
+    healthcheck:
+      <<: *worker-healthcheck
+      test: [CMD, aqa, service, health, strategy-worker]
+
+  execution-worker:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, service, run, execution-worker]
+    environment:
+      <<: *offline-environment
+      CONTAINER_DATABASE_ROLE: aqa_execution
+    secrets:
+      - source: aqa_execution_password
+        target: /app/secrets/aqa_execution_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      strategy-worker:
+        condition: service_healthy
+    healthcheck:
+      <<: *worker-healthcheck
+      test: [CMD, aqa, service, health, execution-worker]
+
+  dashboard:
+    <<: [*platform-image, *runtime-security]
+    command: [aqa, dashboard, serve, --host, 0.0.0.0, --port, "8501"]
+    environment:
+      AQA_CONFIG: configs/platform/offline.yaml
+      AQA_API_BASE_URL: http://control-api:8000
+      AQA_LOG_FORMAT: json
+      AQA_ENABLE_PAPER_ORDERS: "NO"
+      AQA_API_DOCS_ENABLED: "NO"
+      AQA_OPERATOR_TOKEN_FILE: /app/runtime/dashboard-auth/read-token
+    volumes:
+      - dashboard-auth:/app/runtime/dashboard-auth:ro
+    ports:
+      - 127.0.0.1:8501:8501
+    networks:
+      - control
+    depends_on:
+      control-api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).read()
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 4
+
+  market-data-live:
+    profiles: [market-data]
+    image: ${AQA_MARKET_DATA_IMAGE:-autonomous-quant-agent-market-data:local}
+    build:
+      context: .
+      target: market-data
+      args:
+        AQA_SOURCE_URL: ${AQA_SOURCE_URL:-https://github.com/yudhiishvs/autonomous-quant-agent}
+        AQA_VCS_REF: ${AQA_VCS_REF:-local}
+        AQA_VERSION: ${AQA_VERSION:-0.1.0}
+    <<: *runtime-security
+    command: [python, -m, adaptive_trader.collection.cli, run]
+    restart: unless-stopped
+    stop_grace_period: 90s
+    environment:
+      AQA_CONFIG: configs/platform/shadow.yaml
+      AQA_LOG_FORMAT: json
+      AQA_ENABLE_PAPER_ORDERS: "NO"
+      AQA_API_DOCS_ENABLED: "NO"
+      AQA_ALPACA_DATA_API_KEY_FILE: /run/secrets/alpaca_data_api_key
+      AQA_ALPACA_DATA_SECRET_KEY_FILE: /run/secrets/alpaca_data_secret_key
+      AQA_MARKET_DATA_HISTORY_START: ${AQA_MARKET_DATA_HISTORY_START:-}
+      CONTAINER_DATABASE_ROLE: aqa_collector
+    secrets:
+      - source: aqa_collector_password
+        target: /app/secrets/aqa_collector_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: alpaca_data_api_key
+        target: alpaca_data_api_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: alpaca_data_secret_key
+        target: alpaca_data_secret_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+      - market-data-egress
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [CMD, python, -m, adaptive_trader.collection.cli, ready]
       interval: 30s
       timeout: 10s
-      start_period: 30s
+      start_period: 60s
       retries: 3
 
-  paper-trader:
-    profiles: ["paper"]
-    image: adaptive-portfolio-agent:local
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp:size=128m
-    stop_grace_period: 45s
+  paper-execution-worker:
+    profiles: [paper]
+    image: ${AQA_EXECUTION_IMAGE:-autonomous-quant-agent-execution:local}
+    build:
+      context: .
+      target: execution
+      args:
+        AQA_SOURCE_URL: ${AQA_SOURCE_URL:-https://github.com/yudhiishvs/autonomous-quant-agent}
+        AQA_VCS_REF: ${AQA_VCS_REF:-local}
+        AQA_VERSION: ${AQA_VERSION:-0.1.0}
+    <<: *runtime-security
     restart: "no"
-    command: ["python", "-m", "adaptive_trader.cli", "paper-run", "--config", "configs/paper.yaml"]
-    environment: *trader-environment
-    volumes: *trader-volumes
+    command:
+      [python, -m, adaptive_trader.platform.worker_cli, run, paper-execution-worker]
+    environment:
+      AQA_CONFIG: configs/platform/paper.yaml
+      AQA_ARTIFACT_ROOT: outputs/artifacts
+      AQA_API_BASE_URL: http://control-api:8000
+      AQA_LOG_FORMAT: json
+      AQA_ENABLE_PAPER_ORDERS: "NO"
+      AQA_API_DOCS_ENABLED: "NO"
+      AQA_ALPACA_PAPER_API_KEY_FILE: /run/secrets/alpaca_paper_api_key
+      AQA_ALPACA_PAPER_SECRET_KEY_FILE: /run/secrets/alpaca_paper_secret_key
+      AQA_PAPER_ACCOUNT_ID_HASH_FILE: /run/secrets/paper_account_id_hash
+      CONTAINER_DATABASE_ROLE: aqa_execution
+    secrets:
+      - source: aqa_execution_password
+        target: /app/secrets/aqa_execution_password
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: alpaca_paper_api_key
+        target: alpaca_paper_api_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: alpaca_paper_secret_key
+        target: alpaca_paper_secret_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: paper_account_id_hash
+        target: paper_account_id_hash
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks:
+      - database
+      - paper-egress
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-m", "adaptive_trader.cli", "status", "--config", "configs/paper.yaml"]
-      interval: 30s
-      timeout: 10s
-      start_period: 45s
+      <<: *worker-healthcheck
+      test:
+        [CMD, python, -m, adaptive_trader.platform.worker_cli, health, paper-execution-worker]
+
+  db-debug:
+    profiles: [db-debug]
+    <<: [*platform-image, *runtime-security]
+    command: [python, /app/docker/postgres_debug_proxy.py]
+    ports:
+      - 127.0.0.1:5432:5432
+    networks:
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import socket;
+          connection=socket.create_connection(('127.0.0.1', 5432), timeout=3);
+          connection.close()
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
       retries: 3
 
 volumes:
-  apa-runtime:
-  apa-outputs:
-  apa-data-cache:
+  dashboard-auth:
+  platform-artifacts:
+  postgres-data:
+
+networks:
+  control:
+    internal: true
+  database:
+    internal: true
+  market-data-egress:
+  paper-egress:
+
+secrets:
+  postgres_password:
+    file: ${AQA_POSTGRES_PASSWORD_FILE:-./secrets/postgres_password}
+  aqa_migrate_password:
+    file: ${AQA_MIGRATE_PASSWORD_FILE:-./secrets/aqa_migrate_password}
+  aqa_collector_password:
+    file: ${AQA_COLLECTOR_PASSWORD_FILE:-./secrets/aqa_collector_password}
+  aqa_scheduler_password:
+    file: ${AQA_SCHEDULER_PASSWORD_FILE:-./secrets/aqa_scheduler_password}
+  aqa_strategy_password:
+    file: ${AQA_STRATEGY_PASSWORD_FILE:-./secrets/aqa_strategy_password}
+  aqa_execution_password:
+    file: ${AQA_EXECUTION_PASSWORD_FILE:-./secrets/aqa_execution_password}
+  aqa_control_password:
+    file: ${AQA_CONTROL_PASSWORD_FILE:-./secrets/aqa_control_password}
+  aqa_readonly_password:
+    file: ${AQA_READONLY_PASSWORD_FILE:-./secrets/aqa_readonly_password}
+  operator_token:
+    file: ${AQA_OPERATOR_TOKEN_FILE:-./secrets/operator_token}
+  alpaca_data_api_key:
+    file: ${AQA_ALPACA_DATA_API_KEY_FILE:-./secrets/alpaca_data_api_key}
+  alpaca_data_secret_key:
+    file: ${AQA_ALPACA_DATA_SECRET_KEY_FILE:-./secrets/alpaca_data_secret_key}
+  alpaca_paper_api_key:
+    file: ${AQA_ALPACA_PAPER_API_KEY_FILE:-./secrets/alpaca_paper_api_key}
+  alpaca_paper_secret_key:
+    file: ${AQA_ALPACA_PAPER_SECRET_KEY_FILE:-./secrets/alpaca_paper_secret_key}
+  paper_account_id_hash:
+    file: ${AQA_PAPER_ACCOUNT_ID_HASH_FILE:-./secrets/paper_account_id_hash}

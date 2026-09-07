@@ -157,6 +157,7 @@ def _request(
             observed_at=now,
         ),
         account=AccountSnapshot(
+            account_id_hash="a" * 64,
             equity=account_equity,
             cash=account_equity,
             buying_power=account_equity,
@@ -535,6 +536,10 @@ def test_decision_rejects_tampering_and_incomplete_input_sets(
         decided_at=decision.decided_at,
         input_hash=decision.input_hash,
         statistics_hash=decision.statistics_hash,
+        account_snapshot=decision.account_snapshot,
+        planning_positions=decision.planning_positions,
+        planning_prices=decision.planning_prices,
+        security_metadata=decision.security_metadata,
         original_proposal=decision.original_proposal,
         proposed_targets=decision.proposed_targets,
         final_targets=decision.final_targets,

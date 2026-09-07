@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
-from typing import Protocol, Self, TypeVar
+from typing import TYPE_CHECKING, Protocol, Self, TypeVar
 
 from adaptive_trader.platform.constants import AUDIT_GENESIS_HASH
 from adaptive_trader.platform.domain import AuditEvent, AuditPayload, AuditWriter
-from adaptive_trader.platform.execution.broker import BrokerUpdate
+from adaptive_trader.platform.execution.authorization import (
+    SubmissionAuthoritySnapshot,
+    SubmissionLedgerSnapshot,
+)
 from adaptive_trader.platform.execution.models import (
     BrokerOrder,
     ExecutionPlan,
@@ -20,10 +23,16 @@ from adaptive_trader.platform.execution.models import (
     OrderEvent,
     OrderIntent,
     OrderState,
+    Position,
     ReconciliationReceipt,
 )
-from adaptive_trader.platform.risk.latches import RiskLatchEvent
+from adaptive_trader.platform.risk.latches import RiskLatchEvent, RiskLatchKind, RiskLatchState
+from adaptive_trader.platform.risk.models import RiskDecision
 from adaptive_trader.platform.storage.repositories import verify_audit_chain
+
+if TYPE_CHECKING:
+    from adaptive_trader.platform.execution.broker import BrokerUpdate
+    from adaptive_trader.platform.execution.reconciliation import ReconciliationRequest
 
 
 class ExecutionRepository(Protocol):
@@ -33,11 +42,19 @@ class ExecutionRepository(Protocol):
         self,
         plan: ExecutionPlan,
         intents: tuple[OrderIntent, ...],
+        *,
+        risk_decision: RiskDecision,
     ) -> None:
         """Persist the plan, every intent, and initial order state atomically."""
 
     def get_order(self, client_order_id: str) -> BrokerOrder:
         """Load one durable order projection."""
+
+    def get_plan(self, execution_plan_id: str) -> ExecutionPlan:
+        """Load one immutable execution plan."""
+
+    def get_risk_decision(self, risk_decision_id: str) -> RiskDecision:
+        """Load the immutable risk authority for one plan."""
 
     def get_intent(self, client_order_id: str) -> OrderIntent:
         """Load one immutable intent."""
@@ -45,17 +62,27 @@ class ExecutionRepository(Protocol):
     def all_intents(self) -> tuple[OrderIntent, ...]:
         """Return every immutable intent in deterministic order."""
 
+    def intents_for_plan(self, execution_plan_id: str) -> tuple[OrderIntent, ...]:
+        """Return one plan's intents in deterministic submission order."""
+
     def all_orders(self) -> tuple[BrokerOrder, ...]:
         """Return every durable order projection in deterministic order."""
 
     def fills(self) -> tuple[Fill, ...]:
         """Return unique fills ordered by broker execution ID."""
 
+    def submission_ledger_snapshot(
+        self,
+        client_order_id: str,
+    ) -> SubmissionLedgerSnapshot:
+        """Return all durable evidence that must stay stable until submission is claimed."""
+
     def record_submission_started(
         self,
         client_order_id: str,
         *,
         started_at: datetime,
+        authority: SubmissionAuthoritySnapshot,
     ) -> BrokerOrder:
         """Durably record that a side-effect call is about to begin."""
 
@@ -92,10 +119,14 @@ class ExecutionRepository(Protocol):
         self,
         receipt: ReconciliationReceipt,
         *,
+        request: ReconciliationRequest,
         latch_event: RiskLatchEvent | None,
         incident: Incident | None,
     ) -> None:
         """Atomically append reconciliation and any required blocking controls."""
+
+    def record_incident(self, incident: Incident) -> Incident:
+        """Idempotently persist a standalone execution incident and audit evidence."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,6 +134,7 @@ class ExecutionLedgerState:
     """Immutable restart image used by deterministic tests and offline demo."""
 
     plans: tuple[ExecutionPlan, ...]
+    risk_decisions: tuple[RiskDecision, ...]
     intents: tuple[OrderIntent, ...]
     orders: tuple[BrokerOrder, ...]
     order_events: tuple[OrderEvent, ...]
@@ -123,6 +155,7 @@ class MemoryExecutionRepository:
 
     def __init__(self) -> None:
         self._plans: dict[str, ExecutionPlan] = {}
+        self._risk_decisions: dict[str, RiskDecision] = {}
         self._intents: dict[str, OrderIntent] = {}
         self._intent_ids: dict[str, OrderIntent] = {}
         self._orders: dict[str, BrokerOrder] = {}
@@ -139,6 +172,8 @@ class MemoryExecutionRepository:
         self,
         plan: ExecutionPlan,
         intents: tuple[OrderIntent, ...],
+        *,
+        risk_decision: RiskDecision,
     ) -> None:
         """Atomically make intents visible before a broker call can start."""
 
@@ -150,10 +185,34 @@ class MemoryExecutionRepository:
             raise ExecutionValidationError("execution intent belongs to another plan")
         if tuple(intent.sequence for intent in intents) != tuple(range(len(intents))):
             raise ExecutionValidationError("execution intent sequence must be contiguous")
+        from adaptive_trader.platform.execution.planner import (
+            ExecutionPlanningRequest,
+            plan_signed_orders,
+        )
+
+        if type(risk_decision) is not RiskDecision:
+            raise ExecutionValidationError("execution authorization is invalid")
+        expected = plan_signed_orders(
+            ExecutionPlanningRequest(
+                risk_decision=risk_decision,
+                current_positions=plan.current_positions,
+                reference_prices=plan.reference_prices,
+                equity=plan.equity,
+                target_version=plan.target_version,
+                created_at=plan.created_at,
+                deadline_at=plan.deadline_at,
+                forced_flat=plan.forced_flat,
+            )
+        )
+        if expected.plan != plan or expected.intents != intents:
+            raise ExecutionValidationError(
+                "execution bundle does not match its signed risk authorization"
+            )
         existing_plan = self._plans.get(plan.execution_plan_id)
         if existing_plan is not None:
             existing = self.intents_for_plan(plan.execution_plan_id)
-            if existing_plan == plan and existing == intents:
+            existing_risk = self._risk_decisions.get(plan.risk_decision_id)
+            if existing_plan == plan and existing == intents and existing_risk == risk_decision:
                 return
             raise ExecutionValidationError("execution plan identity was reused")
         for intent in intents:
@@ -175,6 +234,7 @@ class MemoryExecutionRepository:
             },
         )
         self._plans[plan.execution_plan_id] = plan
+        self._risk_decisions[plan.risk_decision_id] = risk_decision
         for intent in intents:
             self._intents[intent.client_order_id] = intent
             self._intent_ids[intent.order_intent_id] = intent
@@ -188,6 +248,14 @@ class MemoryExecutionRepository:
             return self._plans[execution_plan_id]
         except KeyError:
             raise ExecutionValidationError("execution plan does not exist") from None
+
+    def get_risk_decision(self, risk_decision_id: str) -> RiskDecision:
+        """Load one immutable risk authority."""
+
+        try:
+            return self._risk_decisions[risk_decision_id]
+        except KeyError:
+            raise ExecutionValidationError("risk decision does not exist") from None
 
     def get_order(self, client_order_id: str) -> BrokerOrder:
         """Load one durable order projection."""
@@ -244,6 +312,57 @@ class MemoryExecutionRepository:
 
         return tuple(self._fills[key] for key in sorted(self._fills))
 
+    def submission_ledger_snapshot(
+        self,
+        client_order_id: str,
+    ) -> SubmissionLedgerSnapshot:
+        """Bind the current order to every same-plan fill, active order, and latch."""
+
+        intent = self.get_intent(client_order_id)
+        plan = self.get_plan(intent.execution_plan_id)
+        decision = self.get_risk_decision(plan.risk_decision_id)
+        plan_client_ids = {
+            item.client_order_id for item in self.intents_for_plan(plan.execution_plan_id)
+        }
+        plan_fill_hashes = tuple(
+            sorted(
+                fill.content_hash
+                for fill in self._fills.values()
+                if fill.client_order_id in plan_client_ids
+            )
+        )
+        experiment_client_ids = {
+            item.client_order_id
+            for item in self._intents.values()
+            if item.experiment_hash == plan.experiment_hash
+        }
+        active_order_hashes = tuple(
+            sorted(
+                order.content_hash
+                for order in self._orders.values()
+                if order.client_order_id in experiment_client_ids and not order.state.terminal
+            )
+        )
+        latch_state = RiskLatchState.from_events(
+            experiment_hash=plan.experiment_hash,
+            events=tuple(
+                event
+                for event in self.latch_events()
+                if event.experiment_hash == plan.experiment_hash
+            ),
+        )
+        return SubmissionLedgerSnapshot.create(
+            client_order_id=client_order_id,
+            experiment_hash=plan.experiment_hash,
+            execution_plan_id=plan.execution_plan_id,
+            risk_decision_hash=decision.content_hash,
+            intent_hash=intent.content_hash,
+            order_hash=self.get_order(client_order_id).content_hash,
+            plan_fill_hashes=plan_fill_hashes,
+            active_order_hashes=active_order_hashes,
+            active_latches=latch_state.active,
+        )
+
     def reconciliations(self) -> tuple[ReconciliationReceipt, ...]:
         """Return signed reconciliation receipts in deterministic order."""
 
@@ -253,6 +372,37 @@ class MemoryExecutionRepository:
         """Return blocking incidents in deterministic order."""
 
         return tuple(self._incidents[key] for key in sorted(self._incidents))
+
+    def record_incident(self, incident: Incident) -> Incident:
+        """Idempotently persist a standalone execution incident and audit evidence."""
+
+        if type(incident) is not Incident:
+            raise ExecutionValidationError("execution incident is invalid")
+        existing = self._incident_keys.get(incident.idempotency_key)
+        if existing is not None:
+            if existing == incident:
+                return existing
+            raise ExecutionValidationError("incident idempotency key was reused")
+        identity = self._incidents.get(incident.incident_id)
+        if identity is not None:
+            if identity == incident:
+                return identity
+            raise ExecutionValidationError("incident identity was reused")
+        audit = self._next_audit(
+            experiment_hash=incident.experiment_hash,
+            event_type="incident.opened",
+            occurred_at=incident.opened_at,
+            payload={
+                "content_hash": incident.content_hash,
+                "idempotency_key": incident.idempotency_key,
+                "incident_id": incident.incident_id,
+                "reason_code": incident.reason_code,
+            },
+        )
+        self._incidents[incident.incident_id] = incident
+        self._incident_keys[incident.idempotency_key] = incident
+        self._audit_events.append(audit)
+        return incident
 
     def latch_events(self) -> tuple[RiskLatchEvent, ...]:
         """Return reconciliation latch history in stream order."""
@@ -282,12 +432,19 @@ class MemoryExecutionRepository:
         client_order_id: str,
         *,
         started_at: datetime,
+        authority: SubmissionAuthoritySnapshot,
     ) -> BrokerOrder:
         """Persist the final pre-side-effect boundary."""
 
         previous = self.get_order(client_order_id)
-        if previous.state is OrderState.SUBMISSION_STARTED:
-            return previous
+        if type(authority) is not SubmissionAuthoritySnapshot:
+            raise ExecutionValidationError("submission authority is invalid")
+        if authority.client_order_id != client_order_id:
+            raise ExecutionValidationError("submission authority belongs to another order")
+        if self.submission_ledger_snapshot(client_order_id).content_hash != (
+            authority.ledger_snapshot_hash
+        ):
+            raise ExecutionValidationError("submission authority became stale")
         if previous.state is not OrderState.INTENT_COMMITTED:
             raise ExecutionValidationError("only a committed intent can begin submission")
         current = previous.evolve(
@@ -295,7 +452,11 @@ class MemoryExecutionRepository:
             updated_at=started_at,
             submitted_at=started_at,
         )
-        self._append_order_transition(previous, current)
+        self._append_order_transition(
+            previous,
+            current,
+            submission_authority_hash=authority.content_hash,
+        )
         return current
 
     def record_reconciliation_required(
@@ -365,6 +526,8 @@ class MemoryExecutionRepository:
     def apply_broker_update(self, update: BrokerUpdate) -> BrokerOrder:
         """Apply cumulative broker state and fills exactly once."""
 
+        from adaptive_trader.platform.execution.broker import BrokerUpdate
+
         if type(update) is not BrokerUpdate:
             raise ExecutionValidationError("broker update is invalid")
         previous = self.get_order(update.client_order_id)
@@ -403,6 +566,11 @@ class MemoryExecutionRepository:
             for order in self._orders.values()
         ):
             raise ExecutionValidationError("broker order ID was reused across intents")
+        if (
+            previous.broker_order_id is not None
+            and update.broker_order_id != previous.broker_order_id
+        ):
+            raise ExecutionValidationError("broker order ID cannot change once assigned")
         for fill in update.fills:
             if (
                 fill.client_order_id != intent.client_order_id
@@ -423,6 +591,14 @@ class MemoryExecutionRepository:
         )
         if filled_quantity != update.cumulative_filled_quantity:
             raise ExecutionValidationError("broker cumulative fill disagrees with unique fills")
+        _verify_fill_evidence(
+            intent=intent,
+            order=previous,
+            fills=tuple(candidate_fills.values()),
+            cumulative_quantity=update.cumulative_filled_quantity,
+            average_price=update.average_fill_price,
+            update_at=update.occurred_at,
+        )
 
         same_projection = (
             previous.broker_order_id == update.broker_order_id
@@ -432,8 +608,10 @@ class MemoryExecutionRepository:
             and previous.safe_error_code == update.safe_error_code
         )
         if same_projection:
-            for fill in update.fills:
-                self._fills.setdefault(fill.broker_execution_id, fill)
+            if any(fill.broker_execution_id not in self._fills for fill in update.fills):
+                raise ExecutionValidationError(
+                    "unchanged broker projection cannot introduce new fill evidence"
+                )
             return previous
         accepted_at = (
             update.occurred_at
@@ -464,7 +642,24 @@ class MemoryExecutionRepository:
             broker_event_id=update.broker_event_id,
         )
         for fill in update.fills:
-            self._fills.setdefault(fill.broker_execution_id, fill)
+            if fill.broker_execution_id in self._fills:
+                continue
+            self._fills[fill.broker_execution_id] = fill
+            self._audit_events.append(
+                self._next_audit(
+                    plan=self.get_plan(intent.execution_plan_id),
+                    event_type="fill.recorded",
+                    occurred_at=fill.occurred_at,
+                    payload={
+                        "content_hash": fill.content_hash,
+                        "fill_id": fill.broker_execution_id,
+                        "idempotency_key": fill.broker_execution_id,
+                        "order_intent_id": intent.order_intent_id,
+                        "quantity": fill.quantity,
+                        "symbol": fill.symbol,
+                    },
+                )
+            )
         return current
 
     def fills_for_order(self, client_order_id: str) -> tuple[Fill, ...]:
@@ -481,18 +676,19 @@ class MemoryExecutionRepository:
         self,
         receipt: ReconciliationReceipt,
         *,
+        request: ReconciliationRequest,
         latch_event: RiskLatchEvent | None,
         incident: Incident | None,
     ) -> None:
         """Atomically append a receipt, reconciliation latch, incident, and audit event."""
 
-        if type(receipt) is not ReconciliationReceipt:
+        from adaptive_trader.platform.execution.reconciliation import (
+            ReconciliationRequest,
+            reconcile,
+        )
+
+        if type(receipt) is not ReconciliationReceipt or type(request) is not ReconciliationRequest:
             raise ExecutionValidationError("reconciliation receipt is invalid")
-        existing = self._reconciliations.get(receipt.reconciliation_id)
-        if existing is not None:
-            if existing == receipt:
-                return
-            raise ExecutionValidationError("reconciliation identity was reused")
         if latch_event is not None:
             if type(latch_event) is not RiskLatchEvent:
                 raise ExecutionValidationError("reconciliation latch event is invalid")
@@ -516,6 +712,96 @@ class MemoryExecutionRepository:
         )
         if plan is not None and plan.experiment_hash != receipt.experiment_hash:
             raise ExecutionValidationError("reconciliation plan experiment mismatch")
+        if plan is None:
+            raise ExecutionValidationError(
+                "persisted reconciliation requires an authoritative execution plan"
+            )
+        decision = self._risk_decisions.get(plan.risk_decision_id)
+        if decision is None:
+            raise ExecutionValidationError("reconciliation plan has no signed risk authorization")
+        active_symbols = tuple(symbol for symbol, _ in decision.final_targets)
+        short_eligible_symbols = tuple(
+            security.symbol
+            for security in decision.security_metadata
+            if security.asset_active
+            and security.tradable
+            and security.shortable
+            and security.easy_to_borrow
+            and security.primary_listing_eligible
+            and security.broker_capability_known
+        )
+        if (
+            receipt.slot_id != decision.slot_id
+            or request.execution_plan_id != plan.execution_plan_id
+            or request.experiment_hash != plan.experiment_hash
+            or request.correlation_id != plan.correlation_id
+            or request.slot_id != decision.slot_id
+            or request.active_symbols != active_symbols
+            or request.short_eligible_symbols != short_eligible_symbols
+            or _normalized_positions(request.baseline_positions)
+            != _normalized_positions(plan.current_positions)
+            or request.baseline_cash != decision.account_snapshot.cash
+            or request.expected_account_id_hash != decision.account_snapshot.account_id_hash
+            or request.mark_prices != plan.reference_prices
+        ):
+            raise ExecutionValidationError(
+                "reconciliation request does not match its execution plan"
+            )
+        plan_intents = self.intents_for_plan(plan.execution_plan_id)
+        plan_client_ids = {intent.client_order_id for intent in plan_intents}
+        authoritative_orders = tuple(
+            order
+            for order in self.all_orders()
+            if self.get_plan(
+                self.get_intent(order.client_order_id).execution_plan_id
+            ).experiment_hash
+            == plan.experiment_hash
+        )
+        authoritative_intents = tuple(
+            sorted(
+                {
+                    intent.client_order_id: intent
+                    for intent in (
+                        *plan_intents,
+                        *(self.get_intent(order.client_order_id) for order in authoritative_orders),
+                    )
+                }.values(),
+                key=lambda intent: intent.client_order_id,
+            )
+        )
+        authoritative = replace(
+            request,
+            active_symbols=active_symbols,
+            short_eligible_symbols=short_eligible_symbols,
+            baseline_positions=plan.current_positions,
+            baseline_cash=decision.account_snapshot.cash,
+            fills=tuple(fill for fill in self.fills() if fill.client_order_id in plan_client_ids),
+            order_fills=tuple(
+                fill
+                for fill in self.fills()
+                if fill.client_order_id in {order.client_order_id for order in authoritative_orders}
+            ),
+            intents=authoritative_intents,
+            durable_orders=authoritative_orders,
+            expected_account_id_hash=decision.account_snapshot.account_id_hash,
+            mark_prices=plan.reference_prices,
+        )
+        if reconcile(authoritative) != receipt:
+            raise ExecutionValidationError(
+                "reconciliation receipt does not match authoritative durable state"
+            )
+        self._validate_reconciliation_controls(
+            receipt=receipt,
+            latch_event=latch_event,
+            incident=incident,
+        )
+        existing = self._reconciliations.get(receipt.reconciliation_id)
+        if existing is not None:
+            if existing != receipt:
+                raise ExecutionValidationError("reconciliation identity was reused")
+            if incident is not None and self._incidents.get(incident.incident_id) != incident:
+                raise ExecutionValidationError("reconciliation retry is missing incident evidence")
+            return
         audit = self._next_audit(
             plan=plan,
             experiment_hash=receipt.experiment_hash,
@@ -537,11 +823,59 @@ class MemoryExecutionRepository:
             self._incident_keys[incident.idempotency_key] = incident
         self._audit_events.append(audit)
 
+    def _validate_reconciliation_controls(
+        self,
+        *,
+        receipt: ReconciliationReceipt,
+        latch_event: RiskLatchEvent | None,
+        incident: Incident | None,
+    ) -> None:
+        if receipt.status.value == "CLEAN":
+            if latch_event is not None or incident is not None:
+                raise ExecutionValidationError(
+                    "clean reconciliation cannot create blocking controls"
+                )
+            return
+        if incident is None or (
+            incident.experiment_hash != receipt.experiment_hash
+            or incident.correlation_id != receipt.correlation_id
+            or incident.reason_code != "reconciliation_blocking"
+            or incident.idempotency_key != f"reconciliation:{receipt.content_hash[:32]}"
+            or incident.opened_at != receipt.completed_at
+        ):
+            raise ExecutionValidationError("blocking reconciliation requires its exact incident")
+        prospective = tuple(self._latch_events.values()) + (
+            () if latch_event is None else (latch_event,)
+        )
+        if latch_event is not None and (
+            latch_event.latch_type is not RiskLatchKind.RECONCILIATION
+            or latch_event.action.value != "ENGAGED"
+            or latch_event.correlation_id != receipt.correlation_id
+            or latch_event.reason_code != "reconciliation_blocking"
+            or latch_event.idempotency_key != f"reconciliation_{receipt.content_hash[:32]}"
+            or latch_event.occurred_at != receipt.completed_at
+        ):
+            raise ExecutionValidationError("blocking reconciliation latch evidence is invalid")
+        state = RiskLatchState.from_events(
+            experiment_hash=receipt.experiment_hash,
+            events=tuple(
+                event
+                for event in prospective
+                if event.experiment_hash == receipt.experiment_hash
+                and event.occurred_at <= receipt.completed_at
+            ),
+        )
+        if not state.is_active(RiskLatchKind.RECONCILIATION):
+            raise ExecutionValidationError(
+                "blocking reconciliation requires an active reconciliation latch"
+            )
+
     def export_state(self) -> ExecutionLedgerState:
         """Freeze all durable state for deterministic restart simulation."""
 
         return ExecutionLedgerState(
             plans=tuple(self._plans[key] for key in sorted(self._plans)),
+            risk_decisions=tuple(self._risk_decisions[key] for key in sorted(self._risk_decisions)),
             intents=tuple(self._intents[key] for key in sorted(self._intents)),
             orders=tuple(self._orders[key] for key in sorted(self._orders)),
             order_events=self.order_events(),
@@ -559,6 +893,10 @@ class MemoryExecutionRepository:
         if type(state) is not ExecutionLedgerState:
             raise ExecutionValidationError("execution restart state is invalid")
         repository = cls()
+        for decision in state.risk_decisions:
+            if decision.risk_decision_id in repository._risk_decisions:
+                raise ExecutionValidationError("restart state contains duplicate risk decision")
+            repository._risk_decisions[decision.risk_decision_id] = decision
         for plan in state.plans:
             if plan.execution_plan_id in repository._plans:
                 raise ExecutionValidationError("restart state contains duplicate plan")
@@ -616,8 +954,46 @@ class MemoryExecutionRepository:
         )
         verify_audit_chain(state.audit_events)
         repository._audit_events = list(state.audit_events)
+        repository._verify_authorized_plans()
         repository._verify_projection_history()
+        for receipt in repository.reconciliations():
+            repository._validate_reconciliation_controls(
+                receipt=receipt,
+                latch_event=None,
+                incident=repository._incident_keys.get(
+                    f"reconciliation:{receipt.content_hash[:32]}"
+                ),
+            )
         return repository
+
+    def _verify_authorized_plans(self) -> None:
+        from adaptive_trader.platform.execution.planner import (
+            ExecutionPlanningRequest,
+            plan_signed_orders,
+        )
+
+        for plan in self._plans.values():
+            decision = self._risk_decisions.get(plan.risk_decision_id)
+            if decision is None:
+                raise ExecutionValidationError("restart plan references a missing risk decision")
+            expected = plan_signed_orders(
+                ExecutionPlanningRequest(
+                    risk_decision=decision,
+                    current_positions=plan.current_positions,
+                    reference_prices=plan.reference_prices,
+                    equity=plan.equity,
+                    target_version=plan.target_version,
+                    created_at=plan.created_at,
+                    deadline_at=plan.deadline_at,
+                    forced_flat=plan.forced_flat,
+                )
+            )
+            if expected.plan != plan or expected.intents != self.intents_for_plan(
+                plan.execution_plan_id
+            ):
+                raise ExecutionValidationError(
+                    "restart execution bundle does not match signed risk authority"
+                )
 
     def _append_order_transition(
         self,
@@ -625,6 +1001,7 @@ class MemoryExecutionRepository:
         current: BrokerOrder,
         *,
         broker_event_id: str | None = None,
+        submission_authority_hash: str | None = None,
     ) -> None:
         if broker_event_id is not None and broker_event_id in self._broker_event_ids:
             owner = self._broker_event_ids[broker_event_id]
@@ -649,6 +1026,11 @@ class MemoryExecutionRepository:
                 "from_state": previous.state.value.lower(),
                 "idempotency_key": event.order_event_id,
                 "order_intent_id": current.order_intent_id,
+                **(
+                    {"submission_authority_hash": submission_authority_hash}
+                    if submission_authority_hash is not None
+                    else {}
+                ),
                 "to_state": current.state.value.lower(),
             },
         )
@@ -684,6 +1066,12 @@ class MemoryExecutionRepository:
         )
 
     def _verify_projection_history(self) -> None:
+        if self._orders.keys() != self._intents.keys():
+            raise ExecutionValidationError("restart intents and order projections differ")
+        if any(event.client_order_id not in self._orders for event in self._order_events.values()):
+            raise ExecutionValidationError("restart order event references a missing order")
+        if any(fill.client_order_id not in self._orders for fill in self._fills.values()):
+            raise ExecutionValidationError("restart fill references a missing order")
         broker_order_owners: dict[str, str] = {}
         events_by_client: dict[str, list[OrderEvent]] = {}
         for event in self._order_events.values():
@@ -715,9 +1103,71 @@ class MemoryExecutionRepository:
             )
             if order.cumulative_filled_quantity != filled:
                 raise ExecutionValidationError("restart order projection disagrees with fills")
+            _verify_fill_evidence(
+                intent=self._intents[client_id],
+                order=order,
+                fills=self.fills_for_order(client_id),
+                cumulative_quantity=order.cumulative_filled_quantity,
+                average_price=order.average_fill_price,
+                update_at=order.updated_at,
+            )
 
 
 _T = TypeVar("_T")
+
+
+def _normalized_positions(positions: tuple[Position, ...]) -> dict[str, Decimal]:
+    normalized: dict[str, Decimal] = {}
+    for position in positions:
+        if position.symbol in normalized:
+            raise ExecutionValidationError("positions contain a duplicate symbol")
+        if position.quantity != 0:
+            normalized[position.symbol] = position.quantity
+    return normalized
+
+
+def _baseline_cash(plan: ExecutionPlan) -> Decimal:
+    prices = dict(plan.reference_prices)
+    return plan.equity - sum(
+        (position.quantity * prices[position.symbol] for position in plan.current_positions),
+        start=Decimal(0),
+    )
+
+
+def _verify_fill_evidence(
+    *,
+    intent: OrderIntent,
+    order: BrokerOrder,
+    fills: tuple[Fill, ...],
+    cumulative_quantity: Decimal,
+    average_price: Decimal | None,
+    update_at: datetime,
+) -> None:
+    if order.submitted_at is None and fills:
+        raise ExecutionValidationError("fill evidence requires a persisted submission marker")
+    for fill in fills:
+        if (
+            fill.client_order_id != intent.client_order_id
+            or fill.symbol != intent.symbol
+            or fill.side is not intent.side
+        ):
+            raise ExecutionValidationError("broker fill does not match its durable intent")
+        if (
+            fill.occurred_at < intent.created_at
+            or (order.submitted_at is not None and fill.occurred_at < order.submitted_at)
+            or fill.occurred_at > update_at
+        ):
+            raise ExecutionValidationError("broker fill timestamp is outside the order lifecycle")
+    actual_quantity = sum((fill.quantity for fill in fills), start=Decimal(0))
+    if actual_quantity != cumulative_quantity:
+        raise ExecutionValidationError("broker cumulative fill disagrees with unique fills")
+    expected_average = (
+        None
+        if actual_quantity == 0
+        else sum((fill.quantity * fill.price for fill in fills), start=Decimal(0)) / actual_quantity
+    )
+    if average_price != expected_average:
+        raise ExecutionValidationError("broker average fill price disagrees with unique fills")
 
 
 def _unique_by(

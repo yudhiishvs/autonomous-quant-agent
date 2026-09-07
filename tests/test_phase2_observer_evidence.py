@@ -863,6 +863,13 @@ def test_quality_evidence_is_self_hashed_source_bound_and_malformed_junit_fails(
     junit.write_text('<testsuite tests="NaN" failures="0" errors="0"/>', encoding="utf-8")
     assert _read_junit(junit) == (False, {})
 
+    junit.write_text(
+        '<!DOCTYPE testsuite [<!ENTITY external SYSTEM "file:///etc/passwd">]>'
+        '<testsuite tests="1" failures="0" errors="0">&external;</testsuite>',
+        encoding="utf-8",
+    )
+    assert _read_junit(junit) == (False, {})
+
 
 def test_attestation_rejects_raw_account_identifier(tmp_path: Path) -> None:
     path = tmp_path / "attestation.json"

@@ -1,0 +1,75 @@
+name: autonomous-quant-agent-market-data
+
+# This deployment consumes an existing authorized PostgreSQL database. It starts
+# no database, migration, research, strategy, dashboard, or execution process.
+services:
+  market-data-collector:
+    image: ${AQA_MARKET_DATA_IMAGE:-autonomous-quant-agent-market-data:local}
+    build:
+      context: .
+      target: market-data
+      args:
+        AQA_SOURCE_URL: ${AQA_SOURCE_URL:-https://github.com/yudhiishvs/autonomous-quant-agent}
+        AQA_VCS_REF: ${AQA_VCS_REF:-local}
+        AQA_VERSION: ${AQA_VERSION:-0.1.0}
+    command: [python, -m, adaptive_trader.collection.cli, run]
+    init: true
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    restart: unless-stopped
+    stop_grace_period: 90s
+    environment:
+      AQA_DATABASE_URL_FILE: /run/secrets/collector_database_url
+      AQA_ALPACA_DATA_API_KEY_FILE: /run/secrets/alpaca_data_api_key
+      AQA_ALPACA_DATA_SECRET_KEY_FILE: /run/secrets/alpaca_data_secret_key
+      AQA_MARKET_DATA_HISTORY_START: ${AQA_MARKET_DATA_HISTORY_START:-}
+      AQA_ENABLE_PAPER_ORDERS: "NO"
+    secrets:
+      - source: collector_database_url
+        target: collector_database_url
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: alpaca_data_api_key
+        target: alpaca_data_api_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+      - source: alpaca_data_secret_key
+        target: alpaca_data_secret_key
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+    networks: [market-data-egress]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768M
+          pids: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      test: [CMD, python, -m, adaptive_trader.collection.cli, ready]
+      interval: 30s
+      timeout: 15s
+      start_period: 90s
+      retries: 3
+
+networks:
+  market-data-egress:
+
+secrets:
+  collector_database_url:
+    file: ${AQA_DATABASE_URL_FILE:-./secrets/collector_database_url}
+  alpaca_data_api_key:
+    file: ${AQA_ALPACA_DATA_API_KEY_FILE:-./secrets/alpaca_data_api_key}
+  alpaca_data_secret_key:
+    file: ${AQA_ALPACA_DATA_SECRET_KEY_FILE:-./secrets/alpaca_data_secret_key}
