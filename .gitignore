@@ -3,7 +3,9 @@
 !/.dockerignore
 !/.editorconfig
 !/.gitignore
+!/.pre-commit-config.yaml
 !/.python-version
+!/.secrets.baseline
 !/.github/
 !/.github/**
 !/.agents/
@@ -27,6 +29,8 @@ data/fixtures/**/.*
 __pycache__/
 *.py[cod]
 *.egg-info/
+build/
+dist/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

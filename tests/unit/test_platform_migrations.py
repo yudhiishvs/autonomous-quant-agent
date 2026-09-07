@@ -15,7 +15,7 @@ from alembic.script import ScriptDirectory
 
 _REVISION_MODULE = "migrations.versions.20260905_0002_platform_foundation"
 _REVISION = "20260905_0002"
-_HEAD_REVISION = "20260905_0006"
+_HEAD_REVISION = "20260906_0015"
 _PRIOR_REVISION = "20260903_0001"
 _EXPECTED_TABLES = frozenset(
     {
@@ -148,3 +148,23 @@ def test_platform_downgrade_refuses_before_rendering_destructive_ddl(
         migration.downgrade()
 
     assert output.getvalue() == ""
+
+
+def test_reversal_stage_migration_preserves_evidence_and_scopes_completion_view(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = importlib.import_module(
+        "migrations.versions.20260906_0014_reversal_execution_stages"
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(migration, "op", _postgresql_operations(output))
+    migration.upgrade()
+    sql = output.getvalue()
+    assert "ADD COLUMN execution_stage BIGINT DEFAULT '1' NOT NULL" in sql
+    assert "UNIQUE (signal_id, execution_stage)" in sql
+    assert "CONSTRAINT ck_aqa_risk_decisions_risk_execution_stage CHECK" in sql
+    assert "CREATE VIEW aqa.aqa_execution_completion_v" in sql
+    assert "GRANT SELECT ON aqa.aqa_execution_completion_v TO aqa_scheduler" in sql
+    assert "DROP TABLE" not in sql
+    migration.downgrade()
+    assert "reversal stage evidence prevents downgrade" in output.getvalue()

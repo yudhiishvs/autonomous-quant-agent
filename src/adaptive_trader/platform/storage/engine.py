@@ -17,7 +17,7 @@ from adaptive_trader.platform.errors import RuntimeSettingsError
 from adaptive_trader.platform.storage.tables import PLATFORM_SCHEMA
 
 _CONCRETE_PATH_TYPE = type(Path())
-_LOOPBACK_DATABASE_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_LOCAL_DATABASE_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "postgres"})
 _POSTGRES_DRIVER_ALIASES = frozenset({"postgres", "postgresql", "postgresql+psycopg"})
 _ALLOWED_POSTGRES_QUERY_KEYS = frozenset({"sslmode"})
 _APPLICATION_NAME_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{0,63}$", flags=re.ASCII)
@@ -83,10 +83,8 @@ def normalize_platform_postgres_url(value: str) -> URL:
     if sslmode is not None and type(sslmode) is not str:
         raise _configuration_error("has an invalid sslmode")
     normalized_host = parsed.host.lower().rstrip(".")
-    if normalized_host not in _LOOPBACK_DATABASE_HOSTS and sslmode != "verify-full":
-        raise _configuration_error(
-            "requires sslmode=verify-full for a non-loopback PostgreSQL host"
-        )
+    if normalized_host not in _LOCAL_DATABASE_HOSTS and sslmode != "verify-full":
+        raise _configuration_error("requires sslmode=verify-full for a non-local PostgreSQL host")
     return parsed
 
 

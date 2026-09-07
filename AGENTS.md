@@ -22,6 +22,11 @@ the supported system.
 - Legacy prototype details: `docs/architecture.md`, `docs/data_dictionary.md`
 - Collector operations: `docs/market_data_runbook.md`
 
+The active assignment completes all non-AI repository code and verification. Do not require live
+activation, credentials, hosted infrastructure, or deployment to complete implementation. The main
+AI is `OUT_OF_SCOPE_FROZEN_AI`, a scope classification distinct from status; preserve the
+61-file manifest and verify it with `scripts/verify_main_ai_freeze.py`.
+
 Use only these implementation-status labels:
 `IMPLEMENTED_AND_VERIFIED`, `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`,
 `PARTIALLY_IMPLEMENTED`, `NOT_IMPLEMENTED`, `BLOCKED`, and
@@ -39,7 +44,9 @@ Use only these implementation-status labels:
 - `migrations/`: Alembic history for the collector-owned `market_data` schema.
 - `docs/`: design, operating, evidence, and engineering documentation.
 - `scripts/`: bounded operator workflows; inspect a script before running it.
-- `app.py`: current read-only Streamlit view over legacy SQLite state.
+- `app.py`: preserved read-only legacy Streamlit view over SQLite.
+- `src/adaptive_trader/platform/api`, `control`, `dashboard`: private API and API-backed dashboard.
+- `src/adaptive_trader/platform/worker_runtime.py`, `service_cycles.py`, `jobs`: durable service workers.
 - `runtime/`, `outputs/`, `data/cache/`, and `data/raw/`: ignored local or generated state;
   reviewed synthetic fixtures elsewhere under `data/` may be tracked.
 
@@ -49,10 +56,10 @@ Use only these implementation-status labels:
 | --- | --- |
 | Locked setup | `uv sync --locked --extra dev --extra dashboard` |
 | Lock check | `uv lock --check` |
-| Format files | `uv run --no-sync ruff format .` |
+| Format files | `make format` |
 | Format check | `uv run --no-sync ruff format --check .` |
 | Lint | `uv run --no-sync ruff check .` |
-| Type check | `uv run --no-sync mypy src` |
+| Type check | `make typecheck` |
 | Unit/component offline tests | `uv run --no-sync pytest -q -m "not integration"` |
 | Offline suite (PostgreSQL skips unless guarded below) | `uv run --no-sync pytest -q` |
 | PostgreSQL integration | `APA_TEST_POSTGRES_URL=postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE=YES uv run --no-sync pytest -q -m postgres` |
@@ -64,11 +71,12 @@ Use only these implementation-status labels:
 | Collector image | `docker build --target market-data --tag adaptive-market-data:validation .` |
 | Diff hygiene | `git diff --check` |
 
-PostgreSQL integration is destructive and may run only against the loopback database named
-`collector_test`; `docs/testing-strategy.md` owns the guard. CI installs the locked environment,
+PostgreSQL integration is destructive and requires the loopback `collector_test` database,
+explicit reset acknowledgement and disposable-cluster acknowledgement; `docs/testing-strategy.md`
+owns the full guard. Never infer cluster authorization from a URL alone. CI installs the locked environment,
 runs format-check/lint/type-check, migrates PostgreSQL, runs pytest and both legacy regressions,
-validates Compose, builds both images, and tests the collector image with networking disabled. A
-one-command local full harness and benchmark command are `NOT_IMPLEMENTED`; do not invent them.
+validates Compose, builds both images, and tests the collector image with networking disabled. The canonical full harness is `make check`, and the deterministic benchmark is
+`make benchmark`. Their existence does not establish that current full verification passed.
 
 # Required Workflow
 
@@ -94,16 +102,16 @@ one-command local full harness and benchmark command are `NOT_IMPLEMENTED`; do n
 - Collector code must not import legacy broker, execution, paper-account, or model code.
 - Strategy code proposes values; it must not receive credentials or call a broker.
 - Risk and execution authorization remain independent from strategy output.
-- The dashboard is read-only; the target private API boundary is not yet implemented.
-- SQLite remains legacy/offline state. PostgreSQL is the collector's operational state.
+- The platform dashboard is a read-only private API client; `app.py` is the legacy SQLite view.
+- SQLite remains legacy/offline state. PostgreSQL owns platform and collector operational state.
 - External I/O belongs at explicit provider, database, CLI, or broker boundaries.
 - Collection membership never grants research or execution authority.
 
 # Testing Rules
 
 - Ordinary tests require no Alpaca credentials and may not use external networking. The current
-  fixture guards `socket.create_connection` and `socket.socket.connect`; a process-wide socket
-  denial wrapper remains target work.
+  fixture guards common TCP paths; canonical offline targets additionally run
+  `scripts/verify_no_network.py` to deny network access process-wide.
 - The `postgres` marker permits loopback only and requires an explicitly disposable database.
 - Never point integration tests at a shared, hosted, or operator database.
 - Use injected clocks/fakes for time, retry, disconnect, and restart behavior.

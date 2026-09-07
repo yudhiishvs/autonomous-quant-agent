@@ -15,20 +15,35 @@ from adaptive_trader.config import AppConfig, load_config
 from adaptive_trader.data import MarketData, generate_synthetic_market_data
 from adaptive_trader.persistence import Database
 
-_ALPACA_CREDENTIAL_ENV_NAMES = (
+_AMBIENT_AUTHORITY_ENV_NAMES = (
+    "APCA_API_BASE_URL",
+    "APCA_API_KEY_ID",
+    "APCA_API_SECRET_KEY",
+    "ALPACA_API_KEY",
+    "ALPACA_SECRET_KEY",
     "APA_ALPACA_DATA_API_KEY",
     "APA_ALPACA_DATA_SECRET_KEY",
     "APA_ALPACA_PAPER_API_KEY",
     "APA_ALPACA_PAPER_SECRET_KEY",
+    "APA_MARKET_DATA_DATABASE_URL",
+    "APA_MARKET_DATA_MIGRATION_DATABASE_URL",
+    "AQA_ALPACA_DATA_API_KEY_FILE",
+    "AQA_ALPACA_DATA_SECRET_KEY_FILE",
+    "AQA_ALPACA_PAPER_API_KEY_FILE",
+    "AQA_ALPACA_PAPER_SECRET_KEY_FILE",
+    "AQA_DATABASE_URL_FILE",
+    "AQA_OPERATOR_TOKEN_FILE",
+    "AQA_PAPER_ACCOUNT_ID_HASH_FILE",
 )
 
 
 def pytest_configure() -> None:
     """Remove ambient Alpaca authority before pytest collects test modules."""
 
-    for variable_name in _ALPACA_CREDENTIAL_ENV_NAMES:
+    for variable_name in _AMBIENT_AUTHORITY_ENV_NAMES:
         os.environ.pop(variable_name, None)
     os.environ["APA_ENABLE_PAPER_ORDERS"] = "NO"
+    os.environ["AQA_ENABLE_PAPER_ORDERS"] = "NO"
 
 
 @pytest.fixture(autouse=True)
@@ -36,13 +51,15 @@ def deny_external_network(
     monkeypatch: pytest.MonkeyPatch,
     request: pytest.FixtureRequest,
 ) -> None:
-    """Remove ambient Alpaca authority and block common Python TCP connection paths."""
+    """Remove ambient Alpaca authority and deny Python DNS and outbound socket paths."""
 
-    for variable_name in _ALPACA_CREDENTIAL_ENV_NAMES:
+    for variable_name in _AMBIENT_AUTHORITY_ENV_NAMES:
         monkeypatch.delenv(variable_name, raising=False)
     monkeypatch.setenv("APA_ENABLE_PAPER_ORDERS", "NO")
+    monkeypatch.setenv("AQA_ENABLE_PAPER_ORDERS", "NO")
 
     original_create_connection = socket.create_connection
+    original_getaddrinfo = socket.getaddrinfo
     original_socket_connect = socket.socket.connect
 
     def blocked(*args: object, **kwargs: object) -> None:
@@ -50,6 +67,19 @@ def deny_external_network(
         raise AssertionError("External network access is prohibited in the offline test suite")
 
     if request.node.get_closest_marker("postgres") is not None:
+
+        def local_getaddrinfo(host: str | bytes | None, *args: Any, **kwargs: Any):
+            if host not in {
+                None,
+                "127.0.0.1",
+                "::1",
+                "localhost",
+                b"127.0.0.1",
+                b"::1",
+                b"localhost",
+            }:
+                blocked(host, *args, **kwargs)
+            return original_getaddrinfo(host, *args, **kwargs)
 
         def local_create_connection(address: tuple[str, int], *args: Any, **kwargs: Any):
             if address[0] not in {"127.0.0.1", "::1", "localhost"}:
@@ -66,11 +96,18 @@ def deny_external_network(
             original_socket_connect(instance, address)
 
         monkeypatch.setattr(socket, "create_connection", local_create_connection)
+        monkeypatch.setattr(socket, "getaddrinfo", local_getaddrinfo)
         monkeypatch.setattr(socket.socket, "connect", local_socket_connect)
         return
 
     monkeypatch.setattr(socket, "create_connection", blocked)
+    monkeypatch.setattr(socket, "getaddrinfo", blocked)
+    monkeypatch.setattr(socket, "gethostbyaddr", blocked)
+    monkeypatch.setattr(socket, "gethostbyname", blocked)
+    monkeypatch.setattr(socket, "gethostbyname_ex", blocked)
     monkeypatch.setattr(socket.socket, "connect", blocked)
+    monkeypatch.setattr(socket.socket, "connect_ex", blocked)
+    monkeypatch.setattr(socket.socket, "sendto", blocked)
 
 
 @pytest.fixture(autouse=True)

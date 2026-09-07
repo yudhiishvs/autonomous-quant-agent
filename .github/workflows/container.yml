@@ -1,0 +1,168 @@
+name: Container
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container:
+    name: Build scan and inventory ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: platform
+            image: autonomous-quant-agent
+          - target: market-data
+            image: autonomous-quant-agent-market-data
+          - target: execution
+            image: autonomous-quant-agent-execution
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Build locked image
+        run: >-
+          docker build --target "${{ matrix.target }}"
+          --build-arg AQA_VCS_REF="${{ github.sha }}"
+          --build-arg AQA_VERSION="0.1.0"
+          --tag "${{ matrix.image }}:${{ github.sha }}" .
+
+      - name: Verify numeric non-root runtime user
+        shell: bash
+        run: |
+          configured_user="$(docker image inspect --format '{{.Config.User}}' "${{ matrix.image }}:${{ github.sha }}")"
+          test "${configured_user}" = "10001:10001"
+
+      - name: Verify immutable application boundary without network
+        run: >-
+          docker run --rm --network none --entrypoint python
+          "${{ matrix.image }}:${{ github.sha }}" -c
+          'import os, pathlib, stat;
+          assert os.getuid() == 10001;
+          assert pathlib.Path("/app/src").stat().st_uid == 0;
+          assert pathlib.Path("/app/.venv").stat().st_uid == 0;
+          assert stat.S_IMODE(pathlib.Path("/app").stat().st_mode) == 0o555'
+
+      - name: Verify global runtime installers are absent
+        run: >-
+          docker run --rm --network none --entrypoint /usr/local/bin/python
+          "${{ matrix.image }}:${{ github.sha }}" -I -c
+          'import importlib.util;
+          assert all(importlib.util.find_spec(name) is None
+          for name in ("pip", "setuptools", "ensurepip"))'
+
+      - name: Verify data-only runtime boundary
+        if: ${{ matrix.target == 'market-data' }}
+        run: >-
+          docker run --rm --network none --entrypoint python
+          "${{ matrix.image }}:${{ github.sha }}" -c
+          'import importlib.util, os;
+          assert os.getuid() == 10001;
+          assert importlib.util.find_spec("alpaca") is None;
+          assert importlib.util.find_spec("fastapi") is None;
+          assert importlib.util.find_spec("yfinance") is None'
+
+      - name: Verify execution runtime imports without provider discovery or network
+        if: ${{ matrix.target == 'execution' }}
+        run: >-
+          docker run --rm --network none --entrypoint python
+          "${{ matrix.image }}:${{ github.sha }}" -c
+          'import importlib.util, sys;
+          import adaptive_trader.platform.paper_gate_runtime;
+          import adaptive_trader.platform.paper_cycle;
+          assert importlib.util.find_spec("adaptive_trader.platform.signals.providers") is None;
+          assert "adaptive_trader.platform.signals.providers" not in sys.modules;
+          assert importlib.util.find_spec("alpaca") is None;
+          assert importlib.util.find_spec("fastapi") is None'
+
+      - name: Verify durable fixture ingest aggregate and Parquet freeze without network
+        if: ${{ matrix.target == 'platform' }}
+        run: >-
+          docker run --rm --network none --entrypoint python
+          "${{ matrix.image }}:${{ github.sha }}" -c
+          'import json, subprocess;
+          outcomes = [json.loads(subprocess.run(
+          ["aqa", "data", operation, "--json"],
+          check=True, capture_output=True, text=True, timeout=120).stdout)
+          for operation in ("ingest-fixture", "aggregate", "freeze")];
+          assert outcomes[-1]["row_count"] == 208;
+          assert outcomes[-1]["promotable"] is False'
+
+      - name: Generate SPDX image SBOM
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ matrix.image }}:${{ github.sha }}
+          format: spdx-json
+          output-file: ${{ matrix.target }}.spdx.json
+          upload-artifact: false
+
+      - name: Scan image for unresolved high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          image-ref: ${{ matrix.image }}:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+
+      - name: Upload image SBOM
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.target }}-spdx-${{ github.run_id }}
+          path: ${{ matrix.target }}.spdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+  python-sbom:
+    name: Generate Python CycloneDX SBOM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+        with:
+          version: "0.11.7"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked environment and SBOM tool
+        run: uv sync --locked --all-extras --group security
+
+      - name: Generate CycloneDX dependency SBOM
+        run: >-
+          uv run --no-sync cyclonedx-py environment
+          --output-format JSON --output-file python.cdx.json .venv/bin/python
+
+      - name: Upload Python SBOM
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: python-cyclonedx-${{ github.run_id }}
+          path: python.cdx.json
+          if-no-files-found: error
+          retention-days: 14

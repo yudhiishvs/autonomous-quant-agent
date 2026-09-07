@@ -92,6 +92,7 @@ _SENSITIVE_COMPACT_KEY_FRAGMENTS = ("apikey", "connectionstring", "databaseurl",
 _SAFE_FENCING_KEY = "fencing_token"
 _AUDIT_SLUG_KEYS = frozenset(
     {
+        "acknowledgement",
         "action",
         "adjustment",
         "decision_type",
@@ -100,6 +101,7 @@ _AUDIT_SLUG_KEYS = frozenset(
         "feed",
         "from_state",
         "job_type",
+        "latch_type",
         "mode",
         "outcome",
         "provider",
@@ -171,6 +173,7 @@ _AUDIT_HASH_KEYS = frozenset(
         "manifest_hash",
         "payload_hash",
         "source_hash",
+        "submission_authority_hash",
     }
 )
 _AUDIT_HASH_LIST_KEYS = frozenset({"artifact_hashes", "content_hashes", "source_hashes"})
@@ -257,11 +260,13 @@ class AuditWriter(StrEnum):
     COLLECTOR = "aqa_collector"
     CONTROL = "aqa_control"
     EXECUTION = "aqa_execution"
+    MIGRATION = "aqa_migrate"
     SCHEDULER = "aqa_scheduler"
     STRATEGY = "aqa_strategy"
 
 
 _AUDIT_EVENT_FAMILIES: dict[AuditWriter, tuple[str, ...]] = {
+    AuditWriter.MIGRATION: ("experiment.", "security."),
     AuditWriter.COLLECTOR: (
         "bar.",
         "collector.",

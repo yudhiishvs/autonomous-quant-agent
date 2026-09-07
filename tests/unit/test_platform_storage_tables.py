@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import dialect as postgresql_dialect
 from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError, StatementError
-from sqlalchemy.schema import CheckConstraint, PrimaryKeyConstraint, UniqueConstraint
+from sqlalchemy.schema import CheckConstraint, CreateTable, PrimaryKeyConstraint, UniqueConstraint
 
 from adaptive_trader.platform.errors import DomainValidationError
 from adaptive_trader.platform.storage.tables import (
@@ -27,6 +27,7 @@ from adaptive_trader.platform.storage.tables import (
     aqa_experiments,
     aqa_fills,
     aqa_jobs,
+    aqa_order_intents,
     aqa_outbox_events,
     aqa_signal_envelopes,
     metadata,
@@ -187,6 +188,17 @@ def test_metadata_creates_cleanly_on_sqlite_without_postgresql_ddl() -> None:
         engine.dispose()
 
     assert created == EXPECTED_TABLE_NAMES
+
+
+def test_order_notional_database_constraint_uses_exact_postgresql_numeric_only() -> None:
+    postgres_sql = str(CreateTable(aqa_order_intents).compile(dialect=postgresql_dialect()))
+    sqlite_sql = str(CreateTable(aqa_order_intents).compile(dialect=sqlite_dialect()))
+
+    assert "ck_aqa_order_intents_order_numbers_valid" in postgres_sql
+    assert "notional AS NUMERIC) = CAST(quantity AS NUMERIC)" in postgres_sql
+    assert "ck_aqa_order_intents_order_numbers_positive" not in postgres_sql
+    assert "ck_aqa_order_intents_order_numbers_valid" not in sqlite_sql
+    assert "ck_aqa_order_intents_order_numbers_positive" in sqlite_sql
 
 
 def test_database_rejects_duplicate_experiment_identity() -> None:

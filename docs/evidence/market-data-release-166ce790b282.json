@@ -1,0 +1,320 @@
+{
+  "build": {
+    "command": [
+      "docker",
+      "build",
+      "--target",
+      "market-data",
+      "--tag",
+      "aqa-market-data:phase-zero",
+      "--build-arg",
+      "AQA_VCS_REF=5659f93ef17c439a121cc584eee000bc34154e4b",
+      "--build-arg",
+      "AQA_VERSION=local-20260906-dirty",
+      "--label",
+      "io.aqa.source.dirty=true",
+      "."
+    ],
+    "dockerfile_sha256_at_build": null,
+    "exit_code": 0,
+    "recipe_hash_evidence": "Dockerfile hash was not captured at build time."
+  },
+  "capability_probe": {
+    "ca_certificates": 150,
+    "dependencies": [
+      [
+        "Mako",
+        "1.4.1"
+      ],
+      [
+        "MarkupSafe",
+        "3.0.3"
+      ],
+      [
+        "PyYAML",
+        "6.0.3"
+      ],
+      [
+        "Pygments",
+        "2.20.0"
+      ],
+      [
+        "SQLAlchemy",
+        "2.0.51"
+      ],
+      [
+        "alembic",
+        "1.19.1"
+      ],
+      [
+        "annotated-doc",
+        "0.0.5"
+      ],
+      [
+        "annotated-types",
+        "0.8.0"
+      ],
+      [
+        "certifi",
+        "2026.7.22"
+      ],
+      [
+        "charset-normalizer",
+        "3.4.9"
+      ],
+      [
+        "exchange_calendars",
+        "4.13.2"
+      ],
+      [
+        "greenlet",
+        "3.5.4"
+      ],
+      [
+        "idna",
+        "3.18"
+      ],
+      [
+        "korean_lunar_calendar",
+        "0.4.0"
+      ],
+      [
+        "markdown-it-py",
+        "4.2.0"
+      ],
+      [
+        "mdurl",
+        "0.1.2"
+      ],
+      [
+        "numpy",
+        "2.4.6"
+      ],
+      [
+        "pandas",
+        "3.0.5"
+      ],
+      [
+        "psycopg",
+        "3.3.5"
+      ],
+      [
+        "psycopg-binary",
+        "3.3.5"
+      ],
+      [
+        "pyarrow",
+        "25.0.0"
+      ],
+      [
+        "pydantic",
+        "2.13.4"
+      ],
+      [
+        "pydantic_core",
+        "2.46.4"
+      ],
+      [
+        "pyluach",
+        "2.3.0"
+      ],
+      [
+        "python-dateutil",
+        "2.9.0.post0"
+      ],
+      [
+        "requests",
+        "2.34.2"
+      ],
+      [
+        "rich",
+        "15.0.0"
+      ],
+      [
+        "shellingham",
+        "1.5.4"
+      ],
+      [
+        "six",
+        "1.17.0"
+      ],
+      [
+        "toolz",
+        "1.1.0"
+      ],
+      [
+        "typer",
+        "0.27.1"
+      ],
+      [
+        "typing-inspection",
+        "0.4.2"
+      ],
+      [
+        "typing_extensions",
+        "4.16.0"
+      ],
+      [
+        "tzdata",
+        "2026.3"
+      ],
+      [
+        "urllib3",
+        "2.7.0"
+      ],
+      [
+        "websockets",
+        "17.0.1"
+      ]
+    ],
+    "forbidden_imports_absent": true,
+    "gid": 10001,
+    "uid": 10001
+  },
+  "checks": {
+    "help": {
+      "exit_code": 0,
+      "passed": true
+    },
+    "ready_missing_secret": {
+      "exit_code": 1,
+      "passed": true
+    },
+    "run_missing_secret": {
+      "exit_code": 1,
+      "passed": true
+    },
+    "snapshot_help": {
+      "exit_code": 0,
+      "passed": true
+    }
+  },
+  "host_source_comparison_at_verification": {
+    "differences": [
+      "migrations/env.py",
+      "migrations/versions/20260906_0012_scheduler_reconciliation_view.py",
+      "src/adaptive_trader/platform/storage/tables.py"
+    ],
+    "inspected_files": 79,
+    "manifest_sha256": "3ea8fb11cd0fd0761a601b05de24e23910adb27ed4afd38eaab818f1f7e22f14",
+    "matched_files": 76
+  },
+  "image_id": "sha256:166ce790b282e1543b41437602ac3a96e60c40a03864547975eacd8eae357a9d",
+  "image_labels": {
+    "io.aqa.source.dirty": "true",
+    "org.opencontainers.image.description": "Data-only Alpaca IEX collector without a trading SDK",
+    "org.opencontainers.image.revision": "5659f93ef17c439a121cc584eee000bc34154e4b",
+    "org.opencontainers.image.source": "https://github.com/yudhiishvs/autonomous-quant-agent",
+    "org.opencontainers.image.title": "Autonomous Quant Agent market-data collector",
+    "org.opencontainers.image.version": "local-20260906-dirty"
+  },
+  "image_source_files_sha256": {
+    "alembic.ini": "6fd46e57cb46a342db1ecdbbf719624478985f541acfeac9c8579c78c32c8c25",
+    "configs/backtest.yaml": "8ca880f497fe5d35fb4d005b88f5e93ba848eae5f8cf4bc95ce7d9994fed98dd",
+    "configs/experiments/semiconductor_network_intraday_v1.yaml": "93afebf2966801da323b9d8705b3fe6743263ca4f94e558caf0849769b992135",
+    "configs/observer.yaml": "7c99d2b71c8692a8f9d28f2d0535495c8922bfb6d770cb15aee054a36d657efa",
+    "configs/paper.yaml": "25a26632433869a27fb11d2b9de25d289af91447fa0857cf1b8cd3f03e0511ab",
+    "configs/platform/offline.yaml": "3c197252aaea0cea46d8418977baab2f76f277b3421250c11b7777c4739e64f5",
+    "configs/platform/paper.yaml": "6cc8eabd32bc32f1762a45567dee72c93345aa7833f95064056d546f686d32fe",
+    "configs/platform/shadow.yaml": "1ca44d165b2fb6e0bf7ae2b83fedb8bf89b405ec3a9ceefd3102f9654abab4e9",
+    "configs/replay.yaml": "6c401dfdaa8a4e915184452d49fa9628443b49631d246665bb019b09377b4834",
+    "docker/entrypoint.py": "b5741c752b9324d887183737fdb3215742d87f16ab06a0de0f6124efb28513a0",
+    "migrations/README.md": "26f683baf9eb3c2496ded1378f1a19ff7ecc37c9f8f3b7fdc2f641c6e572d192",
+    "migrations/env.py": "1235d3500ee18ba600cd5be7b7396d1b466e6cb4c790dc8b9b2dcd5fb0d7bf1a",
+    "migrations/script.py.mako": "8f04eceacc65e51e5371acb08200412129d28d866c44cf9c8d87b91f6e5474f5",
+    "migrations/versions/20260903_0001_market_data_foundation.py": "9374c7c77a1046d80c59d26abcacc2b5eb37b40c7a48341e3d039c64c3fd07ec",
+    "migrations/versions/20260905_0002_platform_foundation.py": "019bfbb42f4a80472c32119b905ffc9f79686747e8281f7bd5c4bdba17692c1e",
+    "migrations/versions/20260905_0003_bar_revision_history.py": "4aa77cc0afc688af56b070cd9955bd0a5f070849dc98bd5cb2f12f95b9178532",
+    "migrations/versions/20260905_0004_platform_roles.py": "83e5a9c2c590a350bed89a830bec03c352c90fdde534d6605c22b9c84277361f",
+    "migrations/versions/20260905_0005_market_data_contracts.py": "1d9bbd3a399c497b0d6e7051fceb9e9937d4c31dda99520504ba450c4ea94b22",
+    "migrations/versions/20260905_0006_scheduler_signal_contracts.py": "6ec20b61224457bccaac57185c2ed124ff834cef118c2db9c15a0014f40bc7b2",
+    "migrations/versions/20260905_0007_signed_risk_contracts.py": "cc418bc6c9325b1d81e83b16bcd033fe3d117dea4489f697eb90e9170666ef59",
+    "migrations/versions/20260905_0008_signed_execution_contracts.py": "d421c3cab03bf0e7c35ed6999fcb1b38242753bb12f8ac73028c1b7610722b95",
+    "migrations/versions/20260905_0009_durable_job_contracts.py": "4a2300c62a717af559d72a618863892ac7a7f98d586e3d3cf19481f8f26e11fa",
+    "migrations/versions/20260905_0010_experiment_registration.py": "90295ba4650f9946020bdddc740342dc84910c2d3baa8bea7042f8727cc1406f",
+    "migrations/versions/20260906_0011_canonical_collector.py": "3f7937cc7c038dce34aaabb23e0efcc6bb386901ded87609556486dad5777142",
+    "migrations/versions/20260906_0012_scheduler_reconciliation_view.py": "c09c4f05a024affb6686298493d747111eabe5b2591387601a1991d90c382bab",
+    "pyproject.toml": "01dbe03cb351bf37f0ffaf450bfea9a87e17815544bfb9a7ea21a1b9d5d446cc",
+    "src/adaptive_trader/__init__.py": "8379e886f8ad264781923fd1a78d02816bef328b76a9060a6e3e1eef0baad60b",
+    "src/adaptive_trader/collection/__init__.py": "a350f370c0b3ed2fd5129d4af03948e11858dfa5318fe7aa09f8d3624fbbce20",
+    "src/adaptive_trader/collection/__main__.py": "053d1dac0301d203ecf29c0bbb64f4d053ecadd9b7fd2b22f7f982c88ba7014e",
+    "src/adaptive_trader/collection/alpaca.py": "c6d209f1863d552c768b9b811c467a49dd30ac3929845f02ae4741cf475aeaea",
+    "src/adaptive_trader/collection/canonical.py": "64c54b27ed2adf7d19912aff02ea2ed3f79169f826bec88d8b7e85a7a1bd897d",
+    "src/adaptive_trader/collection/cli.py": "c727b1c4e5b977e879a094c15d4639540743de7d979ee62663d0462bf57deec4",
+    "src/adaptive_trader/collection/contracts.py": "f4760574d81aa14a50ea5b3475b2599d0b5f7b0ff5c1bc2a4e20ae5233626640",
+    "src/adaptive_trader/collection/credentials.py": "736f499ec4793d3c0381db1dead6109df3939d8df3dff82d8a5db9912c32e527",
+    "src/adaptive_trader/collection/derived.py": "daf7d5b3f1253007e21460f4fc3181c9ca880baee5e73388aa739e5eeac08e6e",
+    "src/adaptive_trader/collection/migrations.py": "f2a96923ed4fcaa5d3b7a81bf1e796a21e61dd43ff4ee62462efb74f5bea0049",
+    "src/adaptive_trader/collection/operations.py": "0cae4d2905a797e00981f18ba853ef6d82563aa3e31350230d54bdc625b276ff",
+    "src/adaptive_trader/collection/postgres.py": "1e19cfb953b94a0154fb9e2aefaa47cb5026a0bd5b369bfa51acb70dc7ee5d4f",
+    "src/adaptive_trader/collection/recovery.py": "2afab982529e36ebf673b6fcf7cdba35f0db7cd53bf6d87e74d9ccd5f3438d57",
+    "src/adaptive_trader/collection/repository.py": "458a4cee36d90628c18a509bb6008b7b0f55630c3c1078f50e656fefa00982f3",
+    "src/adaptive_trader/collection/runtime.py": "3fc487ef2f2a15f9803193463916bd2d82c00512543b64580ee81f02e2000742",
+    "src/adaptive_trader/collection/schema.py": "b7194624fd4f4931a7d8132ae95cbd4bd1bcd2cda62bfe272bbce8bf8bd3f81d",
+    "src/adaptive_trader/collection/service.py": "556080662a1c3183d760ac10fecad6309effb5895d5c7d57e2566385f1bb537c",
+    "src/adaptive_trader/collection/snapshots.py": "c29839b16f4f26c346baca3780b3d8f8ee287621e8da41a678cf6d69c32d3772",
+    "src/adaptive_trader/collection/universe.py": "f6140042812f244fd40be0abe067f6b1f0609f5ce4faa90939f74d9dbb1128c8",
+    "src/adaptive_trader/platform/__init__.py": "ef96421f08e3e847936b7560cf3c68f9d6f7be54cfce4e8d5c341b0e1fb15058",
+    "src/adaptive_trader/platform/_resources/__init__.py": "1df7db76f341205578cdfcabe283cbf18acc3c86b9f33a4471bdeca2ccd7ff83",
+    "src/adaptive_trader/platform/canonical.py": "cc0bd0319ab12e87b8ff81bb131fba1ce4628632e9d29353539802029fb6eaf7",
+    "src/adaptive_trader/platform/config.py": "ef39bba832d827ac97785db57246466f3583b94f86650a7942488a27d8258031",
+    "src/adaptive_trader/platform/constants.py": "d2f423a6a6d2de96ad501060d200e9d4bc44411427658fc3dd9b2ad48d26645c",
+    "src/adaptive_trader/platform/data/__init__.py": "743428dbf20b31689de782bfeff9d3a512b9b8ab5db2b87b32f81157434a6895",
+    "src/adaptive_trader/platform/data/aggregation.py": "c09fdca1575b04b4c92c1513e8ccc368e44df404e558d5ecf2b02ca5fd00a692",
+    "src/adaptive_trader/platform/data/calendar.py": "62a1d1d56e163f2e0fc273e7aa686e95b035a1b9f2ce1600ae84535b8ea3995d",
+    "src/adaptive_trader/platform/data/collector.py": "c38d3bc8fcc119714585c257373a2ac95f71c60edd7af658e16fc4bb7b37d460",
+    "src/adaptive_trader/platform/data/credentials.py": "ef2ef63db9ef5cc30d8e41ab0a219fdfc392760b7225e4b47f5ca846591e881d",
+    "src/adaptive_trader/platform/data/datasets.py": "e39da96e19527a898c8acaa4ee2945243552dc401c8f4ae4f9b0fe78b7b611ff",
+    "src/adaptive_trader/platform/data/materialization.py": "f9cbf02c3bef3b1191c88c09587b11c45ef0ac971eaec679cb39c8e6dc1091a6",
+    "src/adaptive_trader/platform/data/normalization.py": "964a99ae60989411ba6697145f0d11ac53255fd38ae79ec4499b442f7d587c07",
+    "src/adaptive_trader/platform/data/provider.py": "c8bcd9da30ffbb568ffedfe8b531edf14072646ac24f17dde5db675267e626b4",
+    "src/adaptive_trader/platform/data/watermarks.py": "b4b0c0e555bccbfca046e13246100be334d248db73d84e8192cd5bb37eecc02b",
+    "src/adaptive_trader/platform/domain.py": "e6ce1c8787b2d08a8cd1c6c5eedad4a512907d196a737285b38745168836b673",
+    "src/adaptive_trader/platform/errors.py": "e8b28ce1d134589de9c06453f36286176595db1445eb99af108bd3880a277a65",
+    "src/adaptive_trader/platform/hashing.py": "17e43e55450296ae72d98866be6284d529b60a195ded136c3c722b2a24e009da",
+    "src/adaptive_trader/platform/observability/__init__.py": "be1035918660ec4a35949cd11226fbf93e449170bd5fab3d2edf17edf18b0f88",
+    "src/adaptive_trader/platform/observability/logging.py": "1936b964d0c3022ea10fd77283bd4f0f2d454296bb24a93719227a1fd9adcecf",
+    "src/adaptive_trader/platform/package_resources.py": "36996a0b8c7a03b0af9e2494304a13a54437cd68bb6d5459535bf31b6f7e3dc9",
+    "src/adaptive_trader/platform/security.py": "857fdaf6b74b78c5e666d4df7a1a3d80730f8aa69a81536882915021dc9c7808",
+    "src/adaptive_trader/platform/storage/__init__.py": "2d19ba90036bca9c15e74278c7b46c8eaa8b55e8ebc115d36049c30c9678c6af",
+    "src/adaptive_trader/platform/storage/datasets.py": "1c213022600039d997cb70c276053391e5847a6a262993f18c391eac07f517c4",
+    "src/adaptive_trader/platform/storage/engine.py": "46b8d5cd7622f7823180d18fc9ea2f5fdebfcf6be90db9c455b92d360e5046d3",
+    "src/adaptive_trader/platform/storage/experiments.py": "d85e1b612b8a73d823317a93dcc92020ec0843f1b0cdca0fe565b8d04459468b",
+    "src/adaptive_trader/platform/storage/market_data.py": "78f15b12d65b3097da24be3a28b96c9206a51f51b1de2f73b7e02ff0e575103d",
+    "src/adaptive_trader/platform/storage/migration_roles.py": "6aaeb3313aba413ce4d4fa2c3ccb2ef3af13bce75135c6ffcfc03e9f9496c66b",
+    "src/adaptive_trader/platform/storage/migration_runner.py": "10413f6b5506d98171628ab69c565701ba7fb9ef4ad4597548e505ad816f2461",
+    "src/adaptive_trader/platform/storage/repositories.py": "bbd3f9998e0d3c7a9c8ebb8850b92d9ba79de6ec27aef9ae8e2eec9271280b82",
+    "src/adaptive_trader/platform/storage/role_bootstrap.py": "d79cebd78571f3ffe2656682abaf35342195b9ff164e26468874c8ddef9f0014",
+    "src/adaptive_trader/platform/storage/tables.py": "9e4f4eef5e61b16d075958b88e649553e3e161c7cf98e929f3b5b598fbc65245",
+    "src/adaptive_trader/platform/storage/transactions.py": "485ebae67d0b7ea155a9ed5f7274708ba6c1db7767248724e8bf261a0f666214",
+    "src/adaptive_trader/platform/universe.py": "57b022ebd30bc17a97be3d08cd81bbf6fc6bd79fed8d52c04f2faf336d5b01bc"
+  },
+  "image_source_manifest_sha256": "3ea8fb11cd0fd0761a601b05de24e23910adb27ed4afd38eaab818f1f7e22f14",
+  "limitations": [
+    "The image is identified by immutable image ID; the local tag is mutable.",
+    "Three checkout files changed relative to this image during verification; this record does not certify the current checkout.",
+    "The complete PostgreSQL/data suite was run from the working tree, not inside this exact image.",
+    "Provider authentication, subscription, hosted persistence, always-on operation and external recovery are unverified."
+  ],
+  "local_image_tag_at_verification": "aqa-market-data:phase-zero",
+  "phase_zero_live_status": "BLOCKED",
+  "recorded_at_utc": "2026-09-06T21:37:52.549768+00:00",
+  "runtime": {
+    "default_command": [
+      "python",
+      "-m",
+      "adaptive_trader.collection.cli",
+      "run"
+    ],
+    "default_user": "10001:10001",
+    "smoke_capabilities_dropped": [
+      "ALL"
+    ],
+    "smoke_network": "none",
+    "smoke_no_new_privileges": true,
+    "smoke_read_only_root": true,
+    "smoke_secret_mounts": []
+  },
+  "schema_version": 1,
+  "scope": "Local data-only image verification; no external deployment"
+}

@@ -6,9 +6,10 @@ import json
 import logging
 import os
 import signal
+import stat
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any, NoReturn
 
@@ -17,10 +18,17 @@ import typer
 from adaptive_trader.collection.alpaca import AlpacaHistoricalBarSource, AlpacaLiveBarSource
 from adaptive_trader.collection.credentials import AlpacaDataCredentials
 from adaptive_trader.collection.migrations import require_database_at_head
+from adaptive_trader.collection.operations import (
+    collection_experiment,
+    ensure_configuration,
+    health_snapshot,
+)
 from adaptive_trader.collection.postgres import PostgresMarketDataRepository
+from adaptive_trader.collection.recovery import next_gap_repair, restore_canonical_projection
 from adaptive_trader.collection.runtime import (
     CollectorEnvironment,
     parse_utc_boundary,
+    require_file_backed_data_environment,
 )
 from adaptive_trader.collection.service import CollectorService, CollectorServiceConfig
 from adaptive_trader.collection.universe import COLLECTION_UNIVERSE_V1
@@ -136,6 +144,7 @@ def migrate(
             database_url,
             application_root=selected_root,
             bootstrap_admin_database_url=bootstrap_admin_database_url,
+            experiment=collection_experiment(),
         )
     except Exception as error:
         _fail(f"Database migration failed ({type(error).__name__})")
@@ -147,11 +156,12 @@ def status() -> None:
     """Read collector health and storage counts without loading Alpaca credentials."""
 
     environment = _environment()
-    repository = PostgresMarketDataRepository(environment.database_url)
+    repository = PostgresMarketDataRepository(environment.database_url, canonical=True)
     try:
         require_database_at_head(environment.database_url)
         repository.verify_schema()
         snapshot = repository.status()
+        health = health_snapshot(repository.engine, now=datetime.now(UTC))
     except Exception as exc:
         _fail(f"Market-data status unavailable ({type(exc).__name__})")
     finally:
@@ -159,6 +169,7 @@ def status() -> None:
     typer.echo(
         json.dumps(
             {
+                **health,
                 "status": "ok",
                 "universe_version": COLLECTION_UNIVERSE_V1.SCHEMA_VERSION,
                 "universe_hash": COLLECTION_UNIVERSE_V1.universe_hash,
@@ -183,14 +194,16 @@ def status() -> None:
 
 @app.command("ready")
 def ready() -> None:
-    """Run a lightweight check for the canonical active collector lease and run."""
+    """Check collector ownership, acknowledged subscription and recovered data processing."""
 
     environment = _environment()
-    repository = PostgresMarketDataRepository(environment.database_url)
+    repository = PostgresMarketDataRepository(environment.database_url, canonical=True)
     try:
         require_database_at_head(environment.database_url)
         repository.verify_schema()
         active = repository.is_ready(lease_name=CollectorServiceConfig().lease_name)
+        if active:
+            active = health_snapshot(repository.engine, now=datetime.now(UTC))["service_ready"]
     except Exception as exc:
         _fail(f"Market-data readiness unavailable ({type(exc).__name__})")
     finally:
@@ -220,13 +233,42 @@ def backfill(
     environment = _environment()
     start_at = _boundary(start, name="--start", fallback=environment.history_start)
     end_at = None if end is None else _boundary(end, name="--end", fallback=None)
-    repository = PostgresMarketDataRepository(environment.database_url)
+    repository = PostgresMarketDataRepository(environment.database_url, canonical=True)
     historical_source: AlpacaHistoricalBarSource | None = None
     try:
         require_database_at_head(environment.database_url)
         credentials = AlpacaDataCredentials.from_environment()
+        experiment = collection_experiment()
+        history_start = ensure_configuration(
+            repository.engine,
+            experiment=experiment,
+            history_start=environment.history_start or start_at,
+        )
+        from adaptive_trader.collection.derived import DerivedDataProcessor
+
+        processor = DerivedDataProcessor(
+            repository.engine,
+            experiment=experiment,
+            history_start=history_start,
+            clock=lambda: datetime.now(UTC),
+            lease_validator=lambda: service.validate_active_lease(),
+            transaction_guard=lambda connection: repository.validate_ownership(
+                connection, lease=service.require_active_lease()
+            ),
+        )
         historical_source = AlpacaHistoricalBarSource(credentials)
-        service = CollectorService(repository, historical_source)
+        service = CollectorService(
+            repository,
+            historical_source,
+            maintenance=processor.drain_backfill,
+            prepare=lambda run_id: restore_canonical_projection(
+                repository,
+                current_lease=service.require_active_lease,
+                run_id=run_id,
+                history_start=history_start,
+                now=datetime.now(UTC),
+            ),
+        )
         restore_signals = _with_signals(service)
         try:
             counters = service.backfill(start=start_at, end=end_at)
@@ -242,12 +284,82 @@ def backfill(
     typer.echo(json.dumps({"status": "completed", "counters": counters}, sort_keys=True))
 
 
+@app.command("collect-once")
+def collect_once(verbose: bool = False) -> None:
+    """Catch up durable historical data once using only dedicated secret-file references."""
+
+    _configure_logging(verbose)
+    try:
+        require_file_backed_data_environment()
+    except ValueError as error:
+        _fail(str(error))
+    environment = _environment()
+    repository = PostgresMarketDataRepository(environment.database_url, canonical=True)
+    historical_source: AlpacaHistoricalBarSource | None = None
+    try:
+        require_database_at_head(environment.database_url)
+        repository.verify_schema()
+        experiment = collection_experiment()
+        history_start = ensure_configuration(
+            repository.engine,
+            experiment=experiment,
+            history_start=environment.history_start,
+        )
+        from adaptive_trader.collection.derived import DerivedDataProcessor
+
+        processor = DerivedDataProcessor(
+            repository.engine,
+            experiment=experiment,
+            history_start=history_start,
+            clock=lambda: datetime.now(UTC),
+            lease_validator=lambda: service.validate_active_lease(),
+            transaction_guard=lambda connection: repository.validate_ownership(
+                connection, lease=service.require_active_lease()
+            ),
+        )
+        historical_source = AlpacaHistoricalBarSource(AlpacaDataCredentials.from_environment())
+        service = CollectorService(
+            repository,
+            historical_source,
+            maintenance=processor.drain_backfill,
+            prepare=lambda run_id: restore_canonical_projection(
+                repository,
+                current_lease=service.require_active_lease,
+                run_id=run_id,
+                history_start=history_start,
+                now=datetime.now(UTC),
+            ),
+            repair_window=lambda: next_gap_repair(
+                repository,
+                experiment=experiment,
+                history_start=history_start,
+                now=datetime.now(UTC),
+            ),
+        )
+        restore_signals = _with_signals(service)
+        try:
+            counters = service.collect_once(history_start=history_start)
+        finally:
+            restore_signals()
+        health = health_snapshot(repository.engine, now=datetime.now(UTC))
+    except Exception as error:
+        _fail(f"One-shot collection failed ({type(error).__name__})")
+    finally:
+        if historical_source is not None:
+            with suppress(Exception):
+                historical_source.close()
+        repository.close()
+    typer.echo(
+        json.dumps({"status": "completed", "counters": counters, "health": health}, sort_keys=True)
+    )
+
+
 @app.command("run")
 def run(
     start_if_empty: str | None = typer.Option(
         None,
         "--start-if-empty",
-        help="First-run ISO-8601 start; defaults to APA_MARKET_DATA_HISTORY_START.",
+        help="First-run ISO-8601 start; defaults to AQA_MARKET_DATA_HISTORY_START.",
     ),
     verbose: bool = typer.Option(False, "--verbose"),
 ) -> None:
@@ -260,20 +372,55 @@ def run(
         if start_if_empty is None
         else _boundary(start_if_empty, name="--start-if-empty", fallback=None)
     )
-    repository = PostgresMarketDataRepository(environment.database_url)
+    repository = PostgresMarketDataRepository(environment.database_url, canonical=True)
     historical_source: AlpacaHistoricalBarSource | None = None
     try:
         require_database_at_head(environment.database_url)
         credentials = AlpacaDataCredentials.from_environment()
+        experiment = collection_experiment()
+        history_start = ensure_configuration(
+            repository.engine,
+            experiment=experiment,
+            history_start=initial_start,
+        )
+        from adaptive_trader.collection.derived import DerivedDataProcessor
+
+        processor = DerivedDataProcessor(
+            repository.engine,
+            experiment=experiment,
+            history_start=history_start,
+            clock=lambda: datetime.now(UTC),
+            lease_validator=lambda: service.validate_active_lease(),
+            transaction_guard=lambda connection: repository.validate_ownership(
+                connection, lease=service.require_active_lease()
+            ),
+        )
         historical_source = AlpacaHistoricalBarSource(credentials)
         service = CollectorService(
             repository,
             historical_source,
-            AlpacaLiveBarSource(credentials),
+            AlpacaLiveBarSource(
+                credentials,
+                state_handler=lambda state: service.stream_state_changed(state),
+            ),
+            maintenance=processor.drain,
+            prepare=lambda run_id: restore_canonical_projection(
+                repository,
+                current_lease=service.require_active_lease,
+                run_id=run_id,
+                history_start=history_start,
+                now=datetime.now(UTC),
+            ),
+            repair_window=lambda: next_gap_repair(
+                repository,
+                experiment=experiment,
+                history_start=history_start,
+                now=datetime.now(UTC),
+            ),
         )
         restore_signals = _with_signals(service)
         try:
-            counters = service.run(start_if_empty=initial_start)
+            counters = service.run(start_if_empty=history_start)
         finally:
             restore_signals()
     except Exception as exc:
@@ -284,6 +431,90 @@ def run(
                 historical_source.close()
         repository.close()
     typer.echo(json.dumps({"status": "stopped", "counters": counters}, sort_keys=True))
+
+
+@app.command("snapshot")
+def snapshot(
+    start: Annotated[str, typer.Option(help="Inclusive UTC range start (ISO-8601).")],
+    end: Annotated[str, typer.Option(help="Exclusive UTC range end, at most 31 days after start.")],
+    artifact_root: Annotated[
+        Path, typer.Option(help="Trusted persistent root for immutable Parquet artifacts.")
+    ],
+    source_git_commit: Annotated[
+        str, typer.Option(help="Full 40-character Git revision used to produce this data snapshot.")
+    ],
+    uv_lock_sha256: Annotated[str, typer.Option(help="SHA-256 of the exact source uv.lock file.")],
+    metadata_file: Annotated[
+        Path | None,
+        typer.Option(help="Reviewed listing/corporate-action evidence JSON, at most 64 KiB."),
+    ] = None,
+    diagnostic: Annotated[
+        bool,
+        typer.Option(help="Explicitly export non-promotable data with its unresolved conditions."),
+    ] = False,
+    dirty_worktree: Annotated[
+        bool,
+        typer.Option(
+            "--dirty-worktree/--clean-worktree",
+            help="Declare whether source has uncommitted changes; defaults to dirty.",
+        ),
+    ] = True,
+) -> None:
+    """Freeze canonical research/context minutes and their source evidence without provider access."""
+
+    from adaptive_trader.collection.snapshots import (
+        freeze_collection_snapshot,
+        parse_snapshot_metadata,
+    )
+
+    environment = _environment()
+    start_at = _boundary(start, name="--start", fallback=None)
+    end_at = _boundary(end, name="--end", fallback=None)
+    repository = PostgresMarketDataRepository(environment.database_url, canonical=True)
+    try:
+        require_database_at_head(environment.database_url)
+        repository.verify_schema()
+        metadata = None
+        if metadata_file is not None:
+            descriptor = os.open(metadata_file, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(descriptor, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    raise ValueError("snapshot metadata must be a regular file")
+                payload = stream.read(65_537)
+            if len(payload) > 65_536:
+                raise ValueError("snapshot metadata exceeds 64 KiB")
+            metadata = parse_snapshot_metadata(json.loads(payload))
+        frozen, registration = freeze_collection_snapshot(
+            repository.engine,
+            experiment=collection_experiment(),
+            artifact_root=artifact_root,
+            range_start=start_at,
+            range_end=end_at,
+            source_git_commit=source_git_commit,
+            dirty_worktree=dirty_worktree,
+            uv_lock_hash=uv_lock_sha256,
+            created_at=datetime.now(UTC),
+            diagnostic=diagnostic,
+            metadata_evidence=metadata,
+        )
+    except Exception as exc:
+        _fail(f"Canonical snapshot failed ({type(exc).__name__})")
+    finally:
+        repository.close()
+    typer.echo(
+        json.dumps(
+            {
+                "dataset_id": frozen.dataset_id,
+                "artifact_id": frozen.artifact_id,
+                "manifest_hash": frozen.manifest_hash,
+                "status": frozen.status.value,
+                "promotable": frozen.promotable,
+                "registered": registration.created,
+                "artifact_root": str(artifact_root.absolute()),
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def main() -> None:

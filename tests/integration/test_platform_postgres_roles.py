@@ -17,7 +17,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
-from sqlalchemy import Connection, create_engine, inspect, select, text
+from sqlalchemy import Connection, create_engine, insert, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.schema import DropSchema
@@ -33,6 +33,7 @@ from adaptive_trader.collection.postgres import (
 from adaptive_trader.collection.repository import CheckpointKey, CoverageAdvance
 from adaptive_trader.collection.schema import SCHEMA_NAME as COLLECTION_SCHEMA
 from adaptive_trader.collection.schema import bar_observations, current_bars
+from adaptive_trader.platform.control import ReadResource, SQLAlchemyControlQueryService
 from adaptive_trader.platform.domain import AuditPayload, AuditWriter
 from adaptive_trader.platform.errors import AuditPersistenceError
 from adaptive_trader.platform.hashing import sha256_hex
@@ -113,7 +114,11 @@ _AUDIT_READ_VIEW_BY_ROLE = {
     "aqa_control": "aqa_audit_events_v",
     "aqa_readonly": "aqa_audit_events_v",
 }
-_VIEWS = _SAFE_VIEWS | frozenset(_AUDIT_READ_VIEW_BY_ROLE.values())
+_VIEWS = (
+    _SAFE_VIEWS
+    | frozenset(_AUDIT_READ_VIEW_BY_ROLE.values())
+    | {"aqa_execution_completion_v", "aqa_operational_readiness_v"}
+)
 _ALL_SAFE_VIEWS = tuple(sorted(_SAFE_VIEWS))
 
 _COLLECTOR_TABLES = (
@@ -237,12 +242,15 @@ _EXPECTED_GRANTS = {
             "aqa_experiments",
             "aqa_experiment_symbols",
             "aqa_security_metadata_events",
+            "aqa_jobs",
+            "aqa_job_attempts",
             *_COLLECTOR_TABLES[:-1],
             _AUDIT_READ_VIEW_BY_ROLE["aqa_collector"],
         ),
-        insert_into=_COLLECTOR_TABLES,
+        insert_into=(*_COLLECTOR_TABLES, "aqa_job_attempts", "aqa_outbox_events"),
         update=(
             "aqa_bar_latest",
+            "aqa_jobs",
             "aqa_data_gaps",
             "aqa_symbol_watermarks",
             "aqa_basket_watermarks",
@@ -250,7 +258,11 @@ _EXPECTED_GRANTS = {
     ),
     "aqa_scheduler": _grant_set(
         select_from=(
+            "aqa_operational_readiness_v",
             "aqa_decision_slots",
+            "aqa_reconciliations_v",
+            "aqa_execution_completion_v",
+            "aqa_signals_v",
             "aqa_experiment_context_v",
             "aqa_data_gaps_v",
             "aqa_symbol_watermarks_v",
@@ -263,6 +275,7 @@ _EXPECTED_GRANTS = {
     ),
     "aqa_strategy": _grant_set(
         select_from=(
+            "aqa_operational_readiness_v",
             "aqa_signal_envelopes",
             "aqa_experiment_context_v",
             "aqa_security_metadata_v",
@@ -278,7 +291,11 @@ _EXPECTED_GRANTS = {
     ),
     "aqa_execution": _grant_set(
         select_from=(
+            "aqa_effective_bars_v",
+            "aqa_operational_readiness_v",
             *_EXECUTION_READ_INPUTS,
+            "aqa_signals_v",
+            "aqa_decision_slots_v",
             *_EXECUTION_TABLES[:-1],
             _AUDIT_READ_VIEW_BY_ROLE["aqa_execution"],
         ),
@@ -290,6 +307,7 @@ _EXPECTED_GRANTS = {
             "aqa_jobs",
             "aqa_job_attempts",
             "aqa_outbox_events",
+            "aqa_risk_latch_events",
             *_ALL_SAFE_VIEWS,
         ),
         insert_into=(
@@ -357,15 +375,15 @@ def _role_bootstrap_root(
 def _temporary_descendant_migrations(root: Path) -> Path:
     migration_root = root / "migrations"
     shutil.copytree(_PROJECT_ROOT / "migrations", migration_root)
-    descendant = migration_root / "versions" / "20260905_0007_probe.py"
+    descendant = migration_root / "versions" / "20260905_0010_probe.py"
     descendant.write_text(
         '''"""Exercise a governed descendant through the deployment login."""
 
 from alembic import op
 import sqlalchemy as sa
 
-revision = "20260905_0007_probe"
-down_revision = "20260905_0006"
+revision = "20260905_0010_probe"
+down_revision = "20260906_0015"
 branch_labels = None
 depends_on = None
 
@@ -751,7 +769,7 @@ def test_non_superuser_legacy_owner_hands_off_0004_then_descendants_use_migratio
         ) as admin_connection:
             assert admin_connection.execute(
                 "SELECT version_num FROM market_data.alembic_version"
-            ).fetchone() == ("20260905_0007_probe",)
+            ).fetchone() == ("20260905_0010_probe",)
             assert admin_connection.execute(
                 "SELECT session_identity, effective_identity FROM aqa.aqa_transition_probe"
             ).fetchone() == ("aqa_migrate_login", "aqa_migrate")
@@ -1314,6 +1332,28 @@ def test_each_real_service_login_appends_and_verifies_through_audit_repository(
     assert report.stream_heads[0].stream_id == stream_id
 
 
+def test_control_login_queries_every_declared_real_safe_view(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+) -> None:
+    del provisioned_engine
+    control_engine = create_engine(
+        normalize_postgres_url(platform_login_database_urls["aqa_control"]),
+        hide_parameters=True,
+        connect_args=postgres_connect_args("platform-control-safe-view-test"),
+    )
+    try:
+        service = SQLAlchemyControlQueryService(control_engine)
+        for resource in ReadResource:
+            if resource is ReadResource.SYSTEM_STATUS:
+                continue
+            page = service.page(resource, limit=1, offset=0)
+            assert page.count == 0
+            assert page.items == ()
+    finally:
+        control_engine.dispose()
+
+
 def test_readonly_login_verifies_repository_evidence_without_write_authority(
     provisioned_engine: Engine,
     platform_login_database_urls: Mapping[str, str],
@@ -1840,7 +1880,7 @@ def test_migration_role_can_apply_ddl_and_maintain_alembic_revision(
     with _connection_as(provisioned_engine, "aqa_migrate") as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM market_data.alembic_version"))
-            == "20260905_0006"
+            == "20260906_0015"
         )
         assert connection.scalar(
             text("SELECT has_schema_privilege('aqa_migrate', 'market_data', 'CREATE')")
@@ -2009,3 +2049,361 @@ def test_runtime_roles_cannot_create_schema_objects_or_temporary_tables(
         role,
         text("CREATE TEMPORARY TABLE aqa_unauthorized_temp_probe (value integer)"),
     )
+
+
+def test_paper_proposal_views_grant_read_only_declarative_authority(
+    provisioned_engine: Engine,
+) -> None:
+    with _connection_as(provisioned_engine, "aqa_execution") as connection:
+        for view in ("aqa_signals_v", "aqa_decision_slots_v"):
+            assert connection.scalar(
+                text("SELECT has_table_privilege(current_user, :relation, 'SELECT')"),
+                {"relation": f"aqa.{view}"},
+            )
+            for privilege in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
+                assert not connection.scalar(
+                    text("SELECT has_table_privilege(current_user, :relation, :privilege)"),
+                    {"relation": f"aqa.{view}", "privilege": privilege},
+                )
+        signal_columns = set(
+            connection.execute(text("SELECT * FROM aqa.aqa_signals_v LIMIT 0")).keys()
+        )
+        assert "actions" in signal_columns
+        assert "content_hash" in signal_columns
+        assert signal_columns.isdisjoint({"payload", "artifact_bytes", "model", "credentials"})
+
+
+def test_shadow_strategy_and_execution_use_distinct_real_login_authority(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from adaptive_trader.platform.config import RuntimeService, load_runtime_settings
+    from adaptive_trader.platform.data.calendar import XnasExchangeCalendar
+    from adaptive_trader.platform.data.watermarks import DataSeries, WatermarkRepository
+    from adaptive_trader.platform.operational_strategy import OperationalStrategyCycle, propose_once
+    from adaptive_trader.platform.scheduling import DecisionSlotRepository
+    from adaptive_trader.platform.shadow import run_shadow_once
+    from adaptive_trader.platform.shadow_settings import load_shadow_execution_settings
+    from adaptive_trader.platform.storage.experiments import ExperimentRepository
+    from adaptive_trader.platform.storage.market_data import MarketDataRepository
+    from tests.unit.test_platform_shadow import NOW, ROOT, seed
+
+    environment = {
+        "AQA_CONFIG": "configs/platform/shadow.yaml",
+        "AQA_DATABASE_URL_FILE": "/run/secrets/database_url",
+    }
+    execution_settings = load_shadow_execution_settings(environment, application_root=ROOT)
+    strategy_settings = load_runtime_settings(
+        environment, service=RuntimeService.STRATEGY_WORKER, application_root=ROOT
+    )
+    experiment = execution_settings.platform.experiment.definition
+    ExperimentRepository(provisioned_engine).register(experiment, registered_at=NOW)
+    original_append = MarketDataRepository.append
+
+    def simulated_provider_bar(self, bar, **kwargs):
+        return original_append(
+            self,
+            replace(
+                bar,
+                identity=replace(bar.identity, provider="alpaca"),
+                source_mode="external_provider",
+            ),
+            **kwargs,
+        )
+
+    # Synthetic test delivery only; no provider is contacted.
+    with monkeypatch.context() as synthetic:
+        synthetic.setattr(MarketDataRepository, "append", simulated_provider_bar)
+        slot = seed(provisioned_engine, persist_signal=False)
+    now = slot.ready_at + timedelta(seconds=4)
+    watermarks = WatermarkRepository(provisioned_engine, calendar=XnasExchangeCalendar())
+    for symbol in experiment.active_tradable:
+        watermarks.recompute_symbol(
+            experiment_hash=experiment.content_hash,
+            series=DataSeries("alpaca", "iex", "raw", symbol, "15Min"),
+            start_at=slot.source_interval_start,
+            end_at=slot.source_interval_end,
+            updated_at=now,
+        )
+    watermarks.recompute_active_basket(
+        experiment_hash=experiment.content_hash,
+        universe=experiment,
+        provider="alpaca",
+        feed="iex",
+        adjustment="raw",
+        timeframe="15Min",
+        updated_at=now,
+        required_through=slot.source_interval_end,
+    )
+    slots = DecisionSlotRepository(provisioned_engine)
+    slots.evaluate_readiness(
+        slot.slot_id, active_basket_watermark=slot.source_interval_end, now=now
+    )
+    slots.claim(slot.slot_id, owner="strategy_worker", now=now)
+    engines = {
+        role: create_engine(
+            normalize_postgres_url(platform_login_database_urls[role]),
+            hide_parameters=True,
+            connect_args=postgres_connect_args(f"shadow-{role}-test"),
+        )
+        for role in ("aqa_strategy", "aqa_execution")
+    }
+    try:
+        with pytest.raises(ValueError, match="process authority"):
+            run_shadow_once(
+                engine=engines["aqa_strategy"],
+                settings=execution_settings,
+                slot_id=slot.slot_id,
+                now=now,
+            )
+        with pytest.raises(ValueError, match="process authority"):
+            propose_once(
+                engine=engines["aqa_execution"],
+                settings=strategy_settings,
+                slot_id=slot.slot_id,
+                now=now,
+            )
+        assert (
+            run_shadow_once(
+                engine=engines["aqa_execution"],
+                settings=execution_settings,
+                slot_id=slot.slot_id,
+                now=now,
+            )["reason_code"]
+            == "approved_signal_unavailable"
+        )
+        cycle = OperationalStrategyCycle(
+            strategy_settings, engines["aqa_strategy"], clock=lambda: now
+        )
+        assert cycle.run_cycle().reason_code == "signal_persisted"
+        assert cycle.run_cycle().reason_code == "signal_current"
+        outcome = run_shadow_once(
+            engine=engines["aqa_execution"],
+            settings=execution_settings,
+            slot_id=slot.slot_id,
+            now=now,
+        )
+        assert outcome["status"] == "dry_run_persisted"
+        assert outcome["broker_constructed"] is False
+        assert (
+            run_shadow_once(
+                engine=engines["aqa_execution"],
+                settings=execution_settings,
+                slot_id=slot.slot_id,
+                now=now,
+            )
+            == outcome
+        )
+        with engines["aqa_strategy"].connect() as connection:
+            assert not connection.scalar(
+                text("SELECT has_table_privilege(current_user, 'aqa.aqa_risk_decisions', 'INSERT')")
+            )
+            assert not connection.scalar(
+                text(
+                    "SELECT has_table_privilege(current_user, 'aqa.aqa_execution_plans', 'INSERT')"
+                )
+            )
+        with engines["aqa_execution"].connect() as connection:
+            assert not connection.scalar(
+                text(
+                    "SELECT has_table_privilege(current_user, 'aqa.aqa_signal_envelopes', 'INSERT')"
+                )
+            )
+    finally:
+        for engine in engines.values():
+            engine.dispose()
+
+
+def test_operational_readiness_view_has_only_safe_read_authority(
+    provisioned_engine: Engine,
+) -> None:
+    expected = {
+        "experiment_hash",
+        "timeframe",
+        "role",
+        "status",
+        "contiguous_through",
+        "updated_at",
+        "pending_work",
+        "unresolved_gaps",
+    }
+    for role in ("aqa_scheduler", "aqa_strategy", "aqa_execution"):
+        with _connection_as(provisioned_engine, role) as connection:
+            assert (
+                set(
+                    connection.execute(
+                        text("SELECT * FROM aqa.aqa_operational_readiness_v LIMIT 0")
+                    ).keys()
+                )
+                == expected
+            )
+        _assert_permission_denied(
+            provisioned_engine,
+            role,
+            text("DELETE FROM aqa.aqa_operational_readiness_v WHERE FALSE"),
+        )
+    for role in ("aqa_scheduler", "aqa_strategy"):
+        _assert_permission_denied(
+            provisioned_engine, role, text("SELECT * FROM market_data.canonical_work LIMIT 0")
+        )
+
+
+def test_operational_scheduler_uses_its_login_and_durable_deadlines(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+) -> None:
+    from adaptive_trader.platform.config import RuntimeService, load_runtime_settings
+    from adaptive_trader.platform.operational_scheduler import OperationalSchedulerCycle
+    from adaptive_trader.platform.scheduling import SlotState
+    from adaptive_trader.platform.storage.experiments import ExperimentRepository
+
+    settings = load_runtime_settings(
+        {
+            "AQA_CONFIG": "configs/platform/shadow.yaml",
+            "AQA_DATABASE_URL_FILE": "/run/secrets/database_url",
+        },
+        service=RuntimeService.SCHEDULER_WORKER,
+        application_root=_PROJECT_ROOT,
+    )
+    now = datetime(2026, 7, 6, 15, 0, tzinfo=UTC)
+    ExperimentRepository(provisioned_engine).register(
+        settings.platform.experiment.definition, registered_at=now
+    )
+    engine = create_engine(
+        normalize_postgres_url(platform_login_database_urls["aqa_scheduler"]),
+        hide_parameters=True,
+        connect_args=postgres_connect_args("operational-scheduler-test"),
+    )
+    try:
+        cycle = OperationalSchedulerCycle(settings, engine, clock=lambda: now)
+        cycle.run_cycle()
+        slots = cycle.repository.list_for_session(
+            experiment_hash=settings.platform.experiment.definition.content_hash,
+            session_date=now.date(),
+        )
+        assert slots
+        assert all(slot.state is SlotState.EXPIRED for slot in slots if slot.deadline_at <= now)
+        assert not any(slot.state is SlotState.CLAIMED for slot in slots)
+        cycle.run_cycle()
+        assert (
+            cycle.repository.list_for_session(
+                experiment_hash=settings.platform.experiment.definition.content_hash,
+                session_date=now.date(),
+            )
+            == slots
+        )
+    finally:
+        engine.dispose()
+    with pytest.raises(ValueError, match="dedicated database role"):
+        OperationalSchedulerCycle(settings, provisioned_engine, clock=lambda: now).run_cycle()
+
+
+@pytest.mark.parametrize("role", ["aqa_control", "aqa_readonly"])
+def test_durable_status_real_login_safe_views_and_utc(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+    role: str,
+) -> None:
+    from adaptive_trader.platform.config import load_experiment
+    from adaptive_trader.platform.data.calendar import XnasExchangeCalendar
+    from adaptive_trader.platform.durable_status import observe_status
+    from adaptive_trader.platform.scheduling import DecisionSlotRepository, build_session_schedule
+    from adaptive_trader.platform.storage.experiments import ExperimentRepository
+    from adaptive_trader.platform.storage.tables import aqa_basket_watermarks
+
+    now = datetime(2026, 7, 6, 15, 0, tzinfo=UTC)
+    experiment = load_experiment(
+        Path("experiments/semiconductor_network_intraday_v1.yaml"),
+        config_root=_PROJECT_ROOT / "configs",
+    )
+    ExperimentRepository(provisioned_engine).register(experiment, registered_at=now)
+    schedule = build_session_schedule(
+        experiment=experiment,
+        signal_provider_id="always_flat",
+        signal_provider_version="1",
+        session_date=now.date(),
+        calendar=XnasExchangeCalendar(),
+    )
+    DecisionSlotRepository(provisioned_engine).create_schedule(schedule, recorded_at=now)
+    with provisioned_engine.begin() as connection:
+        connection.execute(
+            insert(aqa_basket_watermarks).values(
+                basket_watermark_id="basket_status_contract",
+                experiment_hash=experiment.content_hash,
+                role="active",
+                timeframe="15Min",
+                status="ready",
+                contiguous_through=now,
+                component_hash="a" * 64,
+                content_hash="b" * 64,
+                version=1,
+                updated_at=now,
+            )
+        )
+    engine = create_engine(
+        normalize_postgres_url(platform_login_database_urls[role]),
+        hide_parameters=True,
+        connect_args=postgres_connect_args("durable-status-contract"),
+    ).execution_options(postgresql_readonly=True)
+    try:
+        data = observe_status(engine, experiment_hash=experiment.content_hash, kind="data", now=now)
+        assert data["records"] == [
+            {
+                "role": "active",
+                "timeframe": "15Min",
+                "status": "ready",
+                "contiguous_through": now.isoformat(),
+                "updated_at": now.isoformat(),
+            }
+        ]
+        assert data["health"] == "not_evaluated"
+        slots = observe_status(
+            engine, experiment_hash=experiment.content_hash, kind="scheduler", now=now
+        )
+        assert slots["returned_count"] == len(schedule.slots)
+        assert slots["counts_within_returned_records"] == {"PENDING": 20, "FLATTEN_REQUIRED": 1}
+        assert slots["truncated"] is False
+        records = slots["records"]
+        assert isinstance(records, list)
+        assert all(record["deadline_at"].endswith("+00:00") for record in records)
+        assert all(record["lease_expires_at"] is None for record in records)
+        assert slots["session_date"] == "2026-07-06"
+        assert (
+            observe_status(engine, experiment_hash="0" * 64, kind="data", now=now)["status"]
+            == "empty"
+        )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "role", ["aqa_scheduler", "aqa_strategy", "aqa_execution", "aqa_collector"]
+)
+def test_durable_status_rejects_other_real_logins_before_reading(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+    role: str,
+) -> None:
+    from adaptive_trader.platform.durable_status import observe_status
+
+    del provisioned_engine
+    engine = create_engine(
+        normalize_postgres_url(platform_login_database_urls[role]),
+        hide_parameters=True,
+        connect_args=postgres_connect_args("durable-status-role-denial"),
+    )
+    try:
+        for kind in ("data", "scheduler"):
+            with pytest.raises(ValueError, match="control or read-only"):
+                observe_status(
+                    engine,
+                    experiment_hash="0" * 64,
+                    kind=kind,
+                    now=datetime(2026, 7, 6, tzinfo=UTC),
+                )
+    finally:
+        engine.dispose()

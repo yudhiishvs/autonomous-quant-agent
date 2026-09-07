@@ -1,0 +1,69 @@
+{
+  "ai_freeze": {
+    "dependency_fingerprints": "MATCH",
+    "file_hashes": "MATCH",
+    "inventory": "MATCH",
+    "protected_files": 61
+  },
+  "branch_enabled_coverage": {
+    "platform_floor": 85,
+    "platform_percent": 85.69,
+    "report_precision": 2,
+    "repository_floor": 74,
+    "repository_percent": 82.19
+  },
+  "browser": "PASS_LOCAL_FIXTURE_ONLY",
+  "canonical_make_check": "PASS",
+  "commit_push_deployment": false,
+  "configured_bandit_gate": "PASS",
+  "container_scans": {
+    "application": {
+      "build": "PASS",
+      "critical": 3,
+      "high": 51,
+      "python_findings": 0,
+      "strict_gate": "FAIL"
+    },
+    "execution": {
+      "build": "PASS",
+      "critical": 3,
+      "high": 51,
+      "python_findings": 0,
+      "strict_gate": "FAIL"
+    },
+    "market-data": {
+      "build": "PASS",
+      "critical": 3,
+      "high": 51,
+      "python_findings": 0,
+      "strict_gate": "FAIL"
+    }
+  },
+  "external_provider_calls": false,
+  "image_cli_pipeline": {
+    "aggregate_rows": 208,
+    "dataset_rows": 208,
+    "minute_rows": 4290,
+    "promotable": false
+  },
+  "image_sbom_components": 175,
+  "locked_dependency_audit": "NO_KNOWN_VULNERABILITIES",
+  "offline_tests": {
+    "passed": 3039,
+    "postgres_module_deferrals": 9,
+    "seconds": 421.87,
+    "warnings": 2
+  },
+  "overall_acceptance": "BLOCKED_CONTAINER_VULNERABILITIES",
+  "package_smoke": "PASS",
+  "paper_average_price_policy": "Exact match; rounded provider averages fail closed",
+  "postgres_tests": {
+    "deselected": 3039,
+    "passed": 160,
+    "seconds": 346.51,
+    "skipped": 0,
+    "warnings": 2
+  },
+  "real_credentials_used": false,
+  "replay": "PASS_SYNTHETIC"
+}

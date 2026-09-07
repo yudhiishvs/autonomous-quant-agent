@@ -38,13 +38,15 @@ from adaptive_trader.platform.security import SecretFileReference, SecretFileVar
 
 _START = datetime(2026, 7, 6, 13, 30, tzinfo=UTC)
 _RECEIVED = _START + timedelta(minutes=5)
+_DATA_API_SENTINEL = "TEST_AQA_DATA_KEY_DO_NOT_LEAK"
+_DATA_SECRET_SENTINEL = "TEST_AQA_DATA_SECRET_DO_NOT_LEAK"  # pragma: allowlist secret
 
 
 def _credentials(tmp_path: Path) -> AlpacaDataCredentials:
     api_key = tmp_path / "data_api_key"
     secret_key = tmp_path / "data_secret_key"
-    api_key.write_text("fixture-api-value\n", encoding="utf-8")
-    secret_key.write_text("fixture-secret-value\n", encoding="utf-8")
+    api_key.write_text(f"{_DATA_API_SENTINEL}\n", encoding="utf-8")
+    secret_key.write_text(f"{_DATA_SECRET_SENTINEL}\n", encoding="utf-8")
     api_key.chmod(0o600)
     secret_key.chmod(0o600)
     return AlpacaDataCredentials.load(
@@ -81,9 +83,13 @@ def test_credentials_are_file_backed_immutable_redacted_and_nonserializable(
 ) -> None:
     credentials = _credentials(tmp_path)
 
-    assert "fixture-api-value" not in repr(credentials)
-    assert "fixture-secret-value" not in str(credentials)
-    assert all("fixture" not in repr(value) for value in credentials.transport_material())
+    assert _DATA_API_SENTINEL not in repr(credentials)
+    assert _DATA_SECRET_SENTINEL not in str(credentials)
+    assert all(
+        sentinel not in repr(value)
+        for value in credentials.transport_material()
+        for sentinel in (_DATA_API_SENTINEL, _DATA_SECRET_SENTINEL)
+    )
     with pytest.raises(AttributeError, match="immutable"):
         credentials.extra = "value"
     with pytest.raises(TypeError, match="cannot be serialized"):

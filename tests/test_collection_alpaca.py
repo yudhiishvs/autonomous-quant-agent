@@ -6,7 +6,7 @@ import asyncio
 import json
 import threading
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -16,7 +16,7 @@ from adaptive_trader.collection.alpaca import (
     AlpacaHistoricalBarSource,
     AlpacaLiveBarSource,
 )
-from adaptive_trader.collection.contracts import RawBarObservationV1
+from adaptive_trader.collection.contracts import RawBarObservationV1, RawBarObservationV2
 from adaptive_trader.collection.credentials import AlpacaDataCredentials
 
 RECEIVED_AT = datetime(2026, 9, 3, 15, 1, tzinfo=UTC)
@@ -291,6 +291,40 @@ def test_historical_payload_is_canonical_across_mapping_order() -> None:
     assert first.raw_payload_json == second.raw_payload_json
     assert first.raw_payload_sha256 == second.raw_payload_sha256
     assert first.observation_id == second.observation_id
+
+
+def test_repeated_historical_receipts_preserve_restored_provider_value() -> None:
+    first = _raw_bar()
+    changed = {**first, "c": 101.5}
+    client = FakeHistoricalClient(
+        tuple(
+            FakeResponse({"bars": {"AAPL": [payload]}, "next_page_token": None})
+            for payload in (first, changed, first)
+        )
+    )
+    clock_values = iter(RECEIVED_AT + timedelta(seconds=index) for index in range(3))
+    source = AlpacaHistoricalBarSource(
+        _credentials(), client=client, clock=lambda: next(clock_values)
+    )
+    observations = tuple(
+        source.fetch(
+            ("AAPL",),
+            start=datetime(2026, 9, 3, 15, 0, tzinfo=UTC),
+            end=RECEIVED_AT,
+            source="historical_reconciliation",
+        )[0]
+        for _ in range(3)
+    )
+
+    assert all(type(item) is RawBarObservationV2 for item in observations)
+    assert len({item.observation_id for item in observations}) == 3
+    assert observations[0].content_hash == observations[2].content_hash
+    assert observations[0].raw_payload_sha256 == observations[2].raw_payload_sha256
+    assert [item.bar.receipt_timestamp_utc for item in observations] == [
+        RECEIVED_AT,
+        RECEIVED_AT + timedelta(seconds=1),
+        RECEIVED_AT + timedelta(seconds=2),
+    ]
 
 
 def test_historical_source_records_reconciliation_provenance() -> None:

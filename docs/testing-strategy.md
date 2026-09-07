@@ -6,12 +6,15 @@ Before test-module collection, `tests/conftest.py` removes all four Alpaca crede
 from the process and forces `APA_ENABLE_PAPER_ORDERS=NO`; its automatic fixture reapplies that
 boundary for every test. The fixture also replaces `socket.create_connection` and
 `socket.socket.connect` with failures; marked PostgreSQL tests permit those paths only to loopback.
-A process-wide socket-denial wrapper remains `NOT_IMPLEMENTED`. Tests marked `postgres` may
-connect only to loopback. No ordinary test loads ambient Alpaca credentials, opens an Alpaca
-REST/WebSocket session, or submits a paper or real order.
+`scripts/verify_no_network.py` runs a Python module with DNS and outbound socket operations denied;
+the offline-demo workflow executes both demo runs through that wrapper. Tests marked `postgres`
+may connect only to loopback. No ordinary test loads ambient Alpaca credentials, opens an Alpaca
+REST/WebSocket session, or submits a paper or real order. The Python guard is not a host firewall;
+container verification uses `--network none` where an operating-system boundary is required.
 
 The PostgreSQL integration module additionally requires both a loopback database named
-`collector_test` and `APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE=YES`; otherwise it skips or
+`collector_test`, `APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE=YES`, and
+`APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES=YES`; otherwise it skips or
 refuses startup. Never supply a shared or hosted database.
 
 ## Test categories
@@ -30,9 +33,19 @@ verified.
 | End-to-end regression | Public legacy backtest and replay entry points, artifacts, and orchestration | May replace market and broker boundaries with synthetic/replay providers; must not replace the CLI path or durable outputs | Offline Python and ignored temporary outputs; owner: application maintainer | Commands under “Regression commands” | A supported public workflow or deterministic evidence contract regressed. |
 | Security | Paper-only syntax, configuration rejection, runtime service/secret scope, secret path/owner/mode/content/bootstrap checks, redaction, credential, URL, import, and authorization boundaries | May replace provider responses; must not mock the authorization decision under test | Offline Python with empty credentials and TCP guard; owner: security reviewer plus affected maintainer | `uv run --no-sync pytest -q tests/safety tests/architecture tests/unit/test_platform_experiment.py tests/unit/test_platform_profiles.py tests/unit/test_platform_runtime_settings.py tests/unit/test_platform_secret_bootstrap.py tests/unit/test_platform_security.py tests/test_config_safety.py tests/test_live_safety_matrix.py tests/test_collection_credentials.py tests/test_collection_runtime.py` | Treat the affected trust boundary as closed until the cause and regression are corrected. |
 | Deterministic replay | Stable event ordering, restart identity, terminal state, and evidence hashes | May use recorded synthetic events and a fake broker; must not bypass production replay/orchestration | Offline Python; owner: application maintainer | `uv run --no-sync python -m adaptive_trader.cli replay --config configs/replay.yaml` | Locate the first divergent event or state before accepting later output. |
-| Property-based | General invariants for canonicalization, state machines, and financial constraints | May generate bounded values; must not encode production logic in the oracle | Target: offline Python; owner: platform domain maintainer | `NOT_IMPLEMENTED` — no Hypothesis dependency or canonical property target exists yet | No property-coverage claim is available; explicit examples remain authoritative. |
-| Fuzz | Parser and untrusted-input crash resistance with retained minimized regressions | May generate malformed bytes/objects; must not weaken schemas or resource bounds | Target: isolated offline process; owner: affected boundary maintainer | `NOT_IMPLEMENTED` — no reproducible fuzz harness exists | No fuzz-resistance claim is available. A discovered defect must become a deterministic regression. |
-| Performance | Correctness-preserving throughput, latency distribution, allocation, and storage behavior | May use deterministic generated workloads; must not omit correctness/hash checks | Target: recorded local environment; owner: performance investigator plus affected maintainer | `NOT_IMPLEMENTED` — `scripts/benchmark_pipeline.py` does not yet exist | No performance claim or budget is supported until a repeatable baseline exists. |
+| Generated properties | Canonical roundtrip/idempotence/order invariance, resource boundaries, and shrink-only financial constraints | Seeded bounded generation with independent invariants; no production implementation as oracle | Offline Python; owner: platform domain maintainer | `uv run --no-sync pytest -q tests/unit/test_platform_properties.py tests/unit/test_platform_data_aggregation.py tests/unit/test_platform_risk_policy.py` | A reproducible invariant failure; retain its seed and reduce it to a focused regression. No exhaustive property-coverage claim. |
+| Fuzz smoke | Canonical malformed-object rejection, deterministic redacted errors and bounded nesting/node handling | Seeded malformed nested values; must not weaken schemas/resource limits | Offline Python; owner: canonical boundary maintainer | `uv run --no-sync pytest -q tests/unit/test_platform_properties.py` | Typed failure, redaction or resource-bound regression; this bounded smoke is not coverage-guided fuzzing or a general fuzz-resistance guarantee. |
+| Performance | Correctness-preserving normalization, persistence, aggregation, claim, risk, and fake-execution measurements | May use deterministic generated workloads; must not omit correctness invariants | Recorded local environment; owner: performance investigator plus affected maintainer | `uv run --no-sync python scripts/benchmark_pipeline.py --warmups 2 --repeats 5 --iterations 25` | A harness or semantic regression must be fixed; timing variation alone is not a CI failure or capacity claim. |
+
+The dependency-free generated suite uses four fixed seeds: 256 valid JSON trees exercise
+value preservation, canonical idempotence and recursively permuted mapping order; 160 malformed
+nested values exercise typed rejection and error redaction; 30 nesting shapes and 20 node counts
+straddle the documented resource limits. Existing aggregation tests independently verify OHLC,
+volume/trade-count/VWAP conservation and deterministic shuffled input. The existing risk property
+matrix generates 50 signed weight vectors and asserts shrink-only behavior and every exposure cap.
+This deliberately reuses existing financial invariants instead of adding a duplicate oracle or
+changing the frozen dependency lock. The combined selection passed 37 tests in the current review.
+It does not replace example-based edge, recovery, concurrency, or integration tests.
 
 The full pytest selection is:
 
@@ -50,11 +63,22 @@ After creating a local loopback PostgreSQL 16 database named `collector_test`:
 ```bash
 APA_TEST_POSTGRES_URL=postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test \
 APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE=YES \
+APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES=YES \
 uv run --no-sync pytest -q -m postgres
 ```
 
 The fixture migrates down to base, upgrades to head, and returns to base. The database must
 contain no user data.
+
+The backup/restore smoke additionally requires `createdb`, `dropdb`, `pg_dump`, and `psql`:
+
+```bash
+uv run --no-sync pytest -q tests/integration/test_platform_backup_restore.py
+```
+
+It resets `collector_test`, restores into a generated fresh database, compares schema/row hashes and
+audit state, then removes only the generated restore database. Without the client utilities it is
+skipped and cannot be reported as passing.
 
 ## Regression commands
 
@@ -83,18 +107,17 @@ under `runtime/` and `outputs/` remain ignored.
 
 ## Coverage and conditional test types
 
-Branch coverage is diagnostic. The canonical, experiment, profile, CLI, and architecture tests
-measure 90.88 percent branch coverage for `adaptive_trader.platform` at the preceding profile
-boundary. The focused secret-file tests measure 92 percent branch coverage for
-`adaptive_trader.platform.security`. The repository has coverage configuration but no automated
-target-platform ratchet; that ratchet is `NOT_IMPLEMENTED`. Safety-critical transitions and
-authorization gates require direct tests regardless of percentage.
+Branch coverage is diagnostic and is measured by the canonical full command. The repository-wide
+floor must not fall below the recorded 74 percent starting baseline, and new platform code targets
+at least 85 percent branch coverage except for an explicitly justified external adapter path.
+Safety-critical transitions and authorization gates require direct tests regardless of percentage.
+Do not preserve an obsolete measured percentage in this document; record the exact current result
+in the final command ledger.
 
-Property tests are appropriate for canonical serialization, validation, state machines,
-and financial invariants when generators add coverage beyond explicit cases. Fuzzing,
-mutation testing, browser automation, and performance benchmarks are not current merge
-gates and remain `NOT_IMPLEMENTED` until a concrete requirement and repeatable command
-exist.
+Property tests are appropriate for canonical serialization, validation, state machines, and
+financial invariants when generators add coverage beyond explicit cases. Fuzzing, mutation testing,
+and browser automation are not current merge gates. The deterministic performance harness exists,
+but unstable wall-clock values are intentionally not merge thresholds.
 
 ## Failure interpretation
 
@@ -104,3 +127,22 @@ exist.
 - Safety-test failure: treat the relevant trust boundary as closed until corrected.
 - Nondeterministic failure: capture seed/event order and fix ownership or timing; do not add
   arbitrary sleeps.
+
+
+The canonical `make coverage` first requires the disposable PostgreSQL preflight, then
+runs the socket-denied offline suite and appends the guarded PostgreSQL suite to the
+same branch data. `make coverage-report` enforces the unchanged 74 percent repository
+and 85 percent platform floors with two-decimal precision and writes XML/HTML evidence.
+Zero-decimal rounding cannot promote a result below the platform floor. All production
+platform modules, including external adapters, remain in the report. `make coverage-offline`
+collects offline evidence alone; `make coverage-postgres` appends guarded database
+evidence. Neither partial collection establishes the combined gate. `make check`
+executes PostgreSQL through coverage once. CI retains separate offline and PostgreSQL
+jobs, uploads their actual hidden `.coverage` files, and requires both successful jobs
+and both artifacts before combining data in the dependent coverage gate. Missing
+PostgreSQL prerequisites or coverage artifacts fail verification; they are not skips.
+
+Offline Make recipes remove the inherited disposable PostgreSQL URL and acknowledgements
+only from their child environment. The subsequent guarded database stage retains the
+operator-supplied variables. This prevents integration discovery/autouse fixtures from
+bootstrapping roles during the socket-denied offline stage of the combined harness.

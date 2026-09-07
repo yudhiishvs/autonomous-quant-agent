@@ -15,7 +15,6 @@ import json
 import os
 import re
 import sqlite3
-import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -23,6 +22,9 @@ from itertools import pairwise
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from defusedxml import ElementTree as ET
+from defusedxml.common import DefusedXmlException
 
 from adaptive_trader.constants import (
     PAPER_API_KEY_ENV,
@@ -177,6 +179,8 @@ def _table_names(connection: sqlite3.Connection) -> set[str]:
 
 
 def _placeholders(values: Sequence[str]) -> str:
+    """Return one SQLite placeholder per value; callers bind every value separately."""
+
     return ",".join("?" for _ in values)
 
 
@@ -398,7 +402,7 @@ def audit_observer_session(
             report_type = f"daily_forward_session:{session_date.isoformat()}"
             run_clause = _placeholders(run_ids)
             marker_rows = connection.execute(
-                f"SELECT metadata FROM generated_reports WHERE run_id IN ({run_clause}) "
+                f"SELECT metadata FROM generated_reports WHERE run_id IN ({run_clause}) "  # nosec B608
                 "AND report_type = ?",
                 (*run_ids, marker_type),
             ).fetchall()
@@ -448,7 +452,7 @@ def audit_observer_session(
                 and max(run_ends) >= calendar_close
             )
             daily_rows = connection.execute(
-                f"SELECT metadata FROM generated_reports WHERE run_id IN ({run_clause}) "
+                f"SELECT metadata FROM generated_reports WHERE run_id IN ({run_clause}) "  # nosec B608
                 "AND report_type = ?",
                 (*run_ids, report_type),
             ).fetchall()
@@ -472,7 +476,7 @@ def audit_observer_session(
             )
 
             bar_event_rows = connection.execute(
-                f"SELECT symbol, payload FROM stream_events WHERE run_id IN ({run_clause}) "
+                f"SELECT symbol, payload FROM stream_events WHERE run_id IN ({run_clause}) "  # nosec B608
                 "AND event_type IN ('bar_inserted', 'bar_duplicate', 'bar_corrected')",
                 run_ids,
             ).fetchall()
@@ -600,7 +604,7 @@ def audit_observer_session(
             )
 
             decisions = connection.execute(
-                f"SELECT decision_id, idempotency_key FROM rebalance_decisions "
+                f"SELECT decision_id, idempotency_key FROM rebalance_decisions "  # nosec B608
                 f"WHERE run_id IN ({run_clause}) AND session_date = ?",
                 (*run_ids, session_date.isoformat()),
             ).fetchall()
@@ -615,7 +619,7 @@ def audit_observer_session(
                 receipts = [
                     _json_object(row["payload"])
                     for row in connection.execute(
-                        f"SELECT payload FROM decision_receipts WHERE decision_id IN "
+                        f"SELECT payload FROM decision_receipts WHERE decision_id IN "  # nosec B608
                         f"({decision_clause})",
                         decision_ids,
                     ).fetchall()
@@ -695,12 +699,12 @@ def audit_observer_session(
                 run_ids,
             )
             startup_rows = connection.execute(
-                f"SELECT run_id, stream, event_type, payload FROM stream_events "
+                f"SELECT run_id, stream, event_type, payload FROM stream_events "  # nosec B608
                 f"WHERE run_id IN ({run_clause})",
                 run_ids,
             ).fetchall()
             snapshot_rows = connection.execute(
-                f"SELECT snapshot_id, run_id, account_id_hash, status, trading_blocked "
+                f"SELECT snapshot_id, run_id, account_id_hash, status, trading_blocked "  # nosec B608
                 f"FROM account_snapshots WHERE run_id IN ({run_clause})",
                 run_ids,
             ).fetchall()
@@ -1391,7 +1395,8 @@ def _valid_dry_run_evidence(
                 "risk_decisions",
             ):
                 rows = connection.execute(
-                    f"SELECT payload FROM {table} WHERE run_id = ? AND decision_id = ?",
+                    # Table selection is closed by the literal tuple above; values stay bound.
+                    f"SELECT payload FROM {table} WHERE run_id = ? AND decision_id = ?",  # nosec B608
                     (run_id, decision_id),
                 ).fetchall()
                 if len(rows) != 1:
@@ -1648,7 +1653,7 @@ def _valid_restart_evidence(
         with _read_only_database(database_path) as connection:
             clause = _placeholders(run_ids)
             rows = connection.execute(
-                f"SELECT run_id, event_type, payload FROM stream_events "
+                f"SELECT run_id, event_type, payload FROM stream_events "  # nosec B608
                 f"WHERE run_id IN ({clause}) AND event_type IN "
                 "('controlled_restart_drill_started', 'controlled_restart_drill_completed')",
                 run_ids,
@@ -1913,7 +1918,7 @@ def summarize_observer_evidence(
 def _read_junit(path: Path) -> tuple[bool, dict[str, int]]:
     try:
         root = ET.parse(path).getroot()
-    except (OSError, ET.ParseError):
+    except (OSError, ET.ParseError, DefusedXmlException):
         return False, {}
     suites = [root] if root.tag == "testsuite" else list(root.findall("testsuite"))
     try:
@@ -2218,7 +2223,7 @@ def _backup_evidence(
             backed_up = {
                 str(row["run_id"])
                 for row in connection.execute(
-                    f"SELECT run_id FROM application_runs WHERE run_id IN ({clause})",
+                    f"SELECT run_id FROM application_runs WHERE run_id IN ({clause})",  # nosec B608
                     tuple(accepted_run_ids),
                 ).fetchall()
             }
@@ -2429,14 +2434,14 @@ def evaluate_observer_readiness(
                     if run_ids:
                         clause = _placeholders(run_ids)
                         startup_rows = connection.execute(
-                            f"SELECT run_id, stream, event_type, symbol, payload "
+                            f"SELECT run_id, stream, event_type, symbol, payload "  # nosec B608
                             f"FROM stream_events "
                             f"WHERE run_id IN ({clause})",
                             run_ids,
                         ).fetchall()
                         startup_events = {str(row["event_type"]) for row in startup_rows}
                         snapshot_rows = connection.execute(
-                            f"SELECT snapshot_id, run_id, account_id_hash, status, "
+                            f"SELECT snapshot_id, run_id, account_id_hash, status, "  # nosec B608
                             f"trading_blocked FROM account_snapshots "
                             f"WHERE run_id IN ({clause})",
                             run_ids,

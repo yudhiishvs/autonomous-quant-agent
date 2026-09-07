@@ -18,7 +18,11 @@ from urllib.parse import urlsplit
 import requests
 from websockets.sync.client import connect as websocket_connect
 
-from adaptive_trader.collection.contracts import MarketBarV1, RawBarObservationV1
+from adaptive_trader.collection.contracts import (
+    MarketBarV1,
+    RawBarObservationV1,
+    RawBarObservationV2,
+)
 from adaptive_trader.collection.credentials import AlpacaDataCredentials
 from adaptive_trader.collection.universe import COLLECTION_UNIVERSE_V1
 
@@ -311,7 +315,7 @@ def _observation(
             vwap=_value(raw, "vwap", "vw"),
             source=source,
         )
-        return RawBarObservationV1(
+        return RawBarObservationV2(
             bar=bar,
             is_correction=is_correction,
             raw_payload_json=raw_payload_json,
@@ -605,12 +609,14 @@ class AlpacaLiveBarSource:
         *,
         connection_factory: LiveConnectionFactory | None = None,
         clock: Clock = _utc_now,
+        state_handler: Callable[[str], None] | None = None,
     ) -> None:
         if not isinstance(credentials, AlpacaDataCredentials):
             raise TypeError("credentials must be AlpacaDataCredentials")
         _validate_official_data_endpoints()
         self._credentials = credentials
         self._clock = clock
+        self._state_handler = state_handler
         self._connection_factory = connection_factory or cast(
             LiveConnectionFactory,
             websocket_connect,
@@ -708,6 +714,8 @@ class AlpacaLiveBarSource:
                 )
             )
             _expect_success(connection, "authenticated")
+            if self._state_handler is not None:
+                self._state_handler("authenticated")
             if self._stop_requested.is_set() or stop_requested():
                 return
             connection.send(
@@ -721,6 +729,8 @@ class AlpacaLiveBarSource:
                 )
             )
             _expect_subscription(connection, requested)
+            if self._state_handler is not None:
+                self._state_handler("subscribed")
 
             while not self._stop_requested.is_set() and not stop_requested():
                 try:
@@ -775,6 +785,8 @@ class AlpacaLiveBarSource:
                 if self._connection is connection:
                     self._connection = None
                 self._running = False
+            if self._state_handler is not None:
+                self._state_handler("disconnected")
 
     def stop(self) -> None:
         """Ask the active data stream to close; repeated calls are harmless."""

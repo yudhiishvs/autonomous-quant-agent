@@ -13,13 +13,15 @@ The distinction between current and target state is mandatory:
   executable today.
 - The generic platform currently implements canonical serialization, hashing, immutable
   experiment/profile composition, service-scoped runtime-setting composition, hardened POSIX
-  secret-file loading, local infrastructure-secret bootstrap, the additive 25-table schema,
+  secret-file loading, local infrastructure-secret bootstrap, the additive platform schema,
   PostgreSQL authorization roles and safe views, atomic bar revision/symbol-watermark storage, and
   an append-only audit repository with a read-only verifier.
-- The generic long-running services, remaining atomic repositories, signed signal/risk/execution
-  path, private API, API-backed dashboard, and target Compose topology are `NOT_IMPLEMENTED` unless
-  a narrower current control is explicitly identified below. The new PostgreSQL boundary remains
-  pending final current-revision PostgreSQL 16 and published-CI evidence.
+- The private API, API-backed dashboard, durable-job worker, and their hardened default Compose
+  paths are implemented and locally configuration-tested. Long-running offline collector,
+  scheduler, strategy, and fake-execution orchestrators are not implemented, and the paper profile
+  is a fail-closed credential-isolation scaffold. Remaining deployment claims require published CI,
+  a production host, and recorded operational evidence. The PostgreSQL boundary likewise remains
+  pending final current-revision PostgreSQL 16 evidence.
 - Alpaca-backed collector and legacy paper paths are
   `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`. Ordinary tests and CI do not contact Alpaca.
 - Real-money execution is `INTENTIONALLY_DEFERRED` and prohibited by the supported product
@@ -102,12 +104,13 @@ flowchart LR
     end
 ```
 
-The three paths do not yet form one production service graph. The legacy dashboard reads SQLite
-directly. The predecessor collector still has no downstream platform consumer. Generic storage
-now adds the `aqa` schema alongside `market_data`, but the generic CLI does not start a database,
-API, collector, scheduler, strategy, risk, or execution service. The audit verifier is the first
-runtime command to load its scoped database secret; it creates a read-only engine and never
-receives provider or broker authority.
+The legacy paths remain available and separate: the legacy dashboard still reads SQLite directly.
+The generic platform now has explicit CLI entrypoints and a Compose graph for its API, API-backed
+dashboard, durable-job worker, database bootstrap/migration, and profiled provider workers. The
+default graph does not launch placeholder collector, scheduler, strategy, or fake-execution
+processes. That missing domain orchestration is an explicit topology gap. The graph is locally
+configuration-tested and has selected offline container probes; it has not been validated as a
+deployed service graph on an operator host.
 
 ### Current capability matrix
 
@@ -116,14 +119,16 @@ receives provider or broker authority.
 | Standalone collector | Collector data credentials, fixed Alpaca data hosts, configured PostgreSQL, validated bars, runs, leases, checkpoints, and collector events | Paper credentials, trading SDK/client, order state, legacy execution, arbitrary URL, DDL during runtime | `IMPLEMENTED_AND_VERIFIED` with fakes and PostgreSQL integration; external provider operation is `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` |
 | Legacy strategy/allocation | Completed history and legacy configuration | Direct credential access, direct broker mutation, ownership of risk policy | `IMPLEMENTED_AND_VERIFIED` within the legacy path |
 | Legacy execution/paper adapter | Legacy paper credential object after explicit gates; SQLite order/fill/reconciliation state | Real-money client, configurable trading host, unsupported symbols, silent retry of ambiguous submission | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` for Alpaca paper operation |
-| Current Streamlit dashboard | Direct read access to legacy SQLite and report artifacts | Application-level order mutation; target API isolation and least-privilege launch are absent | `PARTIALLY_IMPLEMENTED` relative to the target |
+| Legacy Streamlit dashboard | Direct read access to legacy SQLite and report artifacts | Generic-platform state and application-level order mutation | `IMPLEMENTED_AND_VERIFIED` only for the preserved legacy path |
+| Generic control API and dashboard | Strict private API, bounded safe read models and control jobs, server-enforced read-only dashboard bearer | Broker/provider credentials, direct database access from dashboard, direct trade mutation routes | `IMPLEMENTED_AND_VERIFIED` locally; deployed exposure remains external evidence |
+| Generic durable-job worker | Control-role database URL, closed handler registry, bounded claims/outbox delivery, immutable artifact root, private heartbeat | Operator, provider, paper, strategy, or broker credentials; arbitrary handlers, URLs, or commands | `IMPLEMENTED_AND_VERIFIED` locally; deployed restart behavior remains external evidence |
 | Generic config/runtime composition | Explicitly injected environment mapping, strict profiles, immutable experiment identity, closed service/secret scope, opaque references | Ambient environment reads, secret-file reads during composition, network/client construction, persistent mutation | `IMPLEMENTED_AND_VERIFIED` |
 | Generic secret loader | One explicitly referenced current-user-owned POSIX regular file in mode `0400` or `0600`, up to 16 KiB | Symlinks, directories/special files, shared modes, NUL, empty or invalid UTF-8 content, serialization of values | `IMPLEMENTED_AND_VERIFIED` |
 | Local secret bootstrap | Exact fixed local infrastructure inventory beneath an owner-controlled application root | Alpaca keys, arbitrary filenames, overwrite, value output, unsafe existing state | `IMPLEMENTED_AND_VERIFIED` |
-| Generic platform schema and database authorization | Additive 25-table `aqa` schema; seven non-login authorization roles and matching login principals; normalized grants, audit row policies, and explicit security-barrier views | Runtime service/Compose credential adoption, the repositories owned by later phases, and final published verification of the current revisions | `PARTIALLY_IMPLEMENTED` pending final PostgreSQL 16 and published-CI evidence |
+| Generic platform schema and database authorization | Additive platform schema; seven non-login authorization roles and matching login principals; normalized grants, audit row policies, security-barrier views, and service-scoped Compose credential adoption | Final published verification of the current revisions | `PARTIALLY_IMPLEMENTED` pending final PostgreSQL 16 and published-CI evidence |
 | Generic market-data repository | Append-only bar revisions, independently hashed provenance, a version-fenced latest projection, and an optional quality-approved symbol watermark in one serialized transaction | Calendar/gap eligibility, basket watermark calculation, aggregation, datasets, and collector-service integration | `PARTIALLY_IMPLEMENTED` relative to the complete data platform |
 | Generic audit repository and verifier | Closed writer/stream/event-family contracts, per-stream serialized append, canonical hash-chain verification, scoped writer views, and read-only `aqa audit verify` | Emission from every consequential later-phase transition and centralized metrics/logging | `PARTIALLY_IMPLEMENTED` relative to complete observability |
-| Current CI | Locked Python 3.11 install, offline checks, configuration for digest-pinned disposable PostgreSQL 16 with runtime major-version and guarded role/migration validation, Compose validation, image builds, and collector image network denial | Final published evidence for the current Phase 2 revisions is pending; Alpaca credentials/calls and the remaining target security/SBOM/container-scan/CodeQL job set are absent | `PARTIALLY_IMPLEMENTED` relative to the target |
+| Current CI | Locked Python 3.11 quality/offline checks, PostgreSQL 16 integration, secret/dependency/static scans, twice-run offline demo, Compose validation, locked image builds, SBOMs, Trivy, and CodeQL | Published workflow and scan evidence for the current revisions | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` |
 
 The standalone collector still uses the legacy `APA_*` runtime namespace. The generic platform
 secret interface below is a new boundary and does not retroactively make the legacy processes
@@ -165,24 +170,25 @@ external data -> canonical events -> durable readiness -> decision slot
 -> broker events/fills -> reconciliation -> audit
 ```
 
-The default Compose invocation is entirely offline. `market-data-live` exists only under the
-`market-data` profile and `paper-execution-worker` only under the `paper` profile; neither starts
-by default. Tracked paper configuration keeps submission disabled and the default authorization
-verifier denies with `model_approval_not_implemented`.
+The implemented default Compose invocation is entirely offline and starts the database, migration,
+control API, dashboard, and control-authority durable-job worker. `market-data-live` exists only
+under the `market-data` profile and the fail-closed `paper-execution-worker` scaffold only under
+the `paper` profile; neither starts by default. Tracked paper configuration keeps submission
+disabled and the default authorization verifier denies with `model_approval_not_implemented`.
 
 ### Target process capability matrix
 
-All rows in this table remain incomplete as deployed process isolation. Pure `RuntimeSettings`
-scope validation models the listed secret references for the nine non-PostgreSQL target process
-identities plus the operator-invoked audit verifier, and the PostgreSQL authorization/grant portion
-now exists. Long-running service commands, mounts, containers, and network boundaries do not yet
-enforce the complete rows.
+These rows define the target separation. The checked-in Compose graph currently enforces the
+database, migration, API, dashboard, job-worker, live-data profile, and fail-closed paper-profile
+subsets by configuration and local tests. A completed domain-worker deployment inventory and
+host-level egress policy remain external operator evidence.
 
 | Target component | Allowed capabilities | Explicitly forbidden capabilities |
 | --- | --- | --- |
 | `postgres` | Initialize private PostgreSQL state from database bootstrap secrets | Public network exposure, broker/data credentials, application execution |
 | `migrate` | Act as the trusted deployment-only schema owner and apply versioned schema/grants with the migration database URL; ordinary business DML is self-revoked | Long-running application work, runtime-service assignment, broker/data credentials, order submission |
 | `control-api` | Read safe views; create bounded jobs/outbox records; write audited halt/resume events | Provider or paper credentials, broker adapters, raw market-data download, strategy/plugin installation, secret return, order submit/cancel/replace/flatten routes, arbitrary path/URL/code/SQL/shell |
+| `job-worker` | Claim bounded control-plane jobs, publish the transactional outbox, and write immutable artifacts using the control database role | Operator/provider/paper credentials, strategy or broker execution, DDL, arbitrary URLs or commands |
 | `market-data-worker` | Read experiment metadata; write fixture bars, gaps, watermarks, datasets, and audit state | Alpaca credentials in offline mode, paper credentials, trading client, order/risk tables, risk-latch clearing, model/plugin installation, arbitrary URL, shell execution |
 | `scheduler-worker` | Read calendars/readiness; claim and transition durable slots; write audit state | Any Alpaca credential, provider/broker adapter, strategy internals, arbitrary network access, order submission |
 | `strategy-worker` | Read immutable decision/data views; load locally registered signal providers; write signed signals and audit state | Broker/paper credentials, DDL, risk mutation, API-selected imports, order mutation |
@@ -273,22 +279,25 @@ filesystem.
 
 ### Target secret mount and database-role matrix
 
-The secret mounts and service launches in this matrix remain normative target state and are
-`NOT_IMPLEMENTED` in current Compose. The underlying PostgreSQL authorization roles, login
-principals, schema grants, row policies, and safe views are implemented; final current-revision
-PostgreSQL 16 and published-CI evidence is pending. Each database URL file contains a role-specific
-login URL even though every process refers to it through the same `AQA_DATABASE_URL_FILE` variable.
+This matrix defines the target mounts. The checked-in Compose graph implements the rows for
+database bootstrap, migration, API, dashboard, job worker, live-data profile, and the fail-closed
+paper scaffold; the four absent domain orchestrators do not receive credentials. The underlying
+PostgreSQL authorization roles, login principals, schema grants, row policies, and safe views are
+implemented; final published-CI evidence remains external. Each database URL file contains a
+role-specific login URL even though every process refers to it through the same
+`AQA_DATABASE_URL_FILE` variable.
 
 | Service | Target secret mounts | Target PostgreSQL authority |
 | --- | --- | --- |
 | `postgres` | Database bootstrap password files only | Server bootstrap; not an application role |
 | `migrate` | `AQA_DATABASE_URL_FILE` containing the `aqa_migrate_login` URL | Trusted deployment-only schema ownership and grants; ordinary business DML is self-revoked |
 | `control-api` | `AQA_DATABASE_URL_FILE` containing the `aqa_control` URL; `AQA_OPERATOR_TOKEN_FILE` | Safe views; bounded jobs/outbox/halt/resume; no order/fill writes |
+| `job-worker` | `AQA_DATABASE_URL_FILE` containing the `aqa_control` URL; no operator, provider, or paper credential | Claim bounded jobs, publish outbox transitions, and write immutable job artifacts |
 | `market-data-worker` | Offline `AQA_DATABASE_URL_FILE` for `aqa_collector` when PostgreSQL is selected; no Alpaca file | Read experiment/security metadata; write bars/gaps/watermarks/datasets/audit |
 | `scheduler-worker` | `AQA_DATABASE_URL_FILE` containing the `aqa_scheduler` URL | Read readiness; write slots/audit |
 | `strategy-worker` | `AQA_DATABASE_URL_FILE` containing the `aqa_strategy` URL | Read decision/data views; write signals/audit |
 | `execution-worker` | `AQA_DATABASE_URL_FILE` containing the `aqa_execution` URL | Read approved signal/data/security state; write risk/latches/execution/orders/fills/reconciliation/incidents/audit; no DDL |
-| `dashboard` | `AQA_OPERATOR_TOKEN_FILE` only | No database role or direct database network |
+| `dashboard` | `AQA_OPERATOR_TOKEN_FILE` points only to the HMAC-derived read bearer in a read-only service volume | No database role, operator mutation bearer, or direct database network |
 | `market-data-live` | `AQA_DATABASE_URL_FILE` for `aqa_collector`; `AQA_ALPACA_DATA_API_KEY_FILE`; `AQA_ALPACA_DATA_SECRET_KEY_FILE` | Same collector role; no execution state authority |
 | `paper-execution-worker` | `AQA_DATABASE_URL_FILE` for `aqa_execution`; `AQA_ALPACA_PAPER_API_KEY_FILE`; `AQA_ALPACA_PAPER_SECRET_KEY_FILE`; `AQA_PAPER_ACCOUNT_ID_HASH_FILE` | Same execution role; no DDL |
 
@@ -317,16 +326,7 @@ uses the full view and has no append path; PostgreSQL deployment must supply it 
 
 ## Authentication and authorization
 
-### Current controls
-
-The current supported deployment is single-operator and has no generic HTTP control plane. Host
-login, filesystem permissions, CLI access, and database credentials form the current operator
-boundary. The legacy paper path requires explicit command selection, tracked configuration
-enablement, an exact acknowledgement, verified paper account/credentials, current session and
-fresh state, independent risk approval, and clean reconciliation. Tracked configuration disables
-submission.
-
-### Target controls
+### Implemented controls
 
 The private FastAPI control plane binds `127.0.0.1:8000` by default, uses a bearer token loaded from
 `AQA_OPERATOR_TOKEN_FILE`, requires at least 32 bytes, and compares tokens with
@@ -339,20 +339,24 @@ Only liveness/readiness are unauthenticated. Authenticated mutations are restric
 bounded job types and audited halt/resume events. No API route directly submits, cancels, replaces,
 liquidates, or flattens an order.
 
-These API controls are `NOT_IMPLEMENTED`.
+The API implementation and route-scope behavior are executable-test verified. Binding beyond
+loopback/private infrastructure, distributed rate limiting, and a completed remote deployment
+remain operator responsibilities rather than properties of the application tests.
 
-### Unresolved operator-token/dashboard conflict
+### Dashboard-scoped bearer resolution
 
-The exact interface defines one `AQA_OPERATOR_TOKEN_FILE`, while the target dashboard receives an
-API token and must have server-enforced read-only authority. If the dashboard and human operator
-share the same bearer token and authorization is token-only, compromise of the dashboard also
-grants the bounded mutation routes. A read-only dashboard client does not solve that authorization
-problem.
+The dashboard does not receive the operator mutation bearer. The control API derives a
+domain-separated HMAC-SHA256 bearer from the loaded operator secret and recognizes that derived
+value as `read_only`. Its entrypoint atomically writes the derived bearer to an owner-private file
+in a dedicated named volume. The dashboard mounts that volume read-only and points its existing
+`AQA_OPERATOR_TOKEN_FILE` interface to that derived file; it mounts no Compose secret and has no
+database network.
 
-Therefore the API-backed dashboard, its mount, and `REQ-ARCH-007`/`REQ-UI-001` authorization claims
-remain `NOT_IMPLEMENTED` until a design within the exact secret contract can distinguish dashboard
-read authority from operator mutation authority. No implementation may silently mount the full
-operator mutation token into the dashboard and call the result least privilege.
+API tests exercise every authenticated GET with the derived bearer and verify that all six POST
+mutation routes return `403 insufficient_scope` without persisting a job or invoking latch control.
+Container entrypoint tests reject unsafe permissions and symlinks, and a local offline container
+probe verified that the dashboard view lacks `/run/secrets/operator_token` and cannot modify the
+derived-token volume. Docker/host administrators remain in the deployment trust boundary.
 
 ## Input and code-execution controls
 
@@ -385,8 +389,9 @@ operator mutation token into the dashboard and call the result least privilege.
 - Parquet, JSON, and YAML artifacts receive size, schema, path, and content-hash validation. No
   upload endpoint exists.
 
-The generic API, job, artifact, plugin-discovery, and signed-envelope input boundaries in this
-target list are `NOT_IMPLEMENTED`.
+The generic API, job, artifact, plugin-discovery, and signed-envelope input boundaries in this list
+are implemented and locally tested. Deployment-level request filtering, process containment, and
+host egress remain external controls.
 
 ## Network controls
 
@@ -394,13 +399,16 @@ target list are `NOT_IMPLEMENTED`.
 
 - The standalone collector uses fixed official Alpaca data hosts, rejects proxy inheritance and
   endpoint overrides, and has no trading SDK import.
-- Non-loopback collector PostgreSQL connections require `sslmode=verify-full`; loopback may be
-  plaintext for local development/tests.
+- Non-local PostgreSQL connections require `sslmode=verify-full`; loopback and the exact
+  internal-Compose hostname `postgres` may be plaintext within the private database network.
 - Current CI supplies empty Alpaca variables. Its collector container smoke test runs with
   `--network none`, while the offline pytest guard blocks common Python TCP connection paths and
   permits explicitly marked loopback PostgreSQL integration.
-- Current Compose does not provision PostgreSQL, has no target internal-network separation, and
-  publishes the dashboard on all host interfaces. It is not the target topology.
+- Current Compose provisions private PostgreSQL, one-shot bootstrap/migration jobs, the API,
+  dashboard, dedicated control-authority job worker, separated internal/provider networks,
+  service-scoped secret mounts, and loopback-only published ports. Live data, the fail-closed paper
+  scaffold, and database debugging remain explicit profiles. Domain worker orchestrators remain a
+  documented topology gap.
 
 ### Target controls
 
@@ -413,8 +421,9 @@ target list are `NOT_IMPLEMENTED`.
 - Ordinary tests, CI, and the offline demo deny external sockets while permitting only required
   loopback/Unix integration.
 
-Compose segmentation is not a general outbound firewall. Process-wide socket denial and the target
-network topology are `NOT_IMPLEMENTED`; operators remain responsible for host/cloud egress policy.
+Compose segmentation is not a general outbound firewall. The topology is configuration-tested but
+not runtime-verified on a production host; operators remain responsible for host/cloud egress
+policy.
 
 ## Persistence and integrity controls
 
@@ -509,16 +518,16 @@ emission/redaction integration are `NOT_IMPLEMENTED`; the audit verifier itself 
 
 ### Current controls
 
-- GitHub Actions uses read-only repository permission, pinned action commits, checkout without
-  persisted credentials, Python 3.11, `uv.lock`, Ruff, mypy, the full offline tests, synthetic
-  backtest, deterministic replay, Compose validation, locked image builds, and empty Alpaca
+- GitHub Actions uses read-only repository permission, immutable action commits, checkout without
+  persisted credentials, Python 3.11, `uv.lock`, Ruff, mypy, the full offline tests with branch
+  coverage, synthetic backtest, deterministic replay, Compose validation, and empty Alpaca
   variables with paper enablement set to `NO`.
-- The collector image uses a nonroot user and omits the Alpaca trading SDK and application
-  execution modules. The current Compose collector service additionally applies a read-only root
-  filesystem, dropped capabilities, and no-new-privileges.
-- The current workflow is configured to verify a digest-pinned PostgreSQL 16 service and its runtime
-  major version, with exact remote-run evidence recorded per commit in the active execution plan;
-  it still combines checks into one offline job.
+- A separate PostgreSQL 16 job covers migrations, authorization, repositories, idempotency, and
+  concurrency. Security/container workflows configure Gitleaks, pip-audit, Bandit, CodeQL, Trivy,
+  and CycloneDX/SPDX evidence without image publication.
+- The platform and data-only collector images use numeric nonroot users. Compose applies read-only
+  roots, dropped capabilities, no-new-privileges, bounded restart/resources, health checks,
+  service-scoped mounts, and distinct trust-zone networks.
 
 ### Target controls
 
@@ -534,29 +543,32 @@ emission/redaction integration are `NOT_IMPLEMENTED`; the audit verifier itself 
 - Pre-commit pins formatting/linting, syntax, private-key/secret, and large-file checks without
   turning every commit into a full integration run.
 
-The target container/Compose service set and the additional security, demo, container/SBOM, and
-CodeQL jobs are `NOT_IMPLEMENTED`. Base-image digests and action commits must never be invented;
-they are added only after resolution from authoritative sources.
+The target container/Compose service set, pre-commit hooks, dependency/secret/static scans,
+twice-run offline demo, container SBOM/vulnerability scans, and CodeQL jobs are checked in and
+covered by static configuration tests. Workflow presence does not claim that a remote scan or
+container runtime has passed; published CI evidence is still required. Base-image digests and
+action commits are immutable and were resolved from their authoritative repositories rather than
+inferred.
 
 ## Control and evidence matrix
 
 | Control | Current evidence | Status / limitation |
 | --- | --- | --- |
 | Closed seven-variable platform secret namespace | `tests/unit/test_platform_security.py::test_secret_file_variable_inventory_is_exact`; runtime inventory tests | `IMPLEMENTED_AND_VERIFIED` for the generic foundation |
-| Owner-private, no-symlink, redacted secret loading | Positive, mode, ownership, file-type, symlink, race, size/content, serialization, and safe-error cases in `tests/unit/test_platform_security.py` | `IMPLEMENTED_AND_VERIFIED` on supported POSIX semantics; no service consumes it yet |
+| Owner-private, no-symlink, redacted secret loading | Positive, mode, ownership, file-type, symlink, race, size/content, serialization, and safe-error cases in `tests/unit/test_platform_security.py` | `IMPLEMENTED_AND_VERIFIED` on supported POSIX semantics; container entrypoint and API consume it |
 | Fixed nine-file local bootstrap | Inventory, rerun, mode, hostile-umask, collision, partial-write, concurrency, output, and ambient-credential tests in `tests/unit/test_platform_secret_bootstrap.py` | `IMPLEMENTED_AND_VERIFIED`; no Alpaca keys generated |
 | Immutable experiment/profile identity and default-deny profile composition | `tests/unit/test_platform_experiment.py`, `test_platform_profiles.py`, `test_platform_runtime_settings.py`, and static CLI tests | `IMPLEMENTED_AND_VERIFIED`; later services do not consume it |
-| Service-scoped secret-reference selection | Exact service/profile/scope, omission, serialization, ambient-environment, and no-secret-load tests in `tests/unit/test_platform_runtime_settings.py` | `IMPLEMENTED_AND_VERIFIED` as pure composition; mounts/process launch are `NOT_IMPLEMENTED` |
+| Service-scoped secret-reference selection | Exact service/profile/scope, omission, serialization, ambient-environment, no-secret-load tests, and declarative Compose mount tests | `PARTIALLY_IMPLEMENTED`: composition and topology are verified; host runtime mounts remain externally unvalidated |
 | Collector cannot gain trading authority | `tests/architecture/` import/source boundaries, collector credential tests, and collector-only image smoke test | `IMPLEMENTED_AND_VERIFIED` for current module/image boundary; host process sandbox is limited |
 | No ordinary test/CI Alpaca access | Empty CI variables, paper `NO`, pytest TCP guards, deterministic fakes, and collector container `--network none` smoke | `PARTIALLY_IMPLEMENTED`: common TCP paths are guarded, process-wide denial is absent |
 | Submission disabled and paper-only | Tracked configuration, static endpoint/client scans, and legacy safety matrix | `IMPLEMENTED_AND_VERIFIED` as default/gate behavior; credential-based paper operation is not externally validated |
 | Intent-first and ambiguity containment | Legacy execution/reconciliation unit, integration, and replay tests | `IMPLEMENTED_AND_VERIFIED` for legacy semantics; target signed execution is `NOT_IMPLEMENTED` |
 | Collector transactional/fencing integrity | Predecessor collector repository/service tests plus generic bar/latest/symbol-watermark unit and PostgreSQL integration tests | `IMPLEMENTED_AND_VERIFIED` for the predecessor; generic repository behavior is implemented with final current-revision PostgreSQL 16/publication evidence pending |
-| API authentication, authorization, size/rate limits, and no trade routes | Requirement and design review only | `NOT_IMPLEMENTED` |
-| Read-only dashboard enforced by server authority | No supporting implementation; exact token conflict remains | `NOT_IMPLEMENTED` |
+| API authentication, authorization, size/rate limits, and no trade routes | `tests/unit/test_platform_control_api.py` and route/import boundaries | `IMPLEMENTED_AND_VERIFIED` locally; deployed listener remains external evidence |
+| Read-only dashboard enforced by server authority | HMAC scope tests, dashboard client/import tests, entrypoint materialization tests, Compose mount separation, and offline volume probe | `IMPLEMENTED_AND_VERIFIED` locally; Docker administrators remain trusted |
 | Target role grants and unauthorized-write denial | Fixed cluster bootstrap, additive grant migration, hostile-ACL normalization tests, and guarded PostgreSQL role matrix | `PARTIALLY_IMPLEMENTED`: database authorization exists; final current-revision PostgreSQL 16/publication evidence and service credential adoption remain |
 | Hash-chained audit and bounded metrics | Audit domain/repository/CLI tests cover canonical payloads, writer authority, idempotency, concurrency, tampering, expected heads, safe failures, and scoped views | `PARTIALLY_IMPLEMENTED`: audit chain/verifier exists; complete emitters and bounded Prometheus metrics do not |
-| Complete target CI security/supply-chain gates | Baseline quality job only | `PARTIALLY_IMPLEMENTED` |
+| Complete target CI security/supply-chain gates | Quality, PostgreSQL, Gitleaks/pip-audit/Bandit/static, twice-run offline demo, container/SBOM/Trivy, and CodeQL workflow tests | `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`: remote execution evidence remains |
 
 Tests prove only the behavior they execute. External credentials, hosted databases, broker
 responses, host firewall policy, backup restoration, and container-runtime enforcement require
@@ -569,35 +581,32 @@ separate recorded validation before their controls can be described as externall
   broker behavior.
 - The current legacy application can place market-data and paper capabilities in one process. The
   generic service-scoped secret interface does not repair that legacy authority boundary.
-- Apart from the read-only audit verifier, no generic service command consumes `RuntimeSettings`
-  or the hardened loader. Least-privilege database grants now exist, but service mounts, process
-  identities, credential adoption, and target networks are not currently deployed.
-- The single named operator token cannot simultaneously be a full operator mutation credential and
-  a server-enforced read-only dashboard credential. This must be resolved before the target API and
-  dashboard are accepted.
-- The current dashboard reads SQLite directly, can inherit unrelated parent environment variables,
-  and publishes its Compose port beyond loopback. Application code does not intentionally consume
-  broker secrets, but launch-time isolation is incomplete.
+- Generic service commands, scoped secret loading, least-privilege database grants, Compose mounts,
+  numeric process identities, and target networks are checked in and locally tested. A deployed
+  process/credential inventory remains operator evidence.
+- The control API derives a domain-separated read-only dashboard bearer from the operator token.
+  Docker/host administrators can still inspect the named credential volume and remain trusted.
+- The preserved legacy dashboard still reads SQLite directly. The generic dashboard is API-only,
+  mounts no Compose secret, and publishes only on loopback by default.
 - Local bootstrap depends on macOS/Linux descriptor-relative filesystem operations and advisory
   `flock`. Host compromise, ineffective locking on an unusual filesystem, and backup copies of
   local secrets remain outside the primitive's control.
 - Compose network separation will reduce reachability but is not an outbound firewall. Host/cloud
   egress restrictions remain an operator responsibility.
-- Installed strategy plugins are operator-trusted code and are not sandboxed. A compromised plugin
-  process must be contained by credentials, imports, database grants, networks, and the independent
-  risk/execution boundary; only the database-grant portion currently exists.
+- Installed strategy plugins are operator-trusted code and are not sandboxed. Credential, import,
+  database-grant, network, and independent risk/execution boundaries reduce their authority but do
+  not provide an in-process Python sandbox.
 - A database owner, host administrator, compromised dependency, or compromised container may bypass
   application checks. Detection, least privilege, immutable evidence, restoration, and dependency
   scanning reduce but do not eliminate this risk.
 - The stored collector-universe row is not yet reverified against the in-process contract at
   startup and lacks an immutability trigger.
-- Explicit collector gap lifecycle, contiguous active-basket readiness, security-metadata
-  ingestion, artifact integrity, retention, audit emission from every later service,
-  backup/restore proof, and target incident recovery remain `NOT_IMPLEMENTED`. The reusable audit
-  chain and verifier are present.
-- Current socket guards do not prove process-wide network denial. Current CI lacks the target
-  secret/dependency/container scans, SBOM, offline-demo evidence comparison, and CodeQL jobs. The
-  current role/migration/concurrency workflow changes still require a successful published run.
+- Deployment evidence for retention, complete cross-service audit emission, a real PostgreSQL
+  backup/restore run, and target incident-response drills remains external. The implementation
+  status ledger distinguishes those missing procedures from checked-in executable contracts.
+- Current socket guards do not prove process-wide network denial. Secret/dependency/container
+  scans, SBOM, offline-demo evidence comparison, CodeQL, and role/migration/concurrency gates are
+  checked in but still require a successful published run for remote evidence.
 - Real-money support and public multi-user hosting remain outside the supported security model.
 
 ## Change discipline

@@ -439,6 +439,96 @@ class BarWriteResult:
             raise MarketDataIntegrityError("bar write watermark outcome is invalid")
 
 
+def read_effective_bars(
+    connection: Connection,
+    identities: tuple[BarIdentity, ...],
+    *,
+    max_revisions: int = 16_384,
+) -> tuple[StoredBarEvent, ...]:
+    """Read a bounded batch with complete revision and latest-projection verification.
+
+    The caller supplies a consistent snapshot or excludes canonical writers for all
+    three SELECTs. This helper neither takes locks nor starts/commits transactions.
+    Results follow input identity order, omitting only identities absent from all
+    three tables. Exceeding the revision limit fails rather than truncating history.
+    """
+
+    if not isinstance(connection, Connection):
+        raise MarketDataValidationError("effective batch requires a database connection")
+    if type(identities) is not tuple or len(identities) > 1_024:
+        raise MarketDataValidationError("effective batch requires at most 1024 identities")
+    if any(type(identity) is not BarIdentity for identity in identities):
+        raise MarketDataValidationError("effective batch contains an invalid identity")
+    if type(max_revisions) is not int or not 1 <= max_revisions <= 16_384:
+        raise MarketDataValidationError("effective batch revision bound is invalid")
+    expected = {identity.bar_identity_id: identity for identity in identities}
+    if len(expected) != len(identities):
+        raise MarketDataValidationError("effective batch contains duplicate identities")
+    if not expected:
+        return ()
+    identity_rows = (
+        connection.execute(
+            select(aqa_bar_identities).where(aqa_bar_identities.c.bar_identity_id.in_(expected))
+        )
+        .mappings()
+        .all()
+    )
+    event_rows = (
+        connection.execute(
+            select(aqa_bar_events)
+            .where(aqa_bar_events.c.bar_identity_id.in_(expected))
+            .order_by(aqa_bar_events.c.bar_identity_id, aqa_bar_events.c.revision)
+            .limit(max_revisions + 1)
+        )
+        .mappings()
+        .all()
+    )
+    latest_rows = (
+        connection.execute(
+            select(aqa_bar_latest).where(aqa_bar_latest.c.bar_identity_id.in_(expected))
+        )
+        .mappings()
+        .all()
+    )
+    if len(event_rows) > max_revisions:
+        raise MarketDataIntegrityError("canonical revision batch exceeds bounded verification")
+    parsed_identities = tuple(_identity_from_row(row) for row in identity_rows)
+    stored_identities = {identity.bar_identity_id: identity for identity in parsed_identities}
+    origins = {row["bar_identity_id"]: row["created_at"] for row in identity_rows}
+    chains: dict[str, list[StoredBarEvent]] = {}
+    for row in event_rows:
+        identity = stored_identities.get(row["bar_identity_id"])
+        if identity is None:
+            raise MarketDataIntegrityError("canonical event has no verified identity")
+        chains.setdefault(identity.bar_identity_id, []).append(_event_from_row(identity, row))
+    latest = {row["bar_identity_id"]: row for row in latest_rows}
+    if set(stored_identities) != set(chains) or set(stored_identities) != set(latest):
+        raise MarketDataIntegrityError("canonical identity, history, and projection disagree")
+    result: list[StoredBarEvent] = []
+    for identity_id, expected_identity in expected.items():
+        if identity_id not in stored_identities:
+            continue
+        identity = stored_identities[identity_id]
+        if identity != expected_identity:
+            raise MarketDataIntegrityError("canonical interval does not match expected identity")
+        chain = chains[identity_id]
+        _verify_revision_chain(chain)
+        current = chain[-1]
+        projection = latest[identity_id]
+        if (
+            origins[identity_id] != chain[0].bar.received_at
+            or type(projection["version"]) is not int
+            or projection["version"] != current.revision
+            or projection["revision"] != current.revision
+            or projection["bar_event_id"] != current.bar_event_id
+            or projection["content_hash"] != current.content_hash
+            or projection["projected_at"] != current.bar.received_at
+        ):
+            raise MarketDataIntegrityError("canonical latest projection is inconsistent")
+        result.append(current)
+    return tuple(result)
+
+
 class MarketDataRepository:
     """Serialize revisions and atomically maintain latest and eligible watermark state."""
 
@@ -494,6 +584,71 @@ class MarketDataRepository:
             raise MarketDataIntegrityError("persisted market-data state is malformed") from None
         except SQLAlchemyError:
             raise MarketDataPersistenceError("market-data write could not be persisted") from None
+
+    def append_selected_batch(
+        self,
+        bars: Sequence[BarWrite],
+        *,
+        connection: Connection,
+    ) -> tuple[BarWriteResult, ...]:
+        """Mirror already selected collector projections in the caller's transaction.
+
+        The collector's fenced current projection owns precedence. Its REST response may have
+        been received before a lower-precedence stream update that committed first, so revision
+        order here records effective-state transitions, not receipt order. Actual receipt times
+        remain unchanged. Raw delivery identity and correction markers do not create an economic
+        revision when the selected OHLCV, interval, and quality are unchanged.
+
+        Pre-acquiring the complete identity and audit lock set is essential: individual appends
+        acquire audit locks after identity locks and cannot safely be composed in a naive loop.
+        """
+
+        if not isinstance(bars, Sequence) or isinstance(bars, (str, bytes)) or len(bars) > 1_000:
+            raise MarketDataValidationError("selected bar batch must be a bounded sequence")
+        selected = tuple(bars)
+        if any(
+            type(bar) is not BarWrite
+            or bar.source != "collection_projection"
+            or bar.source_mode != "external_provider"
+            or (
+                bar.identity.provider,
+                bar.identity.feed,
+                bar.identity.adjustment,
+                bar.identity.timeframe,
+            )
+            != ("alpaca", "iex", "raw", "1Min")
+            for bar in selected
+        ):
+            raise MarketDataValidationError(
+                "selected bars require the canonical collector boundary"
+            )
+        identities = tuple(bar.identity.bar_identity_id for bar in selected)
+        if len(set(identities)) != len(identities):
+            raise MarketDataValidationError("selected batch contains duplicate bar identities")
+        self._validate_connection(connection, require_serialized_sqlite=True)
+        requests = tuple(
+            request
+            for identity in identities
+            for request in (
+                PostgresAdvisoryLockRequest.for_resource(
+                    PostgresAdvisoryLockNamespace.MARKET_DATA_IDENTITY, identity
+                ),
+                PostgresAdvisoryLockRequest.for_resource(
+                    PostgresAdvisoryLockNamespace.AUDIT,
+                    f"{AuditWriter.COLLECTOR.value}:bar:{identity}",
+                ),
+            )
+        )
+        try:
+            self._transactions.acquire_postgres_advisory_locks(connection, requests)
+            return tuple(
+                self._append_on_connection(connection, bar, None, selected_projection=True)
+                for bar in selected
+            )
+        except TransactionBoundaryError:
+            raise MarketDataPersistenceError("selected bar locks could not be acquired") from None
+        except SQLAlchemyError:
+            raise MarketDataPersistenceError("selected bars could not be persisted") from None
 
     def list_events(
         self,
@@ -568,6 +723,8 @@ class MarketDataRepository:
         connection: Connection,
         bar: BarWrite,
         eligible_watermark: EligibleWatermark | None,
+        *,
+        selected_projection: bool = False,
     ) -> BarWriteResult:
         self._validate_connection(connection, require_serialized_sqlite=True)
         try:
@@ -607,12 +764,20 @@ class MarketDataRepository:
                 raise MarketDataIntegrityError("bar identity has no revision history")
             latest_version = self._verify_latest_projection(connection, bar.identity, events)
 
-            if events and events[-1].normalized_payload_hash == bar.normalized_payload_hash:
+            if events and (
+                events[-1].normalized_payload_hash == bar.normalized_payload_hash
+                or (
+                    selected_projection
+                    and _economic_payload(events[-1].bar) == _economic_payload(bar)
+                )
+            ):
                 status = BarWriteStatus.DUPLICATE
                 effective_event = events[-1]
             else:
                 status = BarWriteStatus.INSERTED if not events else BarWriteStatus.CORRECTED
-                effective_event = self._insert_revision(connection, bar, events)
+                effective_event = self._insert_revision(
+                    connection, bar, events, selected_projection=selected_projection
+                )
                 latest_version = self._write_latest_projection(
                     connection,
                     effective_event,
@@ -784,9 +949,16 @@ class MarketDataRepository:
         connection: Connection,
         bar: BarWrite,
         events: Sequence[StoredBarEvent],
+        *,
+        selected_projection: bool = False,
     ) -> StoredBarEvent:
         previous = events[-1] if events else None
-        if previous is not None and bar.received_at < previous.bar.received_at:
+        if (
+            previous is not None
+            and bar.received_at < previous.bar.received_at
+            and not selected_projection
+            and not _lineage_aggregate(bar)
+        ):
             raise MarketDataValidationError("bar correction receipt precedes current revision")
         revision = 1 if previous is None else previous.revision + 1
         if revision > MAX_SIGNED_64_BIT_INTEGER:
@@ -1401,10 +1573,43 @@ def _verify_revision_chain(events: Sequence[StoredBarEvent]) -> None:
         elif (
             event.correction_of_event_id != previous.bar_event_id
             or event.normalized_payload_hash == previous.normalized_payload_hash
-            or event.bar.received_at < previous.bar.received_at
+            or (
+                event.bar.received_at < previous.bar.received_at
+                and event.bar.source != "collection_projection"
+                and not _lineage_aggregate(event.bar)
+            )
         ):
             raise MarketDataIntegrityError("bar revision chain is inconsistent")
         previous = event
+
+
+def _economic_payload(bar: BarWrite) -> tuple[object, ...]:
+    """Compare effective economic values without delivery-specific source identity."""
+
+    return (
+        bar.identity,
+        bar.provider_timestamp,
+        bar.open,
+        bar.high,
+        bar.low,
+        bar.close,
+        bar.volume,
+        bar.trade_count,
+        bar.vwap,
+        bar.quality_flags,
+        bar.source_mode,
+        bar.schema_version,
+    )
+
+
+def _lineage_aggregate(bar: BarWrite) -> bool:
+    """A rebuilt aggregate retains source receipts; its revision order follows lineage changes."""
+
+    return (
+        bar.source == "aggregate"
+        and bar.identity.timeframe == "15Min"
+        and bar.lineage_hash is not None
+    )
 
 
 def _watermark_id(
