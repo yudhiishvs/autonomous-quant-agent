@@ -1,5 +1,34 @@
 # Platform core execution plan
 
+## Current quality repair — 2026-09-07
+
+The maintainer requested a comprehensive quality repair after publishing `eba2e9a`.
+The checkout starts clean at that commit; GitHub main is merge `316427ad`. Main CI,
+PostgreSQL coverage, CodeQL and the offline demo pass. Security fails because the CLI
+colour regression shifted reviewed synthetic-secret baseline locations; container
+scans still reject OS vulnerabilities. Dependency-update PRs conflict with the frozen
+dependency graph. No runtime financial authority or frozen AI bytes may change.
+
+Repair scope: reproduce failing gates, preserve substantive security checks, publish
+missing verification configuration in the repository, align dependency automation with
+supported Python and freeze policy, investigate a patched/minimal compatible image,
+and verify the complete resulting boundary. Do not treat old green local checks as
+evidence for changes made here. No deployment, provider calls, real credentials, or
+remote mutation is part of this repair. Record final commands and residual blockers.
+
+Discovery: `.coveragerc` and the three exact reviewed historical Gitleaks fingerprints
+were ignored by the blanket hidden-file rule and absent from the published commit.
+They must be included so fresh checkouts use the reviewed verification configuration.
+
+The [quality repair ledger](../evidence/quality-repair-20260907.md) records 3,042 offline
+passes, 160 PostgreSQL passes, unchanged 82.19%/85.69% coverage and passing final hooks,
+dependency audit, packaging, regressions, Compose and workflow validation. Exact reviewed
+history fingerprints cover only synthetic fixtures and verified hash metadata. Action pins
+now use Node 24; provider and model authority remains unchanged. All three strict image
+rescans still fail with 54 OS findings each. A Bookworm candidate was worse; the hardened
+Python 3.11 registry requires operator authentication before compatibility can be evaluated.
+This repair does not establish production acceptance or updated hosted workflow results.
+
 ## Current assignment — complete non-AI architecture, 2026-09-06
 
 The latest complete non-AI directive supersedes the historical live-activation prerequisites,

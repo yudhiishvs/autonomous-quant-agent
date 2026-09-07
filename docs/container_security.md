@@ -4,7 +4,8 @@
 
 The checked-in Compose topology uses one locked platform image for the API, dashboard, durable-job
 worker, migration, and database-bootstrap commands. The data-only collector target remains
-separate so the live market-data process does not contain the Alpaca trading SDK. Both targets use
+separate so the live market-data process does not contain the Alpaca trading SDK. A third execution
+target isolates the default-deny paper gate from strategy code. All three targets use
 digest-pinned Python and uv images, install from `uv.lock`, and run as numeric UID/GID `10001`.
 Compiler and dependency-installation tooling remains in build stages.
 
@@ -51,13 +52,15 @@ hostname requires `sslmode=verify-full`.
 `market-data-live` and `paper-execution-worker` are disabled unless the `market-data` or `paper`
 profile is selected. They use separate egress networks and disjoint credentials. The tracked paper
 profile and Compose environment both leave submission disabled and acknowledgement absent. The
-paper profile currently fails closed because no long-running paper execution orchestrator is
-implemented; it is a credential-isolation scaffold, not a runnable trading claim.
+paper loop records default-deny decisions and health, but cannot authorize submissions while Main
+AI approval remains unimplemented and frozen. Its adapter contracts have only fake-provider evidence.
 
-The required offline market-data, scheduler, strategy, and fake-execution domain orchestrators are
-not yet implemented as long-running services, so Compose does not launch placeholder processes for
-them. Durable jobs and outbox delivery run only in `job-worker` with the bounded control database
-role. This is an explicit topology gap, not a healthy-idle service simulation.
+The default graph includes offline market-data, scheduler, strategy, and fake-execution workers.
+They run bounded durable cycles through `platform/worker_runtime.py` and `platform/service_cycles.py`,
+with role-scoped database access, health markers, leases, and shutdown handling. Durable jobs and
+outbox delivery run in `job-worker` with the bounded control database role. Unit, PostgreSQL and
+container probes validate these boundaries; a continuously deployed operator-host service graph
+has not been externally validated.
 
 Compose network segmentation is not an outbound firewall. A process attached to either provider
 egress network can attempt other Internet destinations. Production operators remain responsible
@@ -68,7 +71,8 @@ users from controlling Docker.
 
 CI builds without publishing images from pull requests, verifies the numeric runtime user,
 generates SPDX image and CycloneDX Python SBOM artifacts, and runs Trivy against high and critical
-OS/library findings. Gitleaks, pip-audit, Bandit, architecture tests, secret-redaction tests, and
+OS/library findings. Each matrix job retains its JSON findings even when that gate fails.
+Gitleaks, pip-audit, Bandit, architecture tests, secret-redaction tests, and
 CodeQL are separate read-only gates. These workflows contain no Alpaca credentials.
 
 A vulnerability may be temporarily excepted only through a reviewed, time-bounded repository

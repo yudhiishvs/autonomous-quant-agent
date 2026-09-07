@@ -16,12 +16,12 @@ The distinction between current and target state is mandatory:
   secret-file loading, local infrastructure-secret bootstrap, the additive platform schema,
   PostgreSQL authorization roles and safe views, atomic bar revision/symbol-watermark storage, and
   an append-only audit repository with a read-only verifier.
-- The private API, API-backed dashboard, durable-job worker, and their hardened default Compose
-  paths are implemented and locally configuration-tested. Long-running offline collector,
-  scheduler, strategy, and fake-execution orchestrators are not implemented, and the paper profile
-  is a fail-closed credential-isolation scaffold. Remaining deployment claims require published CI,
-  a production host, and recorded operational evidence. The PostgreSQL boundary likewise remains
-  pending final current-revision PostgreSQL 16 evidence.
+- The private API, API-backed dashboard, durable-job worker, offline collector, scheduler,
+  strategy and fake-execution worker loops are implemented with bounded durable cycles and
+  hardened Compose paths. Local and published main-branch CI include PostgreSQL 16 integration.
+  The paper loop remains default-deny while Main AI approval is frozen. Operator-host deployment,
+  real provider contracts and sustained operational behaviour require separate external evidence;
+  the strict container vulnerability gate is still blocked.
 - Alpaca-backed collector and legacy paper paths are
   `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`. Ordinary tests and CI do not contact Alpaca.
 - Real-money execution is `INTENTIONALLY_DEFERRED` and prohibited by the supported product
@@ -106,10 +106,9 @@ flowchart LR
 
 The legacy paths remain available and separate: the legacy dashboard still reads SQLite directly.
 The generic platform now has explicit CLI entrypoints and a Compose graph for its API, API-backed
-dashboard, durable-job worker, database bootstrap/migration, and profiled provider workers. The
-default graph does not launch placeholder collector, scheduler, strategy, or fake-execution
-processes. That missing domain orchestration is an explicit topology gap. The graph is locally
-configuration-tested and has selected offline container probes; it has not been validated as a
+dashboard, durable-job worker, database bootstrap/migration, offline collector, scheduler,
+strategy, fake execution and profiled provider workers. The graph has configuration, durable-cycle,
+PostgreSQL and selected offline container probes; it has not been validated as a continuously
 deployed service graph on an operator host.
 
 ### Current capability matrix
@@ -171,8 +170,9 @@ external data -> canonical events -> durable readiness -> decision slot
 ```
 
 The implemented default Compose invocation is entirely offline and starts the database, migration,
-control API, dashboard, and control-authority durable-job worker. `market-data-live` exists only
-under the `market-data` profile and the fail-closed `paper-execution-worker` scaffold only under
+control API, dashboard, control-authority durable-job worker, offline data, scheduler, strategy,
+and fake-execution workers. `market-data-live` exists only
+under the `market-data` profile and the default-deny `paper-execution-worker` only under
 the `paper` profile; neither starts by default. Tracked paper configuration keeps submission
 disabled and the default authorization verifier denies with `model_approval_not_implemented`.
 
@@ -279,11 +279,12 @@ filesystem.
 
 ### Target secret mount and database-role matrix
 
-This matrix defines the target mounts. The checked-in Compose graph implements the rows for
-database bootstrap, migration, API, dashboard, job worker, live-data profile, and the fail-closed
-paper scaffold; the four absent domain orchestrators do not receive credentials. The underlying
+This matrix defines the service mounts. The checked-in Compose graph implements the rows for
+database bootstrap, migration, API, dashboard, job worker, four offline domain workers, live-data
+profile, and the default-deny paper worker. Offline workers receive only their scoped database
+credentials. The underlying
 PostgreSQL authorization roles, login principals, schema grants, row policies, and safe views are
-implemented; final published-CI evidence remains external. Each database URL file contains a
+implemented and covered by PostgreSQL integration. Each database URL file contains a
 role-specific login URL even though every process refers to it through the same
 `AQA_DATABASE_URL_FILE` variable.
 
@@ -406,9 +407,8 @@ host egress remain external controls.
   permits explicitly marked loopback PostgreSQL integration.
 - Current Compose provisions private PostgreSQL, one-shot bootstrap/migration jobs, the API,
   dashboard, dedicated control-authority job worker, separated internal/provider networks,
-  service-scoped secret mounts, and loopback-only published ports. Live data, the fail-closed paper
-  scaffold, and database debugging remain explicit profiles. Domain worker orchestrators remain a
-  documented topology gap.
+  service-scoped secret mounts, four offline domain workers, and loopback-only published ports.
+  Live data, the default-deny paper worker, and database debugging remain explicit profiles.
 
 ### Target controls
 
