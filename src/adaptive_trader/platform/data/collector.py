@@ -20,6 +20,7 @@ from adaptive_trader.platform.data.provider import (
     HistoricalStatus,
     MarketDataProvider,
     MarketDataProviderError,
+    ProviderStream,
     RawBarEnvelope,
     StreamEventType,
     StreamSubscription,
@@ -114,6 +115,9 @@ class MarketDataCollector:
         "_readiness_start_at",
         "_series_provider",
         "_sleep",
+        "_stream",
+        "_stream_retry_at",
+        "_stream_retry_index",
         "_watermarks",
     )
 
@@ -173,6 +177,9 @@ class MarketDataCollector:
             self._policy = NormalizationPolicy.for_offline_fixture(experiment)
             self._series_provider = "fixture"
         self._highest_seen: dict[str, datetime] = {}
+        self._stream: ProviderStream | None = None
+        self._stream_retry_at: datetime | None = None
+        self._stream_retry_index = 0
 
     @property
     def collection_allowlist(self) -> tuple[str, ...]:
@@ -208,6 +215,7 @@ class MarketDataCollector:
                         envelope,
                         range_start_at=resume_at,
                         range_end_at=end_at,
+                        recompute=False,
                     )
                 page_token = page.next_page_token
                 if page_token is None:
@@ -264,6 +272,7 @@ class MarketDataCollector:
                             envelope,
                             range_start_at=claimed.start_at,
                             range_end_at=claimed.end_at,
+                            recompute=False,
                         )
                     page_token = page.next_page_token
                     if page_token is None:
@@ -380,6 +389,102 @@ class MarketDataCollector:
             retry_index += 1
         return result
 
+    def collect_stream_cycle(self, *, max_bars: int) -> CollectionResult:
+        """Drain a bounded number of bars while retaining queued frame events across cycles."""
+
+        if type(max_bars) is not int or max_bars < 1:
+            raise MarketDataCollectorError("stream bar bound must be a positive integer")
+        now = _utc(self._clock(), field_name="clock")
+        if self._stream_retry_at is not None and now < self._stream_retry_at:
+            return CollectionResult()
+        if self._stream is None:
+            try:
+                self._stream = self._provider.open_stream(
+                    StreamSubscription(symbols=self.collection_allowlist)
+                )
+                self._stream_retry_at = None
+            except MarketDataProviderError as error:
+                if not error.retryable:
+                    raise
+                self._schedule_stream_retry(now)
+                return CollectionResult()
+
+        result = CollectionResult()
+        bars = 0
+        control_events = 0
+        while bars < max_bars:
+            try:
+                event = self._stream.receive()
+            except StopIteration:
+                self.close_stream()
+                return result
+            except MarketDataProviderError as error:
+                self.close_stream()
+                if not error.retryable:
+                    raise
+                self._schedule_stream_retry(_utc(self._clock(), field_name="clock"))
+                return result
+            control_events += 1
+            if control_events > max_bars * 4 + 16:
+                raise MarketDataCollectorError("stream cycle control-event bound exceeded")
+            if event.event_type is StreamEventType.CONNECTED:
+                self._audit_control(
+                    event_type=(
+                        "collector.connected"
+                        if self._stream_retry_index == 0
+                        else "collector.reconnected"
+                    ),
+                    occurred_at=event.occurred_at,
+                    status="connected",
+                    attempt=self._stream_retry_index,
+                )
+                continue
+            if event.event_type is StreamEventType.BAR:
+                if event.bar is None:  # pragma: no cover - protected by StreamEvent
+                    raise MarketDataCollectorError("stream bar event is missing its payload")
+                result += self._persist_envelope(event.bar, detect_stream_gaps=True)
+                bars += 1
+                self._stream_retry_index = 0
+                self._stream_retry_at = None
+                continue
+            if event.event_type is StreamEventType.RATE_LIMITED:
+                result += CollectionResult(rate_limits=1)
+                self._audit_control(
+                    event_type="collector.rate_limited",
+                    occurred_at=event.occurred_at,
+                    status="rate_limited",
+                    attempt=self._stream_retry_index,
+                )
+                self.close_stream()
+                self._schedule_stream_retry(event.occurred_at)
+                return result
+            self._audit_control(
+                event_type="collector.disconnected",
+                occurred_at=event.occurred_at,
+                status="disconnected",
+                attempt=self._stream_retry_index,
+            )
+            self.close_stream()
+            self._schedule_stream_retry(event.occurred_at)
+            return result
+        return result
+
+    def close_stream(self) -> None:
+        """Close only the retained streaming connection; repeated shutdown is safe."""
+
+        if self._stream is not None:
+            try:
+                self._stream.close()
+            finally:
+                self._stream = None
+
+    def _schedule_stream_retry(self, observed_at: datetime) -> None:
+        if self._stream_retry_index >= len(RETRY_DELAYS_SECONDS):
+            raise MarketDataCollectorError("stream reconnect retry schedule exhausted")
+        delay = RETRY_DELAYS_SECONDS[self._stream_retry_index]
+        self._stream_retry_index += 1
+        self._stream_retry_at = observed_at + timedelta(seconds=delay)
+
     def _fetch_with_retry(self, request: HistoricalRequest) -> tuple[HistoricalResult, int]:
         rate_limits = 0
         for attempt in range(len(RETRY_DELAYS_SECONDS) + 1):
@@ -416,6 +521,7 @@ class MarketDataCollector:
         range_start_at: datetime | None = None,
         range_end_at: datetime | None = None,
         detect_stream_gaps: bool = False,
+        recompute: bool = True,
     ) -> CollectionResult:
         if type(envelope) is not RawBarEnvelope:
             raise MarketDataCollectorError("provider returned an invalid bar envelope")
@@ -450,10 +556,11 @@ class MarketDataCollector:
         )
         if prior is None or canonical.interval_end_utc > prior:
             self._highest_seen[canonical.symbol] = canonical.interval_end_utc
-        self._recompute(
-            symbol=canonical.symbol,
-            end_at=max(canonical.interval_end_utc, prior or canonical.interval_end_utc),
-        )
+        if recompute:
+            self._recompute(
+                symbol=canonical.symbol,
+                end_at=max(canonical.interval_end_utc, prior or canonical.interval_end_utc),
+            )
         return CollectionResult(
             received=1,
             inserted=int(write_result.status is BarWriteStatus.INSERTED),

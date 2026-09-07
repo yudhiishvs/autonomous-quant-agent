@@ -3,19 +3,22 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "adaptive-portfolio-agent"
+name = "autonomous-quant-agent"
 version = "0.1.0"
-description = "Educational, paper-only regime-aware portfolio research prototype"
+description = "Self-hosted, paper-only quantitative trading platform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.16,<2",
     "alpaca-py>=0.42,<1",
+    "defusedxml>=0.7,<1",
     "exchange-calendars>=4.11,<5",
+    "fastapi>=0.116,<1",
     "matplotlib>=3.8",
     "numpy>=1.26",
     "pandas>=2.1",
     "plotly>=5.24",
+    "prometheus-client>=0.21,<1",
     "psycopg[binary]>=3.2,<4",
     "pyarrow>=17",
     "pydantic>=2.9",
@@ -28,13 +31,18 @@ dependencies = [
     "SQLAlchemy>=2.0",
     "tenacity>=9.0",
     "typer>=0.12",
+    "uvicorn>=0.35,<1",
     "websockets>=15,<18",
 ]
 
 [project.optional-dependencies]
-dashboard = ["streamlit>=1.36"]
+dashboard = [
+    "gitpython>=3.1.59,<4",
+    "streamlit>=1.36",
+]
 legacy-yahoo = ["yfinance>=0.2.40"]
 dev = [
+    "httpx>=0.28,<1",
     "mypy>=1.11",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
@@ -43,14 +51,29 @@ dev = [
 ]
 
 [dependency-groups]
+execution-runtime = [
+    "pydantic>=2.9",
+    "PyYAML>=6.0",
+]
 market-data-runtime = [
     "alembic>=1.16,<2",
     "exchange-calendars>=4.11,<5",
+    "numpy>=1.26",
+    "pydantic>=2.9",
     "psycopg[binary]>=3.2,<4",
+    "pyarrow>=17",
+    "PyYAML>=6.0",
     "requests>=2.32,<3",
     "SQLAlchemy>=2.0",
     "typer>=0.12",
     "websockets>=15,<18",
+]
+security = [
+    "bandit[toml]>=1.8,<2",
+    "cyclonedx-bom>=7,<8",
+    "detect-secrets>=1.5,<2",
+    "pip-audit>=2.9,<3",
+    "pre-commit>=4,<5",
 ]
 
 [project.scripts]
@@ -61,6 +84,7 @@ autonomous-quant-agent = "adaptive_trader.platform.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -114,3 +138,6 @@ ignore = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.bandit]
+exclude_dirs = ["tests"]

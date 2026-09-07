@@ -28,6 +28,7 @@ _MAX_PAGE_TOKEN_LENGTH = 4096
 _MAX_RETRY_AFTER_SECONDS = 300
 _REST_TIMEOUT_SECONDS = (5.0, 20.0)
 _STREAM_CONTROL_TIMEOUT_SECONDS = 10.0
+_STREAM_RECEIVE_TIMEOUT_SECONDS = 5.0
 _MAX_CONTROL_ONLY_FRAMES = 32
 
 
@@ -358,7 +359,11 @@ class RequestsAlpacaHistoricalTransport:
             request.origin != ALPACA_DATA_REST_ORIGIN or request.path != ALPACA_DATA_BARS_PATH
         ):
             raise MarketDataProviderError("historical transport rejected a nonofficial resource")
-        if request.query.get("feed") != _FEED or request.query.get("adjustment") != _ADJUSTMENT:
+        if (
+            request.query.get("feed") != _FEED
+            or request.query.get("adjustment") != _ADJUSTMENT
+            or request.query.get("timeframe") != _TIMEFRAME
+        ):
             raise MarketDataProviderError("historical transport rejected series fallback")
         if type(credentials) is not AlpacaDataCredentials:
             raise TypeError("historical transport requires data-only credentials")
@@ -547,7 +552,9 @@ class _JsonAlpacaStreamConnection:
 
     def receive_json(self) -> object | None:
         try:
-            return _decode_websocket_frame(self._connection.recv())
+            return _decode_websocket_frame(
+                self._connection.recv(timeout=_STREAM_RECEIVE_TIMEOUT_SECONDS)
+            )
         except EOFError:
             return None
 
@@ -665,6 +672,10 @@ class AlpacaMarketDataProvider:
                 if type(raw_bar) is not dict:
                     raise MarketDataProviderError("Alpaca historical bar is invalid")
                 copied = cast(dict[str, object], dict(cast(dict[object, object], raw_bar)))
+                if any(alias in copied and copied[alias] != symbol for alias in ("S", "symbol")):
+                    raise MarketDataProviderError(
+                        "Alpaca historical bar contradicts its symbol group"
+                    )
                 if "S" not in copied and "symbol" not in copied:
                     copied["S"] = symbol
                 bars.append(RawBarEnvelope(payload=copied, received_at=received_at))

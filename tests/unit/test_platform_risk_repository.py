@@ -19,8 +19,12 @@ from adaptive_trader.platform.risk.latches import (
     RiskLatchState,
 )
 from adaptive_trader.platform.risk.models import (
+    AccountSnapshot,
+    PlanningPrice,
     RiskDecision,
     RiskExecutionScope,
+    SecurityMetadataSnapshot,
+    SignedPosition,
     SignedRiskValidationError,
 )
 from adaptive_trader.platform.risk.policy import ExposureSnapshot
@@ -200,6 +204,34 @@ def _decision(
         decided_at=_NOW + timedelta(seconds=3),
         input_hash="8" * 64,
         statistics_hash="9" * 64,
+        account_snapshot=AccountSnapshot(
+            account_id_hash="7" * 64,
+            equity=Decimal("100000"),
+            cash=Decimal("100000"),
+            buying_power=Decimal("100000"),
+            observed_at=_NOW + timedelta(seconds=3),
+        ),
+        planning_positions=(SignedPosition("AMD", Decimal(0)),),
+        planning_prices=(
+            PlanningPrice(
+                "AMD",
+                Decimal("100"),
+                _NOW + timedelta(seconds=3),
+                True,
+            ),
+        ),
+        security_metadata=(
+            SecurityMetadataSnapshot(
+                symbol="AMD",
+                asset_active=True,
+                tradable=True,
+                shortable=True,
+                easy_to_borrow=True,
+                primary_listing_eligible=True,
+                broker_capability_known=True,
+                observed_at=_NOW + timedelta(seconds=3),
+            ),
+        ),
         original_proposal=(("AMD", "FLAT", Decimal(0), Decimal(0)),),
         proposed_targets=(("AMD", Decimal(0)),),
         final_targets=(("AMD", Decimal(0)),),

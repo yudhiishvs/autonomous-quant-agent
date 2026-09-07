@@ -47,12 +47,14 @@ class RiskExecutionScope(StrEnum):
 class AccountSnapshot:
     """Point-in-time account inputs required by signed risk."""
 
+    account_id_hash: str
     equity: Decimal
     cash: Decimal
     buying_power: Decimal
     observed_at: datetime
 
     def __post_init__(self) -> None:
+        _hash(self.account_id_hash, field_name="account_id_hash")
         equity = _decimal(self.equity, field_name="account_equity")
         _decimal(self.cash, field_name="account_cash")
         buying_power = _decimal(self.buying_power, field_name="buying_power")
@@ -380,6 +382,10 @@ class RiskDecision:
     decided_at: datetime
     input_hash: str
     statistics_hash: str
+    account_snapshot: AccountSnapshot
+    planning_positions: tuple[SignedPosition, ...]
+    planning_prices: tuple[PlanningPrice, ...]
+    security_metadata: tuple[SecurityMetadataSnapshot, ...]
     original_proposal: tuple[tuple[str, str, Decimal | None, Decimal | None], ...]
     proposed_targets: tuple[tuple[str, Decimal], ...]
     final_targets: tuple[tuple[str, Decimal], ...]
@@ -420,6 +426,10 @@ class RiskDecision:
         decided_at: datetime,
         input_hash: str,
         statistics_hash: str,
+        account_snapshot: AccountSnapshot,
+        planning_positions: tuple[SignedPosition, ...],
+        planning_prices: tuple[PlanningPrice, ...],
+        security_metadata: tuple[SecurityMetadataSnapshot, ...],
         original_proposal: tuple[tuple[str, str, Decimal | None, Decimal | None], ...],
         proposed_targets: tuple[tuple[str, Decimal], ...],
         final_targets: tuple[tuple[str, Decimal], ...],
@@ -448,6 +458,10 @@ class RiskDecision:
             decided_at=decided_at,
             input_hash=input_hash,
             statistics_hash=statistics_hash,
+            account_snapshot=account_snapshot,
+            planning_positions=planning_positions,
+            planning_prices=planning_prices,
+            security_metadata=security_metadata,
             original_proposal=original_proposal,
             proposed_targets=proposed_targets,
             final_targets=final_targets,
@@ -475,6 +489,10 @@ class RiskDecision:
             decided_at=decided_at,
             input_hash=input_hash,
             statistics_hash=statistics_hash,
+            account_snapshot=account_snapshot,
+            planning_positions=planning_positions,
+            planning_prices=planning_prices,
+            security_metadata=security_metadata,
             original_proposal=original_proposal,
             proposed_targets=proposed_targets,
             final_targets=final_targets,
@@ -501,6 +519,7 @@ def risk_input_hash(request: RiskEvaluationRequest, *, policy_hash: str) -> str:
     return sha256_hex(
         {
             "account": {
+                "account_id_hash": request.account.account_id_hash,
                 "buying_power": request.account.buying_power,
                 "cash": request.account.cash,
                 "equity": request.account.equity,
@@ -620,6 +639,27 @@ def _validate_risk_decision(decision: RiskDecision) -> None:
         raise SignedRiskValidationError("risk execution scope is invalid")
     _validate_exposure_matches(decision.proposed_targets, decision.before_exposure)
     _validate_exposure_matches(decision.final_targets, decision.after_exposure)
+    if type(decision.account_snapshot) is not AccountSnapshot:
+        raise SignedRiskValidationError("risk decision account snapshot is invalid")
+    target_symbols = tuple(symbol for symbol, _ in decision.final_targets)
+    _complete_symbol_records(
+        decision.planning_positions,
+        target_symbols,
+        SignedPosition,
+        "planning positions",
+    )
+    _complete_symbol_records(
+        decision.planning_prices,
+        target_symbols,
+        PlanningPrice,
+        "planning prices",
+    )
+    _complete_symbol_records(
+        decision.security_metadata,
+        target_symbols,
+        SecurityMetadataSnapshot,
+        "security metadata",
+    )
     final_is_flat = all(weight == 0 for _, weight in decision.final_targets)
     if decision.execution_scope is RiskExecutionScope.FULL:
         if decision.block_reasons or decision.active_latches:
@@ -641,6 +681,10 @@ def _validate_risk_decision(decision: RiskDecision) -> None:
         decided_at=decision.decided_at,
         input_hash=decision.input_hash,
         statistics_hash=decision.statistics_hash,
+        account_snapshot=decision.account_snapshot,
+        planning_positions=decision.planning_positions,
+        planning_prices=decision.planning_prices,
+        security_metadata=decision.security_metadata,
         original_proposal=decision.original_proposal,
         proposed_targets=decision.proposed_targets,
         final_targets=decision.final_targets,
@@ -673,6 +717,10 @@ def _risk_decision_digest(
     decided_at: datetime,
     input_hash: str,
     statistics_hash: str,
+    account_snapshot: AccountSnapshot,
+    planning_positions: tuple[SignedPosition, ...],
+    planning_prices: tuple[PlanningPrice, ...],
+    security_metadata: tuple[SecurityMetadataSnapshot, ...],
     original_proposal: tuple[tuple[str, str, Decimal | None, Decimal | None], ...],
     proposed_targets: tuple[tuple[str, Decimal], ...],
     final_targets: tuple[tuple[str, Decimal], ...],
@@ -700,15 +748,42 @@ def _risk_decision_digest(
             "final_targets": final_targets,
             "flatten_reasons": flatten_reasons,
             "input_hash": input_hash,
+            "account_snapshot": {
+                "account_id_hash": account_snapshot.account_id_hash,
+                "buying_power": account_snapshot.buying_power,
+                "cash": account_snapshot.cash,
+                "equity": account_snapshot.equity,
+                "observed_at": account_snapshot.observed_at,
+            },
             "latch_state_hash": latch_state_hash,
             "ordered_controls": _controls_payload(ordered_controls),
             "original_proposal": original_proposal,
             "policy_hash": policy_hash,
             "policy_id": policy_id,
             "policy_version": policy_version,
+            "planning_positions": tuple(
+                (position.symbol, position.quantity) for position in planning_positions
+            ),
+            "planning_prices": tuple(
+                (price.symbol, price.price, price.observed_at, price.validated)
+                for price in planning_prices
+            ),
+            "security_metadata": tuple(
+                (
+                    security.symbol,
+                    security.asset_active,
+                    security.tradable,
+                    security.shortable,
+                    security.easy_to_borrow,
+                    security.primary_listing_eligible,
+                    security.broker_capability_known,
+                    security.observed_at,
+                )
+                for security in security_metadata
+            ),
             "proposed_targets": proposed_targets,
             "required_latch_events": tuple(event.content_hash for event in required_latch_events),
-            "schema": "signed-risk-decision-v1",
+            "schema": "signed-risk-decision-v2",
             "signal_hash": signal_hash,
             "signal_id": signal_id,
             "slot_id": slot_id,

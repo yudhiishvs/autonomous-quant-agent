@@ -26,6 +26,14 @@ from adaptive_trader.platform import (
 from adaptive_trader.platform.security import SecretFileReference
 
 SENTINEL = "TEST_AQA_DATA_SECRET_DO_NOT_LEAK"
+REQUIRED_SENTINELS = (
+    "TEST_AQA_DATA_KEY_DO_NOT_LEAK",
+    "TEST_AQA_DATA_SECRET_DO_NOT_LEAK",
+    "TEST_AQA_PAPER_KEY_DO_NOT_LEAK",
+    "TEST_AQA_PAPER_SECRET_DO_NOT_LEAK",
+    "TEST_AQA_OPERATOR_TOKEN_DO_NOT_LEAK",
+    "TEST_AQA_DATABASE_PASSWORD_DO_NOT_LEAK",
+)
 SOURCE = SecretFileVariable.ALPACA_DATA_SECRET_KEY
 
 
@@ -432,6 +440,37 @@ def test_redacted_secret_never_renders_or_serializes_its_value(
     with pytest.raises(CanonicalizationError) as captured:
         canonical_json_bytes(secret)
     assert SENTINEL not in str(captured.value)
+
+
+@pytest.mark.parametrize("sentinel", REQUIRED_SENTINELS)
+def test_required_sentinel_corpus_is_redacted_from_every_generic_output_surface(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    sentinel: str,
+) -> None:
+    path = _write_secret(tmp_path / "secret", sentinel.encode())
+    secret = load_secret_file(path, source=SOURCE)
+    model = _SecretContainer(value=secret)
+
+    with caplog.at_level(logging.INFO):
+        logging.getLogger("platform-required-sentinel-test").info("secret=%s", secret)
+    with pytest.raises(CanonicalizationError) as captured:
+        canonical_json_bytes({"value": secret})
+
+    rendered = "\n".join(
+        (
+            str(secret),
+            repr(secret),
+            repr(model),
+            repr(model.model_dump()),
+            model.model_dump_json(),
+            caplog.text,
+            str(captured.value),
+            repr(captured.value),
+            "".join(traceback.format_exception(captured.value)),
+        )
+    )
+    assert sentinel not in rendered
 
 
 def test_redacted_secret_rejects_direct_construction_pydantic_input_and_persistence(

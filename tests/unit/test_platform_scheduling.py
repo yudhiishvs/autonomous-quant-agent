@@ -343,6 +343,9 @@ def test_wait_ready_claim_and_materialized_lease_recovery_are_durable(
     assert claim.status is ClaimStatus.CLAIMED
     assert claim.slot.lease_expires_at == claimed_at + LEASE_DURATION
     assert claim.slot.attempt_count == 1
+    before_restart_audit = len(recorder.records)
+    assert repo.create_schedule(schedule, recorded_at=claimed_at)[0] == claim.slot
+    assert len(recorder.records) == before_restart_audit
     assert (
         repo.claim(slot.slot_id, owner="worker-2", now=claimed_at).status is ClaimStatus.LEASE_HELD
     )
@@ -356,6 +359,10 @@ def test_wait_ready_claim_and_materialized_lease_recovery_are_durable(
     assert recovered[0].status is ClaimStatus.MATERIALIZED
     assert recovered[0].slot.state is SlotState.COMPLETED
     assert recovered[0].slot.attempt_count == 1
+    assert (
+        repo.create_schedule(schedule, recorded_at=claimed_at + LEASE_DURATION)[0]
+        == recovered[0].slot
+    )
     assert [current for _, current, _ in recorder.records[-4:]] == [
         SlotState.WAITING_FOR_DATA,
         SlotState.READY,
@@ -494,7 +501,7 @@ def test_concurrent_claimers_produce_one_claim_and_one_live_lease(
     assert durable.attempt_count == 1
 
 
-def test_forced_flat_slot_is_claimable_only_at_target_and_fails_at_cutoff(
+def test_forced_flat_slot_is_claimable_only_before_submission_cutoff(
     repository: tuple[DecisionSlotRepository, _Recorder, _Probe],
     experiment: ExperimentDefinition,
     calendar: XnasExchangeCalendar,
@@ -513,16 +520,77 @@ def test_forced_flat_slot_is_claimable_only_at_target_and_fails_at_cutoff(
         ).status
         is ClaimStatus.NOT_READY
     )
-    claimed = repo.claim(forced.slot_id, owner="flatten-worker", now=forced.ready_at)
-    assert claimed.status is ClaimStatus.CLAIMED
     failed = repo.claim(
         forced.slot_id,
-        owner="restart-worker",
+        owner="flatten-worker",
         now=forced.deadline_at,
     )
     assert failed.status is ClaimStatus.DEADLINE_ELAPSED
     assert failed.slot.state is SlotState.FAILED
     assert failed.slot.reason_code == "forced_flat_submission_deadline_elapsed"
+
+
+def test_forced_flat_lease_and_completion_continue_through_required_flat_time(
+    repository: tuple[DecisionSlotRepository, _Recorder, _Probe],
+    experiment: ExperimentDefinition,
+    calendar: XnasExchangeCalendar,
+) -> None:
+    repo, _, probe = repository
+    schedule = _schedule(experiment, calendar)
+    repo.create_schedule(schedule, recorded_at=_RECORDED_AT)
+    forced = schedule.forced_flat_slot
+    assert forced is not None
+    claimed = repo.claim(forced.slot_id, owner="flatten-worker", now=forced.ready_at)
+    assert claimed.status is ClaimStatus.CLAIMED
+    for seconds in (29, 58, 87, 116):
+        renewed = repo.renew_lease(
+            forced.slot_id,
+            owner="flatten-worker",
+            now=forced.ready_at + timedelta(seconds=seconds),
+        )
+        assert renewed.state is SlotState.CLAIMED
+    at_required = repo.renew_lease(
+        forced.slot_id,
+        owner="flatten-worker",
+        now=forced.required_completion_at,
+    )
+    assert at_required.state is SlotState.CLAIMED
+    probe.slot_ids.add(forced.slot_id)
+    completed = repo.complete(
+        forced.slot_id,
+        owner="flatten-worker",
+        now=forced.required_completion_at,
+    )
+    assert completed.state is SlotState.COMPLETED
+    assert completed.completed_at == forced.required_completion_at
+
+
+def test_forced_flat_renewal_after_required_flat_time_fails_slot(
+    repository: tuple[DecisionSlotRepository, _Recorder, _Probe],
+    experiment: ExperimentDefinition,
+    calendar: XnasExchangeCalendar,
+) -> None:
+    repo, _, _ = repository
+    schedule = _schedule(experiment, calendar)
+    repo.create_schedule(schedule, recorded_at=_RECORDED_AT)
+    forced = schedule.forced_flat_slot
+    assert forced is not None
+    repo.claim(forced.slot_id, owner="flatten-worker", now=forced.ready_at)
+    for seconds in (29, 58, 87, 116):
+        repo.renew_lease(
+            forced.slot_id,
+            owner="flatten-worker",
+            now=forced.ready_at + timedelta(seconds=seconds),
+        )
+
+    failed = repo.renew_lease(
+        forced.slot_id,
+        owner="flatten-worker",
+        now=forced.required_completion_at + timedelta(microseconds=1),
+    )
+
+    assert failed.state is SlotState.FAILED
+    assert failed.reason_code == "forced_flat_required_completion_deadline_missed"
 
 
 def test_skip_failure_renewal_and_claim_next_are_persisted_and_recorded(

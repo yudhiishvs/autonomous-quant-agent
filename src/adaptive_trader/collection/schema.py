@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -26,6 +27,31 @@ from sqlalchemy.dialects.postgresql import JSONB
 SCHEMA_NAME = "market_data"
 
 metadata = MetaData(schema=SCHEMA_NAME)
+
+# Derived work is durable in the same transaction as canonical intake. A generation
+# fences acknowledgement against a concurrent late minute or correction.
+canonical_work = Table(
+    "canonical_work",
+    metadata,
+    Column("symbol", String(32), primary_key=True),
+    Column("session_date", Date, primary_key=True),
+    Column("generation", BigInteger, nullable=False),
+    Column("through_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("generation >= 1", name="ck_canonical_work_generation"),
+)
+Index("ix_canonical_work_session", canonical_work.c.session_date, canonical_work.c.symbol)
+
+collector_configuration = Table(
+    "collector_configuration",
+    metadata,
+    Column("name", String(32), primary_key=True),
+    Column("universe_hash", String(64), nullable=False),
+    Column("experiment_hash", String(64), nullable=False),
+    Column("history_start", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    CheckConstraint("name = 'canonical'", name="ck_collector_configuration_name"),
+)
 
 collection_universes = Table(
     "collection_universes",

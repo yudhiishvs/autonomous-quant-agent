@@ -12,40 +12,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
-jobs:
-  offline-quality:
-    name: Offline quality gates
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
-        env:
-          POSTGRES_USER: collector_test
-          POSTGRES_PASSWORD: collector_test
-          POSTGRES_DB: collector_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U collector_test -d collector_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
-    env:
-      APA_ALPACA_PAPER_API_KEY: ""
-      APA_ALPACA_PAPER_SECRET_KEY: ""
-      APA_ALPACA_DATA_API_KEY: ""
-      APA_ALPACA_DATA_SECRET_KEY: ""
-      APA_ENABLE_PAPER_ORDERS: "NO"
-      APA_MARKET_DATA_DATABASE_URL: >-
-        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
-      APA_MARKET_DATA_MIGRATION_DATABASE_URL: >-
-        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
-      APA_TEST_POSTGRES_URL: >-
-        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
-      APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE: "YES"
-      APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES: "YES"
+env:
+  APCA_API_BASE_URL: ""
+  APCA_API_KEY_ID: ""
+  APCA_API_SECRET_KEY: ""
+  ALPACA_API_KEY: ""
+  ALPACA_SECRET_KEY: ""
+  APA_ALPACA_PAPER_API_KEY: ""
+  APA_ALPACA_PAPER_SECRET_KEY: ""
+  APA_ALPACA_DATA_API_KEY: ""
+  APA_ALPACA_DATA_SECRET_KEY: ""
+  APA_MARKET_DATA_DATABASE_URL: ""
+  APA_MARKET_DATA_MIGRATION_DATABASE_URL: ""
+  APA_ENABLE_PAPER_ORDERS: "NO"
+  AQA_ALPACA_DATA_API_KEY_FILE: ""
+  AQA_ALPACA_DATA_SECRET_KEY_FILE: ""
+  AQA_ALPACA_PAPER_API_KEY_FILE: ""
+  AQA_ALPACA_PAPER_SECRET_KEY_FILE: ""
+  AQA_PAPER_ACCOUNT_ID_HASH_FILE: ""
+  AQA_OPERATOR_TOKEN_FILE: ""
+  AQA_DATABASE_URL_FILE: ""
+  AQA_ENABLE_PAPER_ORDERS: "NO"
 
+jobs:
+  quality:
+    name: Quality and offline regressions
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     steps:
       - name: Check out repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -67,14 +60,54 @@ jobs:
       - name: Verify broker-independent environment
         shell: bash
         run: |
+          test -z "${APCA_API_BASE_URL}"
+          test -z "${APCA_API_KEY_ID}"
+          test -z "${APCA_API_SECRET_KEY}"
+          test -z "${ALPACA_API_KEY}"
+          test -z "${ALPACA_SECRET_KEY}"
           test -z "${APA_ALPACA_PAPER_API_KEY}"
           test -z "${APA_ALPACA_PAPER_SECRET_KEY}"
           test -z "${APA_ALPACA_DATA_API_KEY}"
           test -z "${APA_ALPACA_DATA_SECRET_KEY}"
+          test -z "${APA_MARKET_DATA_DATABASE_URL}"
+          test -z "${APA_MARKET_DATA_MIGRATION_DATABASE_URL}"
+          test -z "${AQA_ALPACA_DATA_API_KEY_FILE}"
+          test -z "${AQA_ALPACA_DATA_SECRET_KEY_FILE}"
+          test -z "${AQA_ALPACA_PAPER_API_KEY_FILE}"
+          test -z "${AQA_ALPACA_PAPER_SECRET_KEY_FILE}"
+          test -z "${AQA_PAPER_ACCOUNT_ID_HASH_FILE}"
+          test -z "${AQA_OPERATOR_TOKEN_FILE}"
+          test -z "${AQA_DATABASE_URL_FILE}"
           test "${APA_ENABLE_PAPER_ORDERS}" = "NO"
+          test "${AQA_ENABLE_PAPER_ORDERS}" = "NO"
 
       - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra dashboard
+        run: uv sync --locked --all-extras
+
+      - name: Verify frozen Main AI baseline
+        run: uv run --no-sync python scripts/verify_main_ai_freeze.py
+
+      - name: Build and clean-install package artifacts
+        shell: bash
+        run: |
+          uv build --out-dir "${RUNNER_TEMP}/dist"
+          uv export --locked --no-dev --no-emit-project --no-editable \
+            --format requirements-txt \
+            --output-file "${RUNNER_TEMP}/package-requirements.txt"
+          uv venv "${RUNNER_TEMP}/package-smoke" --python 3.11
+          uv pip sync --python "${RUNNER_TEMP}/package-smoke/bin/python" \
+            "${RUNNER_TEMP}/package-requirements.txt"
+          uv pip install --python "${RUNNER_TEMP}/package-smoke/bin/python" \
+            --no-deps "${RUNNER_TEMP}"/dist/*.whl
+          mkdir "${RUNNER_TEMP}/package-smoke-run"
+          cd "${RUNNER_TEMP}/package-smoke-run"
+          "${RUNNER_TEMP}/package-smoke/bin/python" \
+            "${GITHUB_WORKSPACE}/scripts/verify_installed_package.py"
+          "${RUNNER_TEMP}/package-smoke/bin/aqa" doctor --json
+          "${RUNNER_TEMP}/package-smoke/bin/python" \
+            "${GITHUB_WORKSPACE}/scripts/verify_no_network.py" \
+            adaptive_trader.platform.cli demo --json \
+            --output outputs/demo/evidence.json
 
       - name: Check formatting
         run: uv run --no-sync ruff format --check .
@@ -83,7 +116,85 @@ jobs:
         run: uv run --no-sync ruff check .
 
       - name: Run type checking
-        run: uv run --no-sync mypy src
+        run: uv run --no-sync mypy src docker
+
+      - name: Run complete offline suite with branch coverage
+        run: make coverage-offline
+
+      - name: Upload offline coverage data
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-offline-${{ github.run_id }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Run synthetic backtest regression
+        run: >-
+          uv run --no-sync python -m adaptive_trader.cli backtest
+          --config configs/backtest.yaml --synthetic
+
+      - name: Run deterministic replay regression
+        run: >-
+          uv run --no-sync python -m adaptive_trader.cli replay
+          --config configs/replay.yaml
+
+      - name: Validate Docker Compose configuration
+        run: >-
+          docker compose --env-file .env.example
+          -f docker-compose.yml config --quiet
+
+      - name: Verify checkout remains unchanged
+        shell: bash
+        run: |
+          git diff --check
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=all)"
+
+  postgres-integration:
+    name: PostgreSQL 16 integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+        env:
+          POSTGRES_USER: collector_test
+          POSTGRES_PASSWORD: collector_test
+          POSTGRES_DB: collector_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U collector_test -d collector_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      APA_TEST_POSTGRES_URL: >-
+        postgresql+psycopg://collector_test:collector_test@127.0.0.1:5432/collector_test
+      APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE: "YES"
+      APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES: "YES"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+        with:
+          version: "0.11.7"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras
 
       - name: Verify PostgreSQL server major version
         shell: bash
@@ -96,43 +207,71 @@ jobs:
           )"
           test "${actual_major}" = "16"
 
-      - name: Validate PostgreSQL role bootstrap and migrations
-        run: >-
-          uv run --no-sync pytest -q
-          tests/integration/test_platform_postgres_roles.py
+      - name: Require logical backup and restore utilities
+        shell: bash
+        run: |
+          command -v createdb
+          command -v dropdb
+          command -v pg_dump
+          command -v psql
 
-      - name: Run offline test suite
-        run: uv run --no-sync pytest -q
+      - name: Validate migrations roles repositories and concurrency
+        run: make coverage-postgres
 
-      - name: Run synthetic backtest
-        run: >-
-          uv run --no-sync python -m adaptive_trader.cli backtest
-          --config configs/backtest.yaml --synthetic
+      - name: Upload PostgreSQL coverage data
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-postgres-${{ github.run_id }}
+          path: .coverage
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Run deterministic replay
-        run: >-
-          uv run --no-sync python -m adaptive_trader.cli replay
-          --config configs/replay.yaml
-
-      - name: Validate Docker Compose configuration
-        run: docker compose --env-file .env.example -f docker-compose.yml config --quiet
-
-      - name: Build locked application image
-        run: docker build --target application --tag adaptive-portfolio-agent:ci .
-
-      - name: Build locked market-data image
-        run: docker build --target market-data --tag adaptive-market-data:ci .
-
-      - name: Verify collector image entry point
-        run: >-
-          docker run --rm --network none
-          adaptive-market-data:ci python -m adaptive_trader.collection --help
-
-      - name: Verify collector import boundary
-        run: >-
-          docker run --rm --network none --entrypoint python
-          adaptive-market-data:ci -c
-          'import importlib.util, sys; import adaptive_trader.collection.cli;
-          assert importlib.util.find_spec("alpaca") is None;
-          assert importlib.util.find_spec("adaptive_trader.cli") is None;
-          assert not any(name == "alpaca" or name.startswith("alpaca.") for name in sys.modules)'
+  coverage-gate:
+    name: Combined offline and PostgreSQL coverage
+    needs: [quality, postgres-integration]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@ed21f2f24f8dd64503750218de024bcf64c7250a # v7.1.5
+        with:
+          version: "0.11.7"
+      - name: Install locked dependencies
+        run: uv sync --locked --all-extras
+      - name: Download offline coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-offline-${{ github.run_id }}
+          path: coverage-input/offline
+      - name: Download PostgreSQL coverage
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-postgres-${{ github.run_id }}
+          path: coverage-input/postgres
+      - name: Combine actual branch data and enforce unchanged floors
+        run: |
+          test -s coverage-input/offline/.coverage
+          test -s coverage-input/postgres/.coverage
+          uv run --no-sync coverage combine coverage-input/offline/.coverage coverage-input/postgres/.coverage
+          make coverage-report
+      - name: Upload combined coverage evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-combined-${{ github.run_id }}
+          path: |
+            .coverage
+            coverage.xml
+            htmlcov/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

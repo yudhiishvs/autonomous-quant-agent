@@ -18,7 +18,14 @@ from adaptive_trader.platform.execution import (
     signed_target_quantity,
 )
 from adaptive_trader.platform.hashing import sha256_hex
-from adaptive_trader.platform.risk.models import RiskDecision, RiskExecutionScope
+from adaptive_trader.platform.risk.models import (
+    AccountSnapshot,
+    PlanningPrice,
+    RiskDecision,
+    RiskExecutionScope,
+    SecurityMetadataSnapshot,
+    SignedPosition,
+)
 from adaptive_trader.platform.risk.policy import ExposureSnapshot
 
 NOW = datetime(2026, 7, 6, 14, 0, tzinfo=UTC)
@@ -45,8 +52,14 @@ def _exposure(targets: tuple[tuple[str, Decimal], ...]) -> ExposureSnapshot:
 def risk_decision(
     targets: tuple[tuple[str, Decimal], ...],
     *,
+    current: tuple[tuple[str, Decimal], ...] | None = None,
+    prices: tuple[tuple[str, Decimal], ...] | None = None,
+    equity: Decimal = Decimal("1000"),
+    buying_power: Decimal | None = None,
     decided_at: datetime = NOW,
     scope: RiskExecutionScope = RiskExecutionScope.FULL,
+    slot_id: str = f"slot_{'1' * 64}",
+    correlation_id: str = CORRELATION_ID,
 ) -> RiskDecision:
     exposure = _exposure(targets)
     proposal = tuple(
@@ -59,18 +72,58 @@ def risk_decision(
         for symbol, value in targets
     )
     reasons = () if scope is RiskExecutionScope.FULL else ("risk_blocked",)
+    selected_current = current or tuple((symbol, Decimal(0)) for symbol, _ in targets)
+    selected_prices = prices or tuple((symbol, Decimal("100")) for symbol, _ in targets)
+    price_map = dict(selected_prices)
+    cash = equity - sum(
+        (quantity * price_map[symbol] for symbol, quantity in selected_current),
+        start=Decimal(0),
+    )
     return RiskDecision.create(
-        slot_id=f"slot_{'1' * 64}",
+        slot_id=slot_id,
         signal_id=f"signal_{'2' * 64}",
         signal_hash=HASH_A,
         experiment_hash=HASH_B,
         policy_id="signed_intraday",
         policy_version=1,
         policy_hash=HASH_C,
-        correlation_id=CORRELATION_ID,
+        correlation_id=correlation_id,
         decided_at=decided_at,
         input_hash=sha256_hex(("risk-input", targets, decided_at)),
         statistics_hash=sha256_hex(("statistics", targets)),
+        account_snapshot=AccountSnapshot(
+            account_id_hash=sha256_hex(("broker-account-v1", "fake-paper-account-v1")),
+            equity=equity,
+            cash=cash,
+            buying_power=equity if buying_power is None else buying_power,
+            observed_at=decided_at,
+        ),
+        planning_positions=tuple(
+            SignedPosition(symbol=symbol, quantity=quantity)
+            for symbol, quantity in selected_current
+        ),
+        planning_prices=tuple(
+            PlanningPrice(
+                symbol=symbol,
+                price=price,
+                observed_at=decided_at,
+                validated=True,
+            )
+            for symbol, price in selected_prices
+        ),
+        security_metadata=tuple(
+            SecurityMetadataSnapshot(
+                symbol=symbol,
+                asset_active=True,
+                tradable=True,
+                shortable=True,
+                easy_to_borrow=True,
+                primary_listing_eligible=True,
+                broker_capability_known=True,
+                observed_at=decided_at,
+            )
+            for symbol, _ in selected_prices
+        ),
         original_proposal=proposal,
         proposed_targets=targets,
         final_targets=targets,
@@ -79,7 +132,10 @@ def risk_decision(
         ordered_controls=(),
         block_reasons=reasons,
         flatten_reasons=reasons if scope is RiskExecutionScope.RISK_REDUCING_ONLY else (),
-        source_timestamps=(("account", decided_at),),
+        source_timestamps=(
+            ("account", decided_at),
+            ("reconciliation", decided_at),
+        ),
         latch_state_hash=sha256_hex(("latches",)),
         active_latches=(),
         required_latch_events=(),
@@ -94,16 +150,31 @@ def planning_request(
     prices: tuple[tuple[str, Decimal], ...] | None = None,
     forced_flat: bool = False,
     scope: RiskExecutionScope = RiskExecutionScope.FULL,
+    slot_id: str = f"slot_{'1' * 64}",
+    correlation_id: str = CORRELATION_ID,
+    buying_power: Decimal | None = None,
+    created_at: datetime = NOW,
+    deadline_at: datetime = DEADLINE,
 ) -> ExecutionPlanningRequest:
     selected_prices = prices or tuple((symbol, Decimal("100")) for symbol, _ in target_weights)
     return ExecutionPlanningRequest(
-        risk_decision=risk_decision(target_weights, scope=scope),
+        risk_decision=risk_decision(
+            target_weights,
+            current=current,
+            prices=selected_prices,
+            equity=Decimal("1000"),
+            buying_power=buying_power,
+            scope=scope,
+            decided_at=created_at,
+            slot_id=slot_id,
+            correlation_id=correlation_id,
+        ),
         current_positions=tuple(Position(symbol, quantity) for symbol, quantity in current),
         reference_prices=selected_prices,
         equity=Decimal("1000"),
         target_version=1,
-        created_at=NOW,
-        deadline_at=DEADLINE,
+        created_at=created_at,
+        deadline_at=deadline_at,
         forced_flat=forced_flat,
     )
 

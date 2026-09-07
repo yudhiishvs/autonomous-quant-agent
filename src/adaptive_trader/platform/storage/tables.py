@@ -760,13 +760,20 @@ aqa_risk_decisions = Table(
         String(128),
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_signal_envelopes.signal_id"),
         nullable=False,
-        unique=True,
     ),
     Column(
         "experiment_hash",
         String(64),
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_experiments.experiment_hash"),
         nullable=False,
+    ),
+    Column("execution_stage", BigInteger, nullable=False, server_default="1"),
+    Column("preceding_reconciliation_id", String(128)),
+    UniqueConstraint("signal_id", "execution_stage", name="risk_signal_execution_stage"),
+    CheckConstraint(
+        "(execution_stage = 1 AND preceding_reconciliation_id IS NULL) OR "
+        "(execution_stage = 2 AND preceding_reconciliation_id IS NOT NULL)",
+        name="risk_execution_stage",
     ),
     Column("policy_id", String(64), nullable=False),
     Column("policy_version", BigInteger, nullable=False),
@@ -783,6 +790,10 @@ aqa_risk_decisions = Table(
     Column("approved_targets", json_value, nullable=False),
     Column("before_exposure", json_value, nullable=False),
     Column("after_exposure", json_value, nullable=False),
+    Column("account_snapshot", json_value, nullable=False),
+    Column("planning_positions", json_value, nullable=False),
+    Column("planning_prices", json_value, nullable=False),
+    Column("security_metadata", json_value, nullable=False),
     Column("source_timestamps", json_value, nullable=False),
     Column("active_latches", json_value, nullable=False),
     Column("required_latch_event_ids", json_value, nullable=False),
@@ -830,15 +841,28 @@ aqa_execution_plans = Table(
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_experiments.experiment_hash"),
         nullable=False,
     ),
+    Column("risk_decision_hash", String(64), nullable=False),
+    Column("correlation_id", String(128), nullable=False),
     Column("target_version", BigInteger, nullable=False),
     Column("forced_flat", Boolean, nullable=False),
     Column("targets", json_value, nullable=False),
+    Column("current_positions", json_value, nullable=False),
+    Column("reference_prices", json_value, nullable=False),
+    Column("equity", FiniteNumeric(38, 18), nullable=False),
     Column("created_at", UTCDateTime(), nullable=False),
+    Column("deadline_at", UTCDateTime(), nullable=False),
     Column("payload_hash", String(64), nullable=False),
     Column("signature", String(64), nullable=False),
-    Column("content_hash", String(64), nullable=False),
+    Column("content_hash", String(64), nullable=False, unique=True),
     UniqueConstraint("risk_decision_id", "target_version", name="execution_risk_target_version"),
-    CheckConstraint("target_version >= 1", name="execution_target_version_positive"),
+    CheckConstraint(
+        "target_version BETWEEN 1 AND 999999",
+        name="execution_target_version_range",
+    ),
+    CheckConstraint("created_at < deadline_at", name="execution_deadline_ordered"),
+    CheckConstraint("CAST(equity AS NUMERIC) > 0", name="execution_equity_positive"),
+    _finite_numeric_constraint("equity"),
+    _hash_constraint("risk_decision_hash"),
     _hash_constraint("payload_hash"),
     _hash_constraint("signature"),
     _hash_constraint("content_hash"),
@@ -855,20 +879,38 @@ aqa_order_intents = Table(
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_execution_plans.execution_plan_id"),
         nullable=False,
     ),
+    Column(
+        "risk_decision_id",
+        String(128),
+        ForeignKey(f"{PLATFORM_SCHEMA}.aqa_risk_decisions.risk_decision_id"),
+        nullable=False,
+    ),
+    Column(
+        "experiment_hash",
+        String(64),
+        ForeignKey(f"{PLATFORM_SCHEMA}.aqa_experiments.experiment_hash"),
+        nullable=False,
+    ),
+    Column("correlation_id", String(128), nullable=False),
     Column("client_order_id", String(48), nullable=False, unique=True),
     Column("symbol", String(10), nullable=False),
     Column("side", String(4), nullable=False),
-    Column("effect", String(8), nullable=False),
+    Column("effect", String(32), nullable=False),
     Column("phase", String(16), nullable=False),
     Column("sequence", Integer, nullable=False),
+    Column("target_version", BigInteger, nullable=False),
     Column("quantity", FiniteNumeric(38, 18), nullable=False),
     Column("notional", FiniteNumeric(38, 18), nullable=False),
     Column("reference_price", FiniteNumeric(38, 18), nullable=False),
+    Column("final_target_quantity", FiniteNumeric(38, 18), nullable=False),
+    Column("forced_flat", Boolean, nullable=False),
     Column("order_type", String(16), nullable=False),
     Column("time_in_force", String(16), nullable=False),
     Column("created_at", UTCDateTime(), nullable=False),
+    Column("deadline_at", UTCDateTime(), nullable=False),
+    Column("target_hash", String(64), nullable=False),
     Column("payload_hash", String(64), nullable=False),
-    Column("content_hash", String(64), nullable=False),
+    Column("content_hash", String(64), nullable=False, unique=True),
     UniqueConstraint(
         "execution_plan_id",
         "phase",
@@ -876,16 +918,66 @@ aqa_order_intents = Table(
         "symbol",
         name="order_plan_phase_sequence_symbol",
     ),
-    CheckConstraint("side IN ('buy', 'sell')", name="order_side"),
-    CheckConstraint("effect IN ('open', 'close', 'reduce')", name="order_effect"),
-    CheckConstraint("phase IN ('exit', 'entry', 'flatten')", name="order_phase"),
-    CheckConstraint("sequence >= 0", name="order_sequence_nonnegative"),
-    CheckConstraint(
-        "CAST(quantity AS NUMERIC) > 0 AND CAST(notional AS NUMERIC) >= 0 "
-        "AND CAST(reference_price AS NUMERIC) > 0",
-        name="order_numbers_valid",
+    UniqueConstraint(
+        "client_order_id",
+        "order_intent_id",
+        name="order_client_intent_identity",
     ),
-    _finite_numeric_constraint("quantity", "notional", "reference_price"),
+    CheckConstraint("side IN ('BUY', 'SELL')", name="order_side"),
+    CheckConstraint(
+        "effect IN ('OPEN_LONG', 'INCREASE_LONG', 'REDUCE_LONG', 'CLOSE_LONG', "
+        "'OPEN_SHORT', 'INCREASE_SHORT', 'REDUCE_SHORT', 'CLOSE_SHORT', "
+        "'FORCED_FLAT_LONG', 'FORCED_FLAT_SHORT')",
+        name="order_effect",
+    ),
+    CheckConstraint("phase IN ('EXIT', 'ENTRY', 'FLATTEN')", name="order_phase"),
+    CheckConstraint("sequence BETWEEN 0 AND 15", name="order_sequence_range"),
+    CheckConstraint(
+        "target_version BETWEEN 1 AND 999999",
+        name="order_target_version_range",
+    ),
+    CheckConstraint(
+        "CAST(quantity AS NUMERIC) > 0 AND CAST(notional AS NUMERIC) > 0 "
+        "AND CAST(reference_price AS NUMERIC) > 0 "
+        "AND CAST(notional AS NUMERIC) = "
+        "CAST(quantity AS NUMERIC) * CAST(reference_price AS NUMERIC)",
+        name="order_numbers_valid",
+    ).ddl_if(dialect="postgresql"),
+    # SQLite's NUMERIC cast uses binary floating-point and can reject an exact Decimal product.
+    # The immutable OrderIntent validates equality before persistence; SQLite still enforces the
+    # sign boundary here, while PostgreSQL's exact NUMERIC constraint remains authoritative.
+    CheckConstraint(
+        "CAST(quantity AS NUMERIC) > 0 AND CAST(notional AS NUMERIC) > 0 "
+        "AND CAST(reference_price AS NUMERIC) > 0",
+        name="order_numbers_positive",
+        info={"dialects": ("sqlite",)},
+    ).ddl_if(dialect="sqlite"),
+    CheckConstraint("order_type = 'MARKET'", name="order_type_market"),
+    CheckConstraint("time_in_force = 'DAY'", name="order_time_in_force_day"),
+    CheckConstraint("created_at < deadline_at", name="order_deadline_ordered"),
+    CheckConstraint(
+        "((effect IN ('OPEN_LONG', 'INCREASE_LONG') AND side = 'BUY' AND phase = 'ENTRY') "
+        "OR (effect IN ('OPEN_SHORT', 'INCREASE_SHORT') AND side = 'SELL' AND phase = 'ENTRY') "
+        "OR (effect IN ('REDUCE_LONG', 'CLOSE_LONG') AND side = 'SELL' AND phase = 'EXIT') "
+        "OR (effect IN ('REDUCE_SHORT', 'CLOSE_SHORT') AND side = 'BUY' AND phase = 'EXIT') "
+        "OR (effect = 'FORCED_FLAT_LONG' AND side = 'SELL' AND phase = 'FLATTEN') "
+        "OR (effect = 'FORCED_FLAT_SHORT' AND side = 'BUY' AND phase = 'FLATTEN'))",
+        name="order_effect_side_phase_consistent",
+    ),
+    CheckConstraint(
+        "((forced_flat AND phase = 'FLATTEN' AND "
+        "effect IN ('FORCED_FLAT_LONG', 'FORCED_FLAT_SHORT')) OR "
+        "(NOT forced_flat AND phase <> 'FLATTEN' AND "
+        "effect NOT IN ('FORCED_FLAT_LONG', 'FORCED_FLAT_SHORT')))",
+        name="order_forced_flat_consistent",
+    ),
+    _finite_numeric_constraint(
+        "quantity",
+        "notional",
+        "reference_price",
+        "final_target_quantity",
+    ),
+    _hash_constraint("target_hash"),
     _hash_constraint("payload_hash"),
     _hash_constraint("content_hash"),
     info={"append_only": True},
@@ -897,8 +989,13 @@ aqa_broker_orders = Table(
     Column(
         "client_order_id",
         String(48),
-        ForeignKey(f"{PLATFORM_SCHEMA}.aqa_order_intents.client_order_id"),
         primary_key=True,
+    ),
+    Column(
+        "order_intent_id",
+        String(128),
+        nullable=False,
+        unique=True,
     ),
     Column("broker_order_id", String(128), unique=True),
     Column("state", String(32), nullable=False),
@@ -912,8 +1009,10 @@ aqa_broker_orders = Table(
     Column("content_hash", String(64), nullable=False),
     Column("version", BigInteger, nullable=False),
     CheckConstraint(
-        "state IN ('planned', 'submitting', 'accepted', 'partially_filled', 'filled', "
-        "'cancel_pending', 'cancelled', 'rejected', 'expired', 'unknown')",
+        "state IN ('PLANNED', 'INTENT_COMMITTED', 'SUBMISSION_STARTED', 'SUBMITTED', "
+        "'ACCEPTED', 'PENDING', 'PARTIALLY_FILLED', 'FILLED', 'CANCEL_REQUESTED', "
+        "'CANCELED', 'REJECTED', 'EXPIRED', 'SUBMISSION_UNKNOWN', "
+        "'RECONCILIATION_REQUIRED')",
         name="broker_order_state",
     ),
     CheckConstraint(
@@ -921,8 +1020,28 @@ aqa_broker_orders = Table(
         name="broker_order_filled_nonnegative",
     ),
     CheckConstraint(
-        "average_fill_price IS NULL OR CAST(average_fill_price AS NUMERIC) > 0",
-        name="broker_order_average_positive",
+        "((CAST(cumulative_filled_quantity AS NUMERIC) = 0 "
+        "AND average_fill_price IS NULL) OR "
+        "(CAST(cumulative_filled_quantity AS NUMERIC) > 0 "
+        "AND CAST(average_fill_price AS NUMERIC) > 0))",
+        name="broker_order_average_consistent",
+    ),
+    CheckConstraint(
+        "accepted_at IS NULL OR (submitted_at IS NOT NULL AND accepted_at >= submitted_at)",
+        name="broker_order_acceptance_ordered",
+    ),
+    CheckConstraint(
+        "submitted_at IS NULL OR submitted_at <= updated_at",
+        name="broker_order_submission_ordered",
+    ),
+    CheckConstraint(
+        "accepted_at IS NULL OR accepted_at <= updated_at",
+        name="broker_order_update_ordered",
+    ),
+    CheckConstraint(
+        "state <> 'INTENT_COMMITTED' OR "
+        "(broker_order_id IS NULL AND submitted_at IS NULL AND accepted_at IS NULL)",
+        name="broker_order_committed_clean",
     ),
     _finite_numeric_constraint(
         "cumulative_filled_quantity",
@@ -931,8 +1050,21 @@ aqa_broker_orders = Table(
     ),
     CheckConstraint("last_event_sequence >= 0", name="broker_order_event_sequence_nonnegative"),
     CheckConstraint("version >= 1", name="broker_order_version_positive"),
+    ForeignKeyConstraint(
+        ["client_order_id", "order_intent_id"],
+        [
+            f"{PLATFORM_SCHEMA}.aqa_order_intents.client_order_id",
+            f"{PLATFORM_SCHEMA}.aqa_order_intents.order_intent_id",
+        ],
+        name="broker_order_intent_identity",
+    ),
     _hash_constraint("content_hash"),
     info={"state": True},
+)
+Index(
+    "ix_aqa_broker_orders_state_updated",
+    aqa_broker_orders.c.state,
+    aqa_broker_orders.c.updated_at,
 )
 
 aqa_order_events = Table(
@@ -946,18 +1078,38 @@ aqa_order_events = Table(
         nullable=False,
     ),
     Column("sequence", BigInteger, nullable=False),
-    Column("from_state", String(32)),
+    Column("from_state", String(32), nullable=False),
     Column("to_state", String(32), nullable=False),
     Column("broker_event_id", String(128), unique=True),
     Column("occurred_at", UTCDateTime(), nullable=False),
+    Column("safe_error_code", String(64)),
     Column("payload", json_value, nullable=False),
     Column("payload_hash", String(64), nullable=False),
     Column("content_hash", String(64), nullable=False),
     UniqueConstraint("client_order_id", "sequence", name="order_event_sequence"),
     CheckConstraint("sequence >= 1", name="order_event_sequence_positive"),
+    CheckConstraint(
+        "from_state IN ('PLANNED', 'INTENT_COMMITTED', 'SUBMISSION_STARTED', 'SUBMITTED', "
+        "'ACCEPTED', 'PENDING', 'PARTIALLY_FILLED', 'FILLED', 'CANCEL_REQUESTED', "
+        "'CANCELED', 'REJECTED', 'EXPIRED', 'SUBMISSION_UNKNOWN', "
+        "'RECONCILIATION_REQUIRED')",
+        name="order_event_from_state",
+    ),
+    CheckConstraint(
+        "to_state IN ('PLANNED', 'INTENT_COMMITTED', 'SUBMISSION_STARTED', 'SUBMITTED', "
+        "'ACCEPTED', 'PENDING', 'PARTIALLY_FILLED', 'FILLED', 'CANCEL_REQUESTED', "
+        "'CANCELED', 'REJECTED', 'EXPIRED', 'SUBMISSION_UNKNOWN', "
+        "'RECONCILIATION_REQUIRED')",
+        name="order_event_to_state",
+    ),
     _hash_constraint("payload_hash"),
     _hash_constraint("content_hash"),
     info={"append_only": True},
+)
+Index(
+    "ix_aqa_order_events_client_sequence",
+    aqa_order_events.c.client_order_id,
+    aqa_order_events.c.sequence,
 )
 
 aqa_fills = Table(
@@ -979,7 +1131,7 @@ aqa_fills = Table(
     Column("occurred_at", UTCDateTime(), nullable=False),
     Column("payload_hash", String(64), nullable=False),
     Column("content_hash", String(64), nullable=False),
-    CheckConstraint("side IN ('buy', 'sell')", name="fill_side"),
+    CheckConstraint("side IN ('BUY', 'SELL')", name="fill_side"),
     CheckConstraint(
         "CAST(quantity AS NUMERIC) > 0 AND CAST(price AS NUMERIC) > 0 "
         "AND CAST(fee AS NUMERIC) >= 0",
@@ -989,6 +1141,11 @@ aqa_fills = Table(
     _hash_constraint("payload_hash"),
     _hash_constraint("content_hash"),
     info={"append_only": True},
+)
+Index(
+    "ix_aqa_fills_client_occurred",
+    aqa_fills.c.client_order_id,
+    aqa_fills.c.occurred_at,
 )
 
 aqa_reconciliations = Table(
@@ -1007,23 +1164,57 @@ aqa_reconciliations = Table(
         String(128),
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_execution_plans.execution_plan_id"),
     ),
+    Column("correlation_id", String(128), nullable=False),
     Column("account_id_hash", String(64), nullable=False),
+    Column("account_observed_at", UTCDateTime(), nullable=False),
     Column("started_at", UTCDateTime(), nullable=False),
     Column("completed_at", UTCDateTime(), nullable=False),
     Column("status", String(16), nullable=False),
-    Column("blocking", Boolean, nullable=False),
-    Column("positions", json_value, nullable=False),
-    Column("orders", json_value, nullable=False),
+    Column("expected_positions", json_value, nullable=False),
+    Column("observed_positions", json_value, nullable=False),
+    Column("expected_cash", FiniteNumeric(38, 18), nullable=False),
+    Column("observed_cash", FiniteNumeric(38, 18), nullable=False),
+    Column("expected_equity", FiniteNumeric(38, 18), nullable=False),
+    Column("observed_equity", FiniteNumeric(38, 18), nullable=False),
+    Column("mark_prices", json_value, nullable=False),
+    Column("fill_hashes", json_value, nullable=False),
+    Column("order_hashes", json_value, nullable=False),
+    Column("require_flat", Boolean, nullable=False),
+    Column("required_flat_at", UTCDateTime()),
     Column("discrepancies", json_value, nullable=False),
     Column("payload_hash", String(64), nullable=False),
-    Column("content_hash", String(64), nullable=False),
+    Column("content_hash", String(64), nullable=False, unique=True),
     CheckConstraint("started_at <= completed_at", name="reconciliation_times_ordered"),
-    CheckConstraint("status IN ('clean', 'blocking')", name="reconciliation_status"),
-    CheckConstraint("(status = 'blocking') = blocking", name="reconciliation_blocking_consistent"),
+    CheckConstraint(
+        "started_at <= account_observed_at AND account_observed_at <= completed_at",
+        name="reconciliation_account_time",
+    ),
+    CheckConstraint(
+        "(require_flat AND required_flat_at IS NOT NULL) OR "
+        "(NOT require_flat AND required_flat_at IS NULL)",
+        name="reconciliation_flat_deadline_consistent",
+    ),
+    CheckConstraint("status IN ('CLEAN', 'BLOCKING')", name="reconciliation_status"),
+    _finite_numeric_constraint(
+        "expected_cash",
+        "observed_cash",
+        "expected_equity",
+        "observed_equity",
+    ),
     _hash_constraint("account_id_hash"),
     _hash_constraint("payload_hash"),
     _hash_constraint("content_hash"),
     info={"append_only": True},
+)
+Index(
+    "ix_aqa_reconciliations_experiment_completed",
+    aqa_reconciliations.c.experiment_hash,
+    aqa_reconciliations.c.completed_at,
+)
+Index(
+    "ix_aqa_reconciliations_status_completed",
+    aqa_reconciliations.c.status,
+    aqa_reconciliations.c.completed_at,
 )
 
 aqa_incidents = Table(
@@ -1035,7 +1226,9 @@ aqa_incidents = Table(
         "experiment_hash",
         String(64),
         ForeignKey(f"{PLATFORM_SCHEMA}.aqa_experiments.experiment_hash"),
+        nullable=False,
     ),
+    Column("correlation_id", String(128), nullable=False),
     Column("incident_type", String(64), nullable=False),
     Column("severity", String(16), nullable=False),
     Column("status", String(16), nullable=False),
@@ -1043,7 +1236,7 @@ aqa_incidents = Table(
     Column("details", json_value, nullable=False),
     Column("opened_at", UTCDateTime(), nullable=False),
     Column("resolved_at", UTCDateTime()),
-    Column("content_hash", String(64), nullable=False),
+    Column("content_hash", String(64), nullable=False, unique=True),
     Column("version", BigInteger, nullable=False),
     CheckConstraint(
         "severity IN ('info', 'warning', 'error', 'critical')", name="incident_severity"
@@ -1064,60 +1257,142 @@ aqa_jobs = Table(
     metadata,
     Column("job_id", String(128), primary_key=True),
     Column("job_type", String(32), nullable=False),
-    Column("idempotency_key", String(128), nullable=False),
-    Column("state", String(16), nullable=False),
+    Column("schema_version", Integer, nullable=False),
     Column("payload", json_value, nullable=False),
-    Column("result", json_value),
-    Column("lease_owner", String(128)),
-    Column("lease_expires_at", UTCDateTime()),
+    Column("payload_hash", String(64), nullable=False),
+    Column("idempotency_key", String(128), nullable=False),
+    Column("correlation_id", String(128), nullable=False),
+    Column("state", String(16), nullable=False),
     Column("attempt_count", Integer, nullable=False),
     Column("max_attempts", Integer, nullable=False),
     Column("next_attempt_at", UTCDateTime()),
-    Column("safe_error_code", String(64)),
-    Column("content_hash", String(64), nullable=False),
-    Column("version", BigInteger, nullable=False),
+    Column("lease_owner", String(128)),
+    Column("lease_expires_at", UTCDateTime()),
+    Column("claimed_at", UTCDateTime()),
+    Column("started_at", UTCDateTime()),
+    Column("completed_at", UTCDateTime()),
+    Column("safe_last_error_code", String(64)),
+    Column("safe_last_error_message", String(256)),
+    Column("result_artifact_id", String(128)),
     Column("created_at", UTCDateTime(), nullable=False),
     Column("updated_at", UTCDateTime(), nullable=False),
+    Column("content_hash", String(64), nullable=False),
+    Column("version", BigInteger, nullable=False),
     UniqueConstraint("job_type", "idempotency_key", name="job_type_idempotency"),
     CheckConstraint(
-        "state IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')", name="job_state"
+        "job_type IN ('DATA_QUALITY_AUDIT', 'GAP_REPAIR', 'DATASET_FREEZE', 'OFFLINE_DEMO')",
+        name="job_type_allowlist",
     ),
     CheckConstraint(
-        "((state = 'running' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL) "
-        "OR (state <> 'running' AND lease_owner IS NULL AND lease_expires_at IS NULL))",
-        name="job_lease_consistent",
+        "state IN ('PENDING', 'CLAIMED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'DEAD', 'CANCELED')",
+        name="job_state",
     ),
-    CheckConstraint("attempt_count >= 0", name="job_attempts_nonnegative"),
+    CheckConstraint("schema_version = 1", name="job_schema_version"),
+    CheckConstraint("attempt_count BETWEEN 0 AND 3", name="job_attempt_count"),
     CheckConstraint("max_attempts = 3", name="job_max_attempts"),
     CheckConstraint("version >= 1", name="job_version_positive"),
+    CheckConstraint("updated_at >= created_at", name="job_timestamps_monotonic"),
+    CheckConstraint(
+        "next_attempt_at IS NULL OR next_attempt_at >= updated_at",
+        name="job_retry_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "lease_expires_at IS NULL OR lease_expires_at > updated_at",
+        name="job_lease_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "claimed_at IS NULL OR (claimed_at >= created_at AND claimed_at <= updated_at)",
+        name="job_claim_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "started_at IS NULL OR (started_at >= claimed_at AND started_at <= updated_at)",
+        name="job_start_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "completed_at IS NULL OR completed_at = updated_at",
+        name="job_completion_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "((state IN ('CLAIMED', 'RUNNING') AND lease_owner IS NOT NULL "
+        "AND lease_expires_at IS NOT NULL AND claimed_at IS NOT NULL) OR "
+        "(state NOT IN ('CLAIMED', 'RUNNING') AND lease_owner IS NULL "
+        "AND lease_expires_at IS NULL AND claimed_at IS NULL))",
+        name="job_lease_consistent",
+    ),
+    CheckConstraint(
+        "((state = 'RUNNING' AND started_at IS NOT NULL) OR "
+        "(state <> 'RUNNING' AND started_at IS NULL))",
+        name="job_started_consistent",
+    ),
+    CheckConstraint(
+        "((state IN ('SUCCEEDED', 'DEAD', 'CANCELED') AND completed_at IS NOT NULL) OR "
+        "(state NOT IN ('SUCCEEDED', 'DEAD', 'CANCELED') AND completed_at IS NULL))",
+        name="job_completed_consistent",
+    ),
+    CheckConstraint(
+        "((state IN ('PENDING', 'FAILED') AND next_attempt_at IS NOT NULL) OR "
+        "(state NOT IN ('PENDING', 'FAILED') AND next_attempt_at IS NULL))",
+        name="job_retry_time_consistent",
+    ),
+    CheckConstraint(
+        "((safe_last_error_code IS NULL) = (safe_last_error_message IS NULL))",
+        name="job_error_pair",
+    ),
+    CheckConstraint(
+        "result_artifact_id IS NULL OR "
+        "(result_artifact_id NOT LIKE '%/%' AND result_artifact_id NOT LIKE '%..%')",
+        name="job_result_artifact_shape",
+    ),
+    _hash_constraint("payload_hash"),
     _hash_constraint("content_hash"),
-    info={"state": True},
+    info={"state": True, "monotonic_column": "version"},
 )
-Index("ix_aqa_jobs_claim", aqa_jobs.c.state, aqa_jobs.c.next_attempt_at, aqa_jobs.c.created_at)
+Index(
+    "ix_aqa_jobs_claim",
+    aqa_jobs.c.state,
+    aqa_jobs.c.next_attempt_at,
+    aqa_jobs.c.created_at,
+    aqa_jobs.c.job_id,
+)
 
 aqa_job_attempts = Table(
     "aqa_job_attempts",
     metadata,
-    Column("job_attempt_id", String(128), primary_key=True),
+    Column("job_attempt_event_id", String(128), primary_key=True),
     Column("job_id", String(128), ForeignKey(f"{PLATFORM_SCHEMA}.aqa_jobs.job_id"), nullable=False),
     Column("attempt_number", Integer, nullable=False),
+    Column("sequence", Integer, nullable=False),
+    Column("transition", String(16), nullable=False),
     Column("owner", String(128), nullable=False),
-    Column("started_at", UTCDateTime(), nullable=False),
-    Column("completed_at", UTCDateTime()),
-    Column("outcome", String(16)),
+    Column("occurred_at", UTCDateTime(), nullable=False),
+    Column("lease_expires_at", UTCDateTime()),
     Column("safe_error_code", String(64)),
+    Column("safe_error_message", String(256)),
     Column("content_hash", String(64), nullable=False),
-    UniqueConstraint("job_id", "attempt_number", name="job_attempt_number"),
-    CheckConstraint("attempt_number >= 1", name="job_attempt_number_positive"),
+    UniqueConstraint("job_id", "attempt_number", "sequence", name="job_attempt_sequence"),
+    CheckConstraint("attempt_number BETWEEN 1 AND 3", name="job_attempt_number"),
+    CheckConstraint("sequence BETWEEN 1 AND 4", name="job_attempt_event_sequence"),
     CheckConstraint(
-        "outcome IS NULL OR outcome IN ('succeeded', 'failed', 'abandoned')",
-        name="job_attempt_outcome",
+        "transition IN ('CLAIMED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'ABANDONED')",
+        name="job_attempt_transition",
     ),
     CheckConstraint(
-        "completed_at IS NULL OR completed_at >= started_at", name="job_attempt_times_ordered"
+        "((transition = 'CLAIMED' AND lease_expires_at IS NOT NULL) OR "
+        "(transition <> 'CLAIMED' AND lease_expires_at IS NULL))",
+        name="job_attempt_lease_consistent",
+    ),
+    CheckConstraint(
+        "((safe_error_code IS NULL) = (safe_error_message IS NULL))",
+        name="job_attempt_error_pair",
     ),
     _hash_constraint("content_hash"),
     info={"append_only": True},
+)
+Index(
+    "ix_aqa_job_attempts_job_attempt",
+    aqa_job_attempts.c.job_id,
+    aqa_job_attempts.c.attempt_number,
+    aqa_job_attempts.c.sequence,
 )
 
 aqa_outbox_events = Table(
@@ -1125,31 +1400,79 @@ aqa_outbox_events = Table(
     metadata,
     Column("outbox_event_id", String(128), primary_key=True),
     Column("aggregate_type", String(32), nullable=False),
-    Column("aggregate_id", String(128), nullable=False),
+    Column(
+        "aggregate_id",
+        String(128),
+        ForeignKey(f"{PLATFORM_SCHEMA}.aqa_jobs.job_id"),
+        nullable=False,
+    ),
     Column("event_type", String(64), nullable=False),
+    Column("schema_version", Integer, nullable=False),
     Column("payload", json_value, nullable=False),
     Column("payload_hash", String(64), nullable=False),
     Column("state", String(16), nullable=False),
     Column("attempt_count", Integer, nullable=False),
     Column("next_attempt_at", UTCDateTime()),
+    Column("lease_owner", String(128)),
+    Column("lease_expires_at", UTCDateTime()),
     Column("published_at", UTCDateTime()),
-    Column("content_hash", String(64), nullable=False),
-    Column("version", BigInteger, nullable=False),
+    Column("safe_last_error_code", String(64)),
+    Column("safe_last_error_message", String(256)),
     Column("created_at", UTCDateTime(), nullable=False),
     Column("updated_at", UTCDateTime(), nullable=False),
-    CheckConstraint("state IN ('pending', 'published', 'failed')", name="outbox_state"),
-    CheckConstraint("attempt_count >= 0", name="outbox_attempts_nonnegative"),
-    CheckConstraint("version >= 1", name="outbox_version_positive"),
+    Column("content_hash", String(64), nullable=False),
+    Column("version", BigInteger, nullable=False),
+    CheckConstraint("aggregate_type = 'job'", name="outbox_aggregate_type"),
+    CheckConstraint("schema_version = 1", name="outbox_schema_version"),
     CheckConstraint(
-        "(state = 'published' AND published_at IS NOT NULL) OR "
-        "(state <> 'published' AND published_at IS NULL)",
+        "state IN ('PENDING', 'CLAIMED', 'PUBLISHED', 'FAILED', 'DEAD')",
+        name="outbox_state",
+    ),
+    CheckConstraint("attempt_count BETWEEN 0 AND 3", name="outbox_attempt_count"),
+    CheckConstraint("version >= 1", name="outbox_version_positive"),
+    CheckConstraint("updated_at >= created_at", name="outbox_timestamps_monotonic"),
+    CheckConstraint(
+        "next_attempt_at IS NULL OR next_attempt_at >= updated_at",
+        name="outbox_retry_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "lease_expires_at IS NULL OR lease_expires_at > updated_at",
+        name="outbox_lease_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "published_at IS NULL OR published_at = updated_at",
+        name="outbox_publish_timestamp_monotonic",
+    ),
+    CheckConstraint(
+        "((state = 'CLAIMED' AND lease_owner IS NOT NULL AND lease_expires_at IS NOT NULL) OR "
+        "(state <> 'CLAIMED' AND lease_owner IS NULL AND lease_expires_at IS NULL))",
+        name="outbox_lease_consistent",
+    ),
+    CheckConstraint(
+        "((state = 'PUBLISHED' AND published_at IS NOT NULL) OR "
+        "(state <> 'PUBLISHED' AND published_at IS NULL))",
         name="outbox_publication_consistent",
+    ),
+    CheckConstraint(
+        "((state IN ('PENDING', 'FAILED') AND next_attempt_at IS NOT NULL) OR "
+        "(state NOT IN ('PENDING', 'FAILED') AND next_attempt_at IS NULL))",
+        name="outbox_retry_time_consistent",
+    ),
+    CheckConstraint(
+        "((safe_last_error_code IS NULL) = (safe_last_error_message IS NULL))",
+        name="outbox_error_pair",
     ),
     _hash_constraint("payload_hash"),
     _hash_constraint("content_hash"),
-    info={"state": True},
+    info={"state": True, "monotonic_column": "version"},
 )
-Index("ix_aqa_outbox_delivery", aqa_outbox_events.c.state, aqa_outbox_events.c.next_attempt_at)
+Index(
+    "ix_aqa_outbox_delivery",
+    aqa_outbox_events.c.state,
+    aqa_outbox_events.c.next_attempt_at,
+    aqa_outbox_events.c.created_at,
+    aqa_outbox_events.c.outbox_event_id,
+)
 
 aqa_audit_events = Table(
     "aqa_audit_events",

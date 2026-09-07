@@ -46,7 +46,7 @@ _SOURCE_PRECEDENCE = {
     "historical_reconciliation": 40,
 }
 
-_LOCAL_DATABASE_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_LOCAL_DATABASE_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "postgres"})
 _CONNECTION_ROUTING_QUERY_KEYS = frozenset(
     {"dbname", "host", "hostaddr", "password", "port", "service", "servicefile", "user"}
 )
@@ -106,7 +106,7 @@ def normalize_postgres_url(value: str) -> URL:
     if host not in _LOCAL_DATABASE_HOSTS and ssl_mode != "verify-full":
         raise ValueError(
             "APA_MARKET_DATA_DATABASE_URL must use sslmode=verify-full for a "
-            "non-loopback PostgreSQL host"
+            "non-local PostgreSQL host"
         )
     return url
 
@@ -205,7 +205,11 @@ class PostgresMarketDataRepository:
         *,
         pool_size: int = 5,
         application_name: str = "adaptive-market-data",
+        canonical: bool = False,
     ) -> None:
+        if type(canonical) is not bool:
+            raise TypeError("canonical collection selection must be boolean")
+        self.canonical = canonical
         url = normalize_postgres_url(database_url)
         self.engine: Engine = create_engine(
             url,
@@ -254,6 +258,8 @@ class PostgresMarketDataRepository:
                 "data_gaps",
                 "ingestion_runs",
             }
+            if self.canonical:
+                required.add("canonical_work")
         except Exception as exc:
             raise CollectionPersistenceError(
                 "Unable to connect to the market-data database"
@@ -763,6 +769,15 @@ class PostgresMarketDataRepository:
                 inserted_rows = []
                 inserted_identity_hashes = set()
                 existing_identities = set()
+            if self.canonical:
+                from adaptive_trader.collection.canonical import mirror_current
+
+                mirror_current(
+                    connection,
+                    self.engine,
+                    tuple(inserted_identity_hashes),
+                    coverage_advances,
+                )
             advanced = self._advance_checkpoints(
                 connection,
                 coverage_advances,
@@ -784,6 +799,41 @@ class PostgresMarketDataRepository:
             current_rows_revised=revised_current,
             checkpoints_advanced=advanced,
         )
+
+    def rebuild_canonical_batch(
+        self,
+        *,
+        lease: LeaseToken,
+        after_identity_hash: str | None = None,
+        limit: int = 750,
+    ) -> tuple[int, str | None]:
+        """Mirror one existing projection page under the active collector's lease lock."""
+
+        from adaptive_trader.collection.canonical import rebuild_current_batch
+
+        with self.engine.begin() as connection:
+            self._verify_lease(connection, lease)
+            return rebuild_current_batch(
+                connection,
+                self.engine,
+                after_identity_hash=after_identity_hash,
+                limit=limit,
+            )
+
+    def validate_ownership(self, connection: Connection, *, lease: LeaseToken) -> None:
+        """Lock and verify current ownership inside a derived worker's shared transaction."""
+
+        # OptionEngine shares this pool. SQLAlchemy's ``begin`` event fires before
+        # ``in_transaction`` flips, although statements inside the event execute
+        # within that transaction. The derived fence deliberately runs there.
+        if connection.engine.pool is not self.engine.pool or (
+            not connection.in_transaction()
+            and not connection.get_execution_options().get("aqa_derived_transaction")
+        ):
+            raise CollectionPersistenceError(
+                "collector ownership check requires its active database transaction"
+            )
+        self._verify_lease(connection, lease)
 
     def checkpoints(self, *, checkpoint_name: str) -> dict[str, Checkpoint]:
         with self.engine.connect() as connection:

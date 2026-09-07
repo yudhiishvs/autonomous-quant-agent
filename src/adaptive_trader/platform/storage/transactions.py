@@ -25,11 +25,16 @@ _SUPPORTED_DIALECTS = frozenset({"postgresql", "sqlite"})
 class PostgresAdvisoryLockNamespace(IntEnum):
     """Global acquisition order for platform transaction-scoped advisory locks."""
 
+    EXPERIMENT = 5
     MARKET_DATA_WATERMARK = 10
     MARKET_DATA_IDENTITY = 20
     DATASET_MANIFEST = 30
     RISK_SIGNAL = 40
     RISK_LATCH = 50
+    EXECUTION_EXPERIMENT = 55
+    EXECUTION_PLAN = 60
+    ORDER_CLIENT_ID = 70
+    RECONCILIATION = 80
     AUDIT = 90
 
 

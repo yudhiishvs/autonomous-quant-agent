@@ -976,7 +976,8 @@ def _decode_and_load_yaml(payload: bytes) -> dict[str, object]:
     loaded: object = None
     try:
         _inspect_yaml(text)
-        loaded = yaml.load(text, Loader=_UniqueKeySafeLoader)
+        # This closed loader subclasses SafeLoader; the bounded event pass rejects aliases first.
+        loaded = yaml.load(text, Loader=_UniqueKeySafeLoader)  # nosec B506
     except ExperimentConfigError:
         raise
     except (OverflowError, RecursionError, TypeError, ValueError, yaml.YAMLError):
@@ -1094,6 +1095,7 @@ class RuntimeService(StrEnum):
 
     MIGRATE = "migrate"
     CONTROL_API = "control-api"
+    JOB_WORKER = "job-worker"
     MARKET_DATA_WORKER = "market-data-worker"
     SCHEDULER_WORKER = "scheduler-worker"
     STRATEGY_WORKER = "strategy-worker"
@@ -1128,6 +1130,12 @@ _FORBIDDEN_ALPACA_VARIABLES = frozenset(
         "ALPACA_SECRET_KEY",
     }
 )
+_LEGACY_RAW_DATA_VARIABLES = frozenset(
+    {
+        "APA_ALPACA_DATA_API_KEY",
+        "APA_ALPACA_DATA_SECRET_KEY",
+    }
+)
 _RUNTIME_DEFAULTS = {
     "AQA_CONFIG": "configs/platform/offline.yaml",
     "AQA_ARTIFACT_ROOT": "outputs/artifacts",
@@ -1141,6 +1149,7 @@ _SERVICE_SECRET_SOURCES = {
     RuntimeService.CONTROL_API: frozenset(
         {SecretFileVariable.DATABASE_URL, SecretFileVariable.OPERATOR_TOKEN}
     ),
+    RuntimeService.JOB_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.MARKET_DATA_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.SCHEDULER_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.STRATEGY_WORKER: frozenset({SecretFileVariable.DATABASE_URL}),
@@ -1166,6 +1175,7 @@ _SERVICE_SECRET_SOURCES = {
 _SERVICE_BASE_REQUIRED_SOURCES = {
     RuntimeService.MIGRATE: frozenset({SecretFileVariable.DATABASE_URL}),
     RuntimeService.CONTROL_API: frozenset({SecretFileVariable.OPERATOR_TOKEN}),
+    RuntimeService.JOB_WORKER: frozenset(),
     RuntimeService.MARKET_DATA_WORKER: frozenset(),
     RuntimeService.SCHEDULER_WORKER: frozenset(),
     RuntimeService.STRATEGY_WORKER: frozenset(),
@@ -1189,6 +1199,7 @@ _SERVICE_BASE_REQUIRED_SOURCES = {
 _SERVICE_MODES = {
     RuntimeService.MIGRATE: frozenset(ExecutionMode),
     RuntimeService.CONTROL_API: frozenset(ExecutionMode),
+    RuntimeService.JOB_WORKER: frozenset(ExecutionMode),
     RuntimeService.MARKET_DATA_WORKER: frozenset({ExecutionMode.OFFLINE}),
     RuntimeService.SCHEDULER_WORKER: frozenset(ExecutionMode),
     RuntimeService.STRATEGY_WORKER: frozenset(ExecutionMode),
@@ -1490,6 +1501,8 @@ def _runtime_environment_snapshot(
     key_set = frozenset(string_keys)
     if key_set & _FORBIDDEN_ALPACA_VARIABLES:
         raise RuntimeSettingsError("forbidden generic Alpaca environment variable is present")
+    if service is RuntimeService.MARKET_DATA_LIVE and key_set & _LEGACY_RAW_DATA_VARIABLES:
+        raise RuntimeSettingsError("legacy raw Alpaca data variable is present")
     known_variables = frozenset(_NONSECRET_RUNTIME_VARIABLES) | frozenset(
         source.value for source in SecretFileVariable
     )

@@ -25,6 +25,7 @@ from adaptive_trader.collection.repository import (
 from adaptive_trader.collection.service import (
     CollectorService,
     CollectorServiceConfig,
+    HistoricalRepairWindow,
     _session_windows,
     completed_bar_cutoff,
 )
@@ -1028,3 +1029,209 @@ def test_request_stop_unblocks_live_source_finishes_run_and_releases_lease() -> 
     assert live.stop_calls >= 1
     assert repository.finished_runs[-1]["status"] == "stopped"
     assert len(repository.release_calls) == 1
+
+
+def test_preparation_failure_prevents_provider_access_and_releases_ownership() -> None:
+    repository = FakeRepository()
+    historical = FakeHistoricalSource()
+
+    def prepare(run_id: str) -> None:
+        assert run_id == repository.started_runs[0][0]
+        service.require_active_lease()
+        raise LeaseLostError("synthetic replay lease loss")
+
+    service = CollectorService(repository, historical, clock=lambda: NOW, prepare=prepare)
+    with pytest.raises(LeaseLostError):
+        service.backfill(start=SESSION_OPEN, end=SESSION_CLOSE)
+    assert historical.calls == []
+    assert repository.finished_runs[-1]["status"] == "failed"
+    assert len(repository.release_calls) == 1
+
+
+def test_backfill_remains_owned_until_durable_derived_work_has_drained() -> None:
+    repository = FakeRepository()
+    historical = FakeHistoricalSource((_observation(),))
+    work = [2, 1, 0]
+
+    def drain() -> int:
+        service.require_active_lease()
+        assert repository.observations
+        assert repository.finished_runs == []
+        return work.pop(0)
+
+    service = CollectorService(repository, historical, clock=lambda: NOW, maintenance=drain)
+    service.backfill(start=SESSION_OPEN, end=SESSION_CLOSE)
+    assert work == []
+    assert repository.finished_runs[-1]["status"] == "completed"
+    with pytest.raises(LeaseLostError):
+        service.require_active_lease()
+
+
+@pytest.mark.parametrize("size", [0, -1, 1001])
+def test_canonical_database_batches_reject_unsafe_bounds(size: int) -> None:
+    with pytest.raises(ValueError, match="database_batch_size"):
+        CollectorServiceConfig(database_batch_size=size)
+
+
+def test_collect_once_resumes_missed_sessions_with_overlap_without_starting_stream() -> None:
+    repository = FakeRepository()
+    prior_close = SESSION_CLOSE - timedelta(days=1)
+    repository.seed_coverage(prior_close)
+    historical = FakeHistoricalSource((_observation(),))
+    stream = FakeLiveSource()
+    service = CollectorService(repository, historical, stream, clock=lambda: NOW)
+    result = service.collect_once(history_start=SESSION_OPEN - timedelta(days=1))
+    assert historical.calls[0]["start"] == prior_close - timedelta(minutes=5)
+    assert historical.calls[-1]["end"] == SESSION_CLOSE
+    assert stream.run_calls == []
+    assert result["observations_inserted"] == 1
+    assert all(
+        checkpoint.committed_through_utc == completed_bar_cutoff(NOW, lag_minutes=2)
+        for checkpoint in repository.checkpoint_rows.values()
+    )
+    assert repository.finished_runs[-1]["status"] == "completed"
+    assert len(repository.release_calls) == 1
+
+
+def test_collect_once_clamps_overlap_to_immutable_history_scope() -> None:
+    repository = FakeRepository()
+    start = SESSION_OPEN + timedelta(minutes=12)
+    repository.seed_coverage(start + timedelta(minutes=1))
+    historical = FakeHistoricalSource()
+    CollectorService(repository, historical, clock=lambda: NOW).collect_once(history_start=start)
+    assert historical.calls[0]["start"] == start
+
+
+def test_collect_once_closed_market_replay_does_not_contact_provider() -> None:
+    repository = FakeRepository()
+    sunday = datetime(2026, 9, 6, 16, 0, tzinfo=UTC)
+    repository.seed_coverage(sunday - timedelta(minutes=5))
+    historical = FakeHistoricalSource()
+    CollectorService(repository, historical, clock=lambda: sunday).collect_once(
+        history_start=SESSION_OPEN
+    )
+    assert historical.calls == []
+    assert repository.finished_runs[-1]["status"] == "completed"
+
+
+def test_collect_once_repairs_one_durable_old_gap_and_drains_before_release() -> None:
+    repository = FakeRepository()
+    repository.seed_coverage(SESSION_CLOSE)
+    old_minute = SESSION_OPEN - timedelta(days=1)
+    window = HistoricalRepairWindow("old_gap", old_minute, old_minute + timedelta(minutes=1))
+    historical = FakeHistoricalSource((_observation(timestamp=old_minute),))
+    drains: list[int] = []
+    selected: list[str] = []
+
+    def drain() -> int:
+        service.require_active_lease()
+        assert repository.finished_runs == []
+        drains.append(len(repository.observations))
+        return 0
+
+    def repair() -> HistoricalRepairWindow:
+        selected.append(window.gap_id)
+        return window
+
+    service = CollectorService(
+        repository, historical, clock=lambda: NOW, maintenance=drain, repair_window=repair
+    )
+    service.collect_once(history_start=old_minute)
+    assert selected == ["old_gap"]
+    assert historical.calls[-1]["start"] == old_minute
+    assert historical.calls[-1]["source"] == "historical_reconciliation"
+    assert drains == [0, 0, 1]
+    assert repository.finished_runs[-1]["status"] == "completed"
+
+
+@pytest.mark.parametrize("failure_phase", ["checkpoint", "derived"])
+def test_collect_once_recovers_persisted_state_after_partial_failure(failure_phase: str) -> None:
+    class FailingRepository(FakeRepository):
+        reject_coverage = failure_phase == "checkpoint"
+
+        def append_batch(
+            self,
+            observations: Sequence[RawBarObservationV1],
+            *,
+            lease: LeaseToken,
+            coverage_advances: Sequence[CoverageAdvance] = (),
+        ) -> BatchResult:
+            if coverage_advances and self.reject_coverage:
+                self.reject_coverage = False
+                raise RuntimeError("injected checkpoint failure")
+            return super().append_batch(
+                observations, lease=lease, coverage_advances=coverage_advances
+            )
+
+    repository = FailingRepository()
+    historical = FakeHistoricalSource((_observation(),))
+
+    def fail_derived() -> int:
+        if failure_phase == "derived" and repository.observations:
+            raise RuntimeError("injected derived failure")
+        return 0
+
+    with pytest.raises(RuntimeError, match="injected"):
+        CollectorService(
+            repository, historical, clock=lambda: NOW, maintenance=fail_derived
+        ).collect_once(history_start=SESSION_OPEN)
+    assert len(repository.observations) == 1
+    assert repository.finished_runs[-1]["status"] == "failed"
+    assert len(repository.release_calls) == 1
+    result = CollectorService(repository, historical, clock=lambda: NOW).collect_once(
+        history_start=SESSION_OPEN
+    )
+    assert len(repository.observations) == 1
+    assert result.get("observations_inserted", 0) == 0
+    assert repository.finished_runs[-1]["status"] == "completed"
+    assert len(repository.release_calls) == 2
+
+
+def test_collect_once_lease_conflict_prevents_provider_access() -> None:
+    historical = FakeHistoricalSource()
+    with pytest.raises(LeaseUnavailableError):
+        CollectorService(FakeRepository(lease_available=False), historical).collect_once(
+            history_start=SESSION_OPEN
+        )
+    assert historical.calls == []
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        (SESSION_OPEN - timedelta(minutes=1), SESSION_OPEN + timedelta(minutes=1)),
+        (SESSION_OPEN + timedelta(seconds=1), SESSION_OPEN + timedelta(minutes=1)),
+        (SESSION_CLOSE, SESSION_CLOSE + timedelta(minutes=1)),
+        (SESSION_OPEN + timedelta(days=2), SESSION_OPEN + timedelta(days=2, minutes=1)),
+    ],
+)
+def test_job_gap_repair_rejects_non_session_windows_before_provider_access(
+    start: datetime, end: datetime
+) -> None:
+    repository = FakeRepository()
+    historical = FakeHistoricalSource()
+    service = CollectorService(repository, historical, clock=lambda: NOW)
+
+    def prepare(_run_id: str) -> None:
+        service.repair_gap_window(HistoricalRepairWindow("job_gap", start, end))
+
+    service._prepare = prepare
+    with pytest.raises(ValueError, match="complete minutes"):
+        service.collect_once(history_start=SESSION_OPEN)
+    assert historical.calls == []
+    assert repository.finished_runs[-1]["status"] == "failed"
+    assert len(repository.release_calls) == 1
+
+
+def test_job_gap_repair_requires_an_active_run_and_fails_after_shutdown() -> None:
+    repository = FakeRepository()
+    historical = FakeHistoricalSource()
+    service = CollectorService(repository, historical, clock=lambda: NOW)
+    window = HistoricalRepairWindow("job_gap", SESSION_OPEN, SESSION_OPEN + timedelta(minutes=1))
+    with pytest.raises(LeaseLostError):
+        service.repair_gap_window(window)
+    service.collect_once(history_start=SESSION_OPEN)
+    call_count = len(historical.calls)
+    with pytest.raises(LeaseLostError):
+        service.repair_gap_window(window)
+    assert len(historical.calls) == call_count

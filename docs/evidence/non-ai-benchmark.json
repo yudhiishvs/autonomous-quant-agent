@@ -1,0 +1,136 @@
+{
+  "environment": {
+    "implementation": "CPython",
+    "machine": "arm64",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "processor": "arm",
+    "python": "3.11.15"
+  },
+  "input": {
+    "fixture": "deterministic_synthetic",
+    "iterations": 25,
+    "repeats": 5,
+    "warmups": 2
+  },
+  "measurements": {
+    "canonical_normalization": {
+      "elapsed_seconds": {
+        "maximum": 0.001006458,
+        "median": 0.0009765,
+        "minimum": 0.00096775
+      },
+      "latency_ms_per_operation": {
+        "maximum": 0.04025832,
+        "median": 0.039060000000000004,
+        "minimum": 0.03871
+      },
+      "operation_count_per_repeat": 25,
+      "repeat_count": 5,
+      "throughput_operations_per_second": {
+        "maximum": 25833.118057349522,
+        "median": 25601.63850486431,
+        "minimum": 24839.585953909653
+      }
+    },
+    "decision_slot_claim": {
+      "elapsed_seconds": {
+        "maximum": 0.031618958,
+        "median": 0.030682791,
+        "minimum": 0.030370709
+      },
+      "latency_ms_per_operation": {
+        "maximum": 31.618958000000003,
+        "median": 30.682791,
+        "minimum": 30.370708999999998
+      },
+      "operation_count_per_repeat": 1,
+      "repeat_count": 5,
+      "throughput_operations_per_second": {
+        "maximum": 32.92646213823984,
+        "median": 32.591559222888165,
+        "minimum": 31.62659566453771
+      }
+    },
+    "fake_order_reconciliation": {
+      "elapsed_seconds": {
+        "maximum": 0.0808405,
+        "median": 0.080556417,
+        "minimum": 0.079797459
+      },
+      "latency_ms_per_operation": {
+        "maximum": 3.2336199999999997,
+        "median": 3.2222566800000005,
+        "minimum": 3.19189836
+      },
+      "operation_count_per_repeat": 25,
+      "repeat_count": 5,
+      "throughput_operations_per_second": {
+        "maximum": 313.2931839345912,
+        "median": 310.34150885831974,
+        "minimum": 309.25093239156115
+      }
+    },
+    "fifteen_minute_aggregation": {
+      "elapsed_seconds": {
+        "maximum": 0.002579458,
+        "median": 0.002572708,
+        "minimum": 0.00255275
+      },
+      "latency_ms_per_operation": {
+        "maximum": 0.10317832,
+        "median": 0.10290832,
+        "minimum": 0.10211
+      },
+      "operation_count_per_repeat": 25,
+      "repeat_count": 5,
+      "throughput_operations_per_second": {
+        "maximum": 9793.360101850945,
+        "median": 9717.387282194482,
+        "minimum": 9691.958543228848
+      }
+    },
+    "one_minute_ingestion_persistence": {
+      "elapsed_seconds": {
+        "maximum": 0.038946708,
+        "median": 0.035402709,
+        "minimum": 0.034327125
+      },
+      "latency_ms_per_operation": {
+        "maximum": 1.5578683199999999,
+        "median": 1.4161083599999997,
+        "minimum": 1.373085
+      },
+      "operation_count_per_repeat": 25,
+      "repeat_count": 5,
+      "throughput_operations_per_second": {
+        "maximum": 728.2870324852431,
+        "median": 706.1606500225732,
+        "minimum": 641.9027764811342
+      }
+    },
+    "risk_decision": {
+      "elapsed_seconds": {
+        "maximum": 0.045497209,
+        "median": 0.045031125,
+        "minimum": 0.043740958
+      },
+      "latency_ms_per_operation": {
+        "maximum": 1.81988836,
+        "median": 1.8012449999999998,
+        "minimum": 1.7496383200000003
+      },
+      "operation_count_per_repeat": 25,
+      "repeat_count": 5,
+      "throughput_operations_per_second": {
+        "maximum": 571.5466954336025,
+        "median": 555.1715618919137,
+        "minimum": 549.4842551770594
+      }
+    }
+  },
+  "notes": [
+    "Wall-clock results are observational and are not CI pass/fail thresholds.",
+    "No native optimization is justified until repeatable profiling identifies a bottleneck."
+  ],
+  "schema": "offline-pipeline-benchmark-v1"
+}

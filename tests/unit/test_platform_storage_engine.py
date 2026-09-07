@@ -28,7 +28,7 @@ from adaptive_trader.platform.storage import (
 from adaptive_trader.platform.storage.tables import aqa_experiments, metadata
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-SENTINEL = "TEST_DATABASE_PASSWORD_DO_NOT_LEAK"
+SENTINEL = "TEST_AQA_DATABASE_PASSWORD_DO_NOT_LEAK"
 
 
 def _application_root(tmp_path: Path) -> Path:
@@ -415,6 +415,22 @@ def test_non_loopback_postgres_accepts_verify_full_without_connecting(tmp_path: 
     engine = create_platform_engine(settings)
     try:
         assert engine.url.query == {"sslmode": "verify-full"}
+    finally:
+        engine.dispose()
+
+
+def test_exact_internal_compose_postgres_host_is_a_local_database_boundary(
+    tmp_path: Path,
+) -> None:
+    settings = _database_settings(
+        tmp_path,
+        f"postgresql://service:{SENTINEL}@postgres:5432/platform",
+    )
+
+    engine = create_platform_engine(settings)
+    try:
+        assert engine.url.host == "postgres"
+        assert engine.url.query == {}
     finally:
         engine.dispose()
 

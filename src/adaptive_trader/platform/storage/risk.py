@@ -22,8 +22,12 @@ from adaptive_trader.platform.risk.latches import (
     RiskLatchState,
 )
 from adaptive_trader.platform.risk.models import (
+    AccountSnapshot,
+    PlanningPrice,
     RiskDecision,
     RiskExecutionScope,
+    SecurityMetadataSnapshot,
+    SignedPosition,
     SignedRiskValidationError,
 )
 from adaptive_trader.platform.risk.policy import AppliedRiskControl, ExposureSnapshot, RiskControl
@@ -59,6 +63,8 @@ _REQUIRED_LATCH_COLUMNS = frozenset(
 _REQUIRED_DECISION_COLUMNS = frozenset(
     {
         "risk_decision_id",
+        "execution_stage",
+        "preceding_reconciliation_id",
         "slot_id",
         "signal_id",
         "experiment_hash",
@@ -77,6 +83,10 @@ _REQUIRED_DECISION_COLUMNS = frozenset(
         "approved_targets",
         "before_exposure",
         "after_exposure",
+        "account_snapshot",
+        "planning_positions",
+        "planning_prices",
+        "security_metadata",
         "source_timestamps",
         "active_latches",
         "required_latch_event_ids",
@@ -104,7 +114,7 @@ class RiskPersistenceError(RuntimeError):
 
 
 class SignedRiskRepository:
-    """Serialize latch state with each signal's append-once risk decision."""
+    """Serialize latch state with each signal's immutable execution-stage decisions."""
 
     def __init__(
         self,
@@ -184,11 +194,14 @@ class SignedRiskRepository:
         except (DecimalException, KeyError, TypeError, ValueError, SQLAlchemyError):
             raise RiskPersistenceError("risk latch event could not be persisted") from None
 
-    def persist(self, decision: RiskDecision) -> RiskDecision:
-        """Atomically append required latches and one immutable decision per signal."""
+    def persist(
+        self, decision: RiskDecision, *, preceding_reconciliation_id: str | None = None
+    ) -> RiskDecision:
+        """Atomically append required latches and one immutable decision per signal stage."""
 
         if type(decision) is not RiskDecision:
             raise RiskPersistenceError("risk persistence requires an immutable decision")
+        stage = 1 if preceding_reconciliation_id is None else 2
         try:
             with self.transaction() as connection:
                 self._acquire_locks(
@@ -196,13 +209,17 @@ class SignedRiskRepository:
                     signal_id=decision.signal_id,
                     experiment_hash=decision.experiment_hash,
                 )
-                existing = self._decision_for_signal(connection, decision.signal_id)
+                existing = self._decision_for_signal(
+                    connection, decision.signal_id, execution_stage=stage
+                )
                 if existing is not None:
                     if existing == decision:
                         return existing
                     raise RiskPersistenceError("signal already has a different risk decision")
 
                 self._verify_signal(connection, decision)
+                if preceding_reconciliation_id is not None:
+                    self._verify_continuation(connection, decision, preceding_reconciliation_id)
 
                 before = self._latch_state_on_connection(
                     connection,
@@ -226,9 +243,17 @@ class SignedRiskRepository:
                         "risk decision active latches do not match persistence"
                     )
 
-                connection.execute(insert(self._decisions).values(**_decision_row(decision)))
+                connection.execute(
+                    insert(self._decisions).values(
+                        **_decision_row(decision),
+                        execution_stage=stage,
+                        preceding_reconciliation_id=preceding_reconciliation_id,
+                    )
+                )
                 self._append_decision_audit(connection, decision)
-                stored = self._decision_for_signal(connection, decision.signal_id)
+                stored = self._decision_for_signal(
+                    connection, decision.signal_id, execution_stage=stage
+                )
                 if stored != decision:
                     raise RiskPersistenceError("persisted risk decision failed verification")
                 return decision
@@ -239,12 +264,28 @@ class SignedRiskRepository:
         except (DecimalException, KeyError, TypeError, ValueError, SQLAlchemyError):
             raise RiskPersistenceError("risk decision could not be persisted") from None
 
-    def decision_for_signal(self, signal_id: str) -> RiskDecision | None:
-        """Read and hash-verify the immutable decision for one signal."""
+    def decision_for_signal(
+        self,
+        signal_id: str,
+        *,
+        connection: Connection | None = None,
+        execution_stage: int = 1,
+    ) -> RiskDecision | None:
+        """Read and hash-verify the immutable decision for one signal stage."""
 
         try:
+            if connection is not None:
+                self._transactions.validate_connection(
+                    connection,
+                    require_serialized_sqlite=False,
+                )
+                return self._decision_for_signal(
+                    connection, signal_id, execution_stage=execution_stage
+                )
             with self._engine.begin() as connection:
-                return self._decision_for_signal(connection, signal_id)
+                return self._decision_for_signal(
+                    connection, signal_id, execution_stage=execution_stage
+                )
         except (RiskLatchError, SignedRiskValidationError, RiskPersistenceError):
             raise
         except (DecimalException, KeyError, TypeError, ValueError, SQLAlchemyError):
@@ -335,14 +376,48 @@ class SignedRiskRepository:
         self,
         connection: Connection,
         signal_id: str,
+        *,
+        execution_stage: int = 1,
     ) -> RiskDecision | None:
         row = (
             connection.execute(
-                select(self._decisions).where(self._decisions.c.signal_id == signal_id)
+                select(self._decisions).where(
+                    self._decisions.c.signal_id == signal_id,
+                    self._decisions.c.execution_stage == execution_stage,
+                )
             )
             .mappings()
             .one_or_none()
         )
+        return self._verified_decision_row(connection, row)
+
+    def decision_by_id(
+        self, risk_decision_id: str, *, connection: Connection | None = None
+    ) -> RiskDecision | None:
+        """Read one immutable stage by its signed identity."""
+        try:
+            if connection is None:
+                with self._engine.begin() as selected:
+                    return self.decision_by_id(risk_decision_id, connection=selected)
+            self._transactions.validate_connection(connection, require_serialized_sqlite=False)
+            row = (
+                connection.execute(
+                    select(self._decisions).where(
+                        self._decisions.c.risk_decision_id == risk_decision_id
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            return self._verified_decision_row(connection, row)
+        except (RiskLatchError, SignedRiskValidationError, RiskPersistenceError):
+            raise
+        except (DecimalException, KeyError, TypeError, ValueError, SQLAlchemyError):
+            raise RiskPersistenceError("risk decision could not be read safely") from None
+
+    def _verified_decision_row(
+        self, connection: Connection, row: RowMapping | None
+    ) -> RiskDecision | None:
         if row is None:
             return None
         required_ids = _string_list(row["required_latch_event_ids"], field_name="latch event IDs")
@@ -361,6 +436,95 @@ class SignedRiskRepository:
         )
         self._verify_signal(connection, decision)
         return decision
+
+    def _verify_continuation(
+        self, connection: Connection, decision: RiskDecision, receipt_id: str
+    ) -> None:
+        """Only a clean, terminal, zero-position close authorizes a fresh second stage."""
+        from adaptive_trader.platform.execution.models import OrderState, ReconciliationStatus
+        from adaptive_trader.platform.storage.execution import (
+            _plan_from_row,
+            _reconciliation_from_row,
+        )
+        from adaptive_trader.platform.storage.tables import (
+            aqa_broker_orders,
+            aqa_execution_plans,
+            aqa_order_intents,
+            aqa_reconciliations,
+        )
+
+        prior = self._decision_for_signal(connection, decision.signal_id)
+        receipt_row = (
+            connection.execute(
+                select(aqa_reconciliations).where(
+                    aqa_reconciliations.c.reconciliation_id == receipt_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if prior is None or receipt_row is None:
+            raise RiskPersistenceError("reversal close evidence is unavailable")
+        receipt = _reconciliation_from_row(receipt_row)
+        plan_row = (
+            connection.execute(
+                select(aqa_execution_plans).where(
+                    aqa_execution_plans.c.execution_plan_id == receipt.execution_plan_id
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if plan_row is None:
+            raise RiskPersistenceError("reversal close plan is unavailable")
+        plan = _plan_from_row(plan_row)
+        current = {item.symbol: item.quantity for item in plan.current_positions}
+        reversed_symbols = tuple(
+            item.symbol
+            for item in plan.target_quantities
+            if current[item.symbol] * item.quantity < 0
+        )
+        positions = {item.symbol: item.quantity for item in receipt.observed_positions}
+        planning_positions = {
+            item.symbol: item.quantity for item in decision.planning_positions if item.quantity != 0
+        }
+        observed_positions = {symbol: qty for symbol, qty in positions.items() if qty != 0}
+        order_rows = connection.execute(
+            select(aqa_broker_orders.c.state)
+            .join(
+                aqa_order_intents,
+                aqa_order_intents.c.client_order_id == aqa_broker_orders.c.client_order_id,
+            )
+            .where(aqa_order_intents.c.execution_plan_id == plan.execution_plan_id)
+        ).all()
+        fresh_times = (
+            decision.account_snapshot.observed_at,
+            *(item.observed_at for item in decision.planning_prices),
+            *(item.observed_at for item in decision.security_metadata),
+            dict(decision.source_timestamps).get("reconciliation", prior.decided_at),
+        )
+        if (
+            plan.risk_decision_id != prior.risk_decision_id
+            or plan.target_version != 1
+            or plan.forced_flat
+            or not reversed_symbols
+            or receipt.status is not ReconciliationStatus.CLEAN
+            or receipt.slot_id != decision.slot_id
+            or receipt.experiment_hash != decision.experiment_hash
+            or receipt.correlation_id != decision.correlation_id
+            or any(
+                abs(positions.get(symbol, Decimal(0))) > Decimal("0.000001")
+                for symbol in reversed_symbols
+            )
+            or not order_rows
+            or any(row.state != OrderState.FILLED.value for row in order_rows)
+            or planning_positions != observed_positions
+            or decision.account_snapshot.account_id_hash != receipt.account_id_hash
+            or abs(decision.account_snapshot.cash - receipt.observed_cash) > Decimal("0.01")
+            or not receipt.completed_at < decision.decided_at < plan.deadline_at
+            or any(instant < receipt.completed_at for instant in fresh_times)
+        ):
+            raise RiskPersistenceError("reversal continuation lacks fresh reconciled authority")
 
     def _verify_signal(self, connection: Connection, decision: RiskDecision) -> None:
         row = (
@@ -501,6 +665,39 @@ def _decision_row(decision: RiskDecision) -> dict[str, object]:
         "approved_targets": _decimal_pairs(decision.final_targets),
         "before_exposure": _exposure_row(decision.before_exposure),
         "after_exposure": _exposure_row(decision.after_exposure),
+        "account_snapshot": {
+            "account_id_hash": decision.account_snapshot.account_id_hash,
+            "buying_power": format(decision.account_snapshot.buying_power, "f"),
+            "cash": format(decision.account_snapshot.cash, "f"),
+            "equity": format(decision.account_snapshot.equity, "f"),
+            "observed_at": _timestamp(decision.account_snapshot.observed_at),
+        },
+        "planning_positions": [
+            [position.symbol, format(position.quantity, "f")]
+            for position in decision.planning_positions
+        ],
+        "planning_prices": [
+            [
+                price.symbol,
+                format(price.price, "f"),
+                _timestamp(price.observed_at),
+                price.validated,
+            ]
+            for price in decision.planning_prices
+        ],
+        "security_metadata": [
+            [
+                security.symbol,
+                security.asset_active,
+                security.tradable,
+                security.shortable,
+                security.easy_to_borrow,
+                security.primary_listing_eligible,
+                security.broker_capability_known,
+                _timestamp(security.observed_at),
+            ]
+            for security in decision.security_metadata
+        ],
         "source_timestamps": [
             [name, _timestamp(instant)] for name, instant in decision.source_timestamps
         ],
@@ -531,6 +728,15 @@ def _decision_from_row(
     reasons = _mapping(row["reason_codes"])
     if set(reasons) != {"block", "flatten"}:
         raise RiskPersistenceError("persisted risk reasons are malformed")
+    account = _mapping(row["account_snapshot"])
+    if set(account) != {
+        "account_id_hash",
+        "buying_power",
+        "cash",
+        "equity",
+        "observed_at",
+    }:
+        raise RiskPersistenceError("persisted account snapshot is malformed")
     decision = RiskDecision(
         risk_decision_id=_string(row["risk_decision_id"]),
         slot_id=_string(row["slot_id"]),
@@ -544,6 +750,16 @@ def _decision_from_row(
         decided_at=_datetime(row["decided_at"]),
         input_hash=_string(row["input_hash"]),
         statistics_hash=_string(row["statistics_hash"]),
+        account_snapshot=AccountSnapshot(
+            account_id_hash=_string(account["account_id_hash"]),
+            equity=_decimal(account["equity"]),
+            cash=_decimal(account["cash"]),
+            buying_power=_decimal(account["buying_power"]),
+            observed_at=_timestamp_from_text(account["observed_at"]),
+        ),
+        planning_positions=_planning_positions(row["planning_positions"]),
+        planning_prices=_planning_prices(row["planning_prices"]),
+        security_metadata=_security_metadata(row["security_metadata"]),
         original_proposal=_proposal(row["original_proposal"]),
         proposed_targets=_pairs(row["proposed_targets"]),
         final_targets=_pairs(row["approved_targets"]),
@@ -571,6 +787,55 @@ def _decision_from_row(
     ):
         raise RiskPersistenceError("persisted risk projection is inconsistent")
     return decision
+
+
+def _planning_positions(value: object) -> tuple[SignedPosition, ...]:
+    result: list[SignedPosition] = []
+    for raw in _list(value, field_name="planning positions"):
+        if type(raw) is not list or len(raw) != 2:
+            raise RiskPersistenceError("persisted planning positions are malformed")
+        result.append(SignedPosition(symbol=_string(raw[0]), quantity=_decimal(raw[1])))
+    return tuple(result)
+
+
+def _planning_prices(value: object) -> tuple[PlanningPrice, ...]:
+    result: list[PlanningPrice] = []
+    for raw in _list(value, field_name="planning prices"):
+        if type(raw) is not list or len(raw) != 4 or type(raw[3]) is not bool:
+            raise RiskPersistenceError("persisted planning prices are malformed")
+        result.append(
+            PlanningPrice(
+                symbol=_string(raw[0]),
+                price=_decimal(raw[1]),
+                observed_at=_timestamp_from_text(raw[2]),
+                validated=raw[3],
+            )
+        )
+    return tuple(result)
+
+
+def _security_metadata(value: object) -> tuple[SecurityMetadataSnapshot, ...]:
+    result: list[SecurityMetadataSnapshot] = []
+    for raw in _list(value, field_name="security metadata"):
+        if (
+            type(raw) is not list
+            or len(raw) != 8
+            or any(type(item) is not bool for item in raw[1:7])
+        ):
+            raise RiskPersistenceError("persisted security metadata is malformed")
+        result.append(
+            SecurityMetadataSnapshot(
+                symbol=_string(raw[0]),
+                asset_active=raw[1],
+                tradable=raw[2],
+                shortable=raw[3],
+                easy_to_borrow=raw[4],
+                primary_listing_eligible=raw[5],
+                broker_capability_known=raw[6],
+                observed_at=_timestamp_from_text(raw[7]),
+            )
+        )
+    return tuple(result)
 
 
 def _control_row(control: AppliedRiskControl) -> dict[str, object]:

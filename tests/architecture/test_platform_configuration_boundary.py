@@ -12,11 +12,25 @@ UNIVERSE_MODULE = Path("src/adaptive_trader/platform/universe.py")
 ALLOWED_IMPORTS = {
     CLI_MODULE: {
         "__future__",
+        "adaptive_trader.collection.cli",
         "adaptive_trader.platform.config",
+        "adaptive_trader.platform.data.calendar",
+        "adaptive_trader.platform.data_cli",
+        "adaptive_trader.platform.demo",
         "adaptive_trader.platform.domain",
+        "adaptive_trader.platform.durable_status",
         "adaptive_trader.platform.errors",
+        "adaptive_trader.platform.package_resources",
+        "adaptive_trader.platform.operational_strategy",
+        "adaptive_trader.platform.runtime",
+        "adaptive_trader.platform.scheduling",
+        "adaptive_trader.platform.shadow",
+        "adaptive_trader.platform.shadow_settings",
         "adaptive_trader.platform.security",
         "adaptive_trader.platform.storage",
+        "adaptive_trader.platform.storage.engine",
+        "adaptive_trader.platform.storage.migration_runner",
+        "datetime",
         "json",
         "os",
         "pathlib",
@@ -137,9 +151,32 @@ def test_generic_configuration_has_no_environment_or_process_authority(project_r
 
     for relative_path in ALLOWED_IMPORTS:
         tree = ast.parse(_source(project_root, relative_path), filename=str(relative_path))
+        # Only the two operational CLI entrypoints snapshot ambient values for the
+        # strict service-scoped settings loaders. Configuration/domain modules retain
+        # no environment authority, and direct getenv/process access stays prohibited.
+        environment_snapshots = set()
+        if relative_path == CLI_MODULE:
+            for function in tree.body:
+                if isinstance(function, ast.FunctionDef) and function.name in {
+                    "shadow_propose_once",
+                    "shadow_run_once",
+                }:
+                    for call in ast.walk(function):
+                        if (
+                            isinstance(call, ast.Call)
+                            and isinstance(call.func, ast.Name)
+                            and call.func.id == "dict"
+                            and len(call.args) == 1
+                            and not call.keywords
+                            and isinstance(call.args[0], ast.Attribute)
+                            and isinstance(call.args[0].value, ast.Name)
+                            and call.args[0].value.id == "os"
+                            and call.args[0].attr == "environ"
+                        ):
+                            environment_snapshots.add(id(call.args[0]))
         for node in ast.walk(tree):
             if isinstance(node, ast.Attribute):
-                assert node.attr not in prohibited_attributes
+                assert node.attr not in prohibited_attributes or id(node) in environment_snapshots
             elif isinstance(node, ast.Name):
                 assert node.id not in prohibited_names
             elif isinstance(node, (ast.Import, ast.ImportFrom)):

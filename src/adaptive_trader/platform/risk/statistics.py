@@ -122,11 +122,11 @@ def compute_risk_statistics(
     returns_by_symbol = tuple(
         _within_session_returns(sessions_by_symbol[symbol]) for symbol in symbols
     )
-    input_hash = sha256_hex(
+    history_commitments = tuple(
         {
-            "as_of_date": as_of_date.isoformat(),
-            "history": tuple(
+            "history_hash": sha256_hex(
                 {
+                    "schema": "signed-risk-symbol-history-v1",
                     "sessions": tuple(
                         {
                             "closes": session.closes,
@@ -136,9 +136,16 @@ def compute_risk_statistics(
                     ),
                     "symbol": symbol,
                 }
-                for symbol in symbols
             ),
-            "schema": "signed-risk-statistics-input-v1",
+            "symbol": symbol,
+        }
+        for symbol in symbols
+    )
+    input_hash = sha256_hex(
+        {
+            "as_of_date": as_of_date.isoformat(),
+            "history_commitments": history_commitments,
+            "schema": "signed-risk-statistics-input-v2",
             "symbols": symbols,
         }
     )

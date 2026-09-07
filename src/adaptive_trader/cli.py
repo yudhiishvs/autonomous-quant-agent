@@ -1430,7 +1430,8 @@ def _observer_smoke_database_summary(
                 placeholders = ",".join("?" for _ in decision_ids)
                 report["hypothetical_order_intents"] = int(
                     connection.execute(
-                        f"SELECT COUNT(*) FROM order_intents WHERE decision_id IN "
+                        # Only placeholder arity is interpolated; every ID remains bound data.
+                        f"SELECT COUNT(*) FROM order_intents WHERE decision_id IN "  # nosec B608
                         f"({placeholders}) AND reason LIKE 'hypothetical_%'",
                         decision_ids,
                     ).fetchone()[0]
@@ -1461,7 +1462,8 @@ def _observer_smoke_database_summary(
                 )
                 report["broker_fills"] = int(
                     connection.execute(
-                        f"SELECT COUNT(*) FROM fill_events WHERE {decision_fill_clause} "
+                        # The clause is either literal false or bound-parameter placeholders.
+                        f"SELECT COUNT(*) FROM fill_events WHERE {decision_fill_clause} "  # nosec B608
                         "OR (created_at >= ? AND created_at <= ?)",
                         fill_parameters,
                     ).fetchone()[0]

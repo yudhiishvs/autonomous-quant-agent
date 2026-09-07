@@ -16,10 +16,11 @@ testing, or résumé breadth. Do not vendor source without its license and updat
 | Set | Purpose |
 | --- | --- |
 | Core project dependencies | Legacy research/application runtime, SQLAlchemy persistence, configuration, reporting, and guarded paper adapter |
-| `dashboard` extra | Streamlit presentation only |
+| `dashboard` extra | Streamlit presentation plus a fixed GitPython security floor for its transitive dependency |
 | `legacy-yahoo` extra | Explicit compatibility data source only |
 | `dev` extra | Ruff, mypy, pytest, async tests, and coverage |
-| `market-data-runtime` group | Minimal collector runtime: Alembic, exchange calendar, psycopg, requests, SQLAlchemy, Typer, and websockets |
+| `market-data-runtime` group | Data-only collector runtime, including its normalization, Parquet, configuration, database, HTTP, and WebSocket dependencies |
+| `security` group | Pre-commit, secret scanning, Bandit, pip-audit, and CycloneDX generation |
 
 `alpaca-py` remains a legacy application dependency. The collector uses fixed-host
 `requests`/`websockets` transports and its image installs only `market-data-runtime`, so it
@@ -37,7 +38,7 @@ Change metadata and the lock together with `uv`; never hand-edit resolved packag
 
 ```bash
 uv lock --check
-uv sync --locked --extra dev --extra dashboard
+uv sync --locked --all-extras
 ```
 
 A collector dependency change also verifies:
@@ -58,9 +59,29 @@ docker build --target market-data --tag adaptive-market-data:validation .
    exploitability, owner, and removal/upgrade plan.
 7. Remove the package if its caller is removed.
 
-Automated dependency scanning and a documented advisory exception process are currently
-`NOT_IMPLEMENTED` in the checked-in CI. Until they exist, no vulnerability-free claim is
-permitted; manual review does not substitute for an executed scanner.
+The checked-in security workflow installs `pip-audit` and Bandit from the locked `security`
+dependency group. The container workflow scans both runtime image targets with Trivy and emits
+CycloneDX/SPDX SBOM artifacts. Dependabot proposes bounded uv, GitHub Actions, and Docker updates;
+it does not bypass review or update the lock outside a pull request. A configured scan is not a
+claim that a future run will find no vulnerabilities.
+
+The blocking Bandit gate covers all runtime Python under `src` plus the container support code.
+Untrusted XML is parsed with `defusedxml`. The reviewed `B608` annotations are limited to SQLite
+queries whose variable text is either placeholder arity produced solely from `?` characters or a
+table name selected from a closed literal tuple; all values remain separately bound. The platform
+`B506` annotation is similarly narrow: the custom YAML loader subclasses `SafeLoader`, and a
+bounded parser-event pass rejects aliases and excess structure before construction. The runtime
+`B104` annotation is a closed host allowlist for container servers whose publication is controlled
+by Compose; its `B108` annotation uses an owner-private `0700` directory and no-follow descriptor
+operations for local health markers. The container annotations are also bounded: `B108` covers a
+fixed file beneath a private Compose tmpfs with a `0700` parent and exclusive no-follow creation;
+`B104` covers the debug profile's in-container listener, whose sole host publication is fixed to
+`127.0.0.1` and whose network is internal.
+
+An advisory exception requires a reviewed, time-bounded repository change containing the advisory
+ID, exact affected component, deployment exploitability, compensating control, owner, upstream
+tracking link, and expiration date. Expired or undocumented ignores are prohibited. There are no
+current checked-in exceptions.
 
 Dependency updates should be grouped by purpose. Security corrections may be isolated for
 fast review, but must not silently change application behavior or bypass the locked graph.

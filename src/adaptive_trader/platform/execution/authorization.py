@@ -5,15 +5,20 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from adaptive_trader.platform.config import ExecutionMode
 from adaptive_trader.platform.domain import require_utc_instant
 from adaptive_trader.platform.errors import DomainValidationError
 from adaptive_trader.platform.execution.models import (
+    AccountState,
     ExecutionValidationError,
     OrderIntent,
+    Position,
     PositionEffect,
 )
+from adaptive_trader.platform.hashing import sha256_hex
+from adaptive_trader.platform.risk.latches import RiskLatchKind
 from adaptive_trader.platform.signals.models import (
     PaperAuthorizationDecision,
     SignalEnvelope,
@@ -72,6 +77,218 @@ class SubmissionSafetySnapshot:
                 raise ExecutionValidationError("submission symbols must be unique and ordered")
         if not set(self.shortable_symbols).issubset(self.active_symbols):
             raise ExecutionValidationError("shortable symbols must be active")
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionLedgerSnapshot:
+    """Hash-bound durable state that must remain unchanged until submission is claimed."""
+
+    client_order_id: str
+    experiment_hash: str
+    execution_plan_id: str
+    risk_decision_hash: str
+    intent_hash: str
+    order_hash: str
+    plan_fill_hashes: tuple[str, ...]
+    active_order_hashes: tuple[str, ...]
+    active_latches: tuple[RiskLatchKind, ...]
+    content_hash: str
+
+    def __post_init__(self) -> None:
+        if type(self.client_order_id) is not str or not self.client_order_id:
+            raise ExecutionValidationError("submission ledger client order ID is invalid")
+        for value in (
+            self.experiment_hash,
+            self.risk_decision_hash,
+            self.intent_hash,
+            self.order_hash,
+            self.content_hash,
+        ):
+            if type(value) is not str or _SHA256.fullmatch(value) is None:
+                raise ExecutionValidationError("submission ledger hash is invalid")
+        if type(self.execution_plan_id) is not str or not self.execution_plan_id:
+            raise ExecutionValidationError("submission ledger plan ID is invalid")
+        for values in (self.plan_fill_hashes, self.active_order_hashes):
+            if type(values) is not tuple or values != tuple(sorted(set(values))):
+                raise ExecutionValidationError(
+                    "submission ledger hashes must be unique and ordered"
+                )
+            if any(type(value) is not str or _SHA256.fullmatch(value) is None for value in values):
+                raise ExecutionValidationError("submission ledger evidence hash is invalid")
+        if (
+            type(self.active_latches) is not tuple
+            or self.active_latches != tuple(sorted(set(self.active_latches), key=str))
+            or any(type(value) is not RiskLatchKind for value in self.active_latches)
+        ):
+            raise ExecutionValidationError("submission ledger latches are invalid")
+        expected = sha256_hex(
+            {
+                "active_latches": self.active_latches,
+                "active_order_hashes": self.active_order_hashes,
+                "client_order_id": self.client_order_id,
+                "execution_plan_id": self.execution_plan_id,
+                "experiment_hash": self.experiment_hash,
+                "intent_hash": self.intent_hash,
+                "order_hash": self.order_hash,
+                "plan_fill_hashes": self.plan_fill_hashes,
+                "risk_decision_hash": self.risk_decision_hash,
+                "schema": "submission-ledger-snapshot-v1",
+            }
+        )
+        if self.content_hash != expected:
+            raise ExecutionValidationError("submission ledger snapshot hash is invalid")
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        client_order_id: str,
+        experiment_hash: str,
+        execution_plan_id: str,
+        risk_decision_hash: str,
+        intent_hash: str,
+        order_hash: str,
+        plan_fill_hashes: tuple[str, ...],
+        active_order_hashes: tuple[str, ...],
+        active_latches: tuple[RiskLatchKind, ...],
+    ) -> SubmissionLedgerSnapshot:
+        """Create the canonical digest for one durable pre-submission view."""
+
+        values = {
+            "active_latches": active_latches,
+            "active_order_hashes": active_order_hashes,
+            "client_order_id": client_order_id,
+            "execution_plan_id": execution_plan_id,
+            "experiment_hash": experiment_hash,
+            "intent_hash": intent_hash,
+            "order_hash": order_hash,
+            "plan_fill_hashes": plan_fill_hashes,
+            "risk_decision_hash": risk_decision_hash,
+        }
+        return cls(
+            client_order_id=client_order_id,
+            experiment_hash=experiment_hash,
+            execution_plan_id=execution_plan_id,
+            risk_decision_hash=risk_decision_hash,
+            intent_hash=intent_hash,
+            order_hash=order_hash,
+            plan_fill_hashes=plan_fill_hashes,
+            active_order_hashes=active_order_hashes,
+            active_latches=active_latches,
+            content_hash=sha256_hex({"schema": "submission-ledger-snapshot-v1", **values}),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SubmissionAuthoritySnapshot:
+    """Auditable broker and durable-state authority for one submission attempt."""
+
+    client_order_id: str
+    ledger_snapshot_hash: str
+    safety_snapshot_hash: str
+    account_id_hash: str
+    account_cash: Decimal
+    account_equity: Decimal
+    account_observed_at: datetime
+    positions: tuple[Position, ...]
+    open_client_order_ids: tuple[str, ...]
+    evaluated_at: datetime
+    content_hash: str
+
+    def __post_init__(self) -> None:
+        if type(self.client_order_id) is not str or not self.client_order_id:
+            raise ExecutionValidationError("submission authority client order ID is invalid")
+        for value in (
+            self.ledger_snapshot_hash,
+            self.safety_snapshot_hash,
+            self.account_id_hash,
+            self.content_hash,
+        ):
+            if type(value) is not str or _SHA256.fullmatch(value) is None:
+                raise ExecutionValidationError("submission authority hash is invalid")
+        for account_value in (self.account_cash, self.account_equity):
+            if type(account_value) is not Decimal or not account_value.is_finite():
+                raise ExecutionValidationError("submission authority account value is invalid")
+        observed_at = _instant(self.account_observed_at)
+        evaluated_at = _instant(self.evaluated_at)
+        if observed_at > evaluated_at:
+            raise ExecutionValidationError("submission authority account is from the future")
+        if (
+            type(self.positions) is not tuple
+            or any(type(position) is not Position for position in self.positions)
+            or self.positions != tuple(sorted(self.positions, key=lambda item: item.symbol))
+            or len({position.symbol for position in self.positions}) != len(self.positions)
+        ):
+            raise ExecutionValidationError("submission authority positions are invalid")
+        if type(self.open_client_order_ids) is not tuple or self.open_client_order_ids != tuple(
+            sorted(set(self.open_client_order_ids))
+        ):
+            raise ExecutionValidationError("submission authority open orders are invalid")
+        expected = sha256_hex(_authority_payload(self))
+        if self.content_hash != expected:
+            raise ExecutionValidationError("submission authority content hash is invalid")
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        ledger: SubmissionLedgerSnapshot,
+        safety: SubmissionSafetySnapshot,
+        account: AccountState,
+        positions: tuple[Position, ...],
+        open_client_order_ids: tuple[str, ...],
+    ) -> SubmissionAuthoritySnapshot:
+        """Bind broker observations and caller safety evidence to the durable snapshot."""
+
+        if type(ledger) is not SubmissionLedgerSnapshot:
+            raise ExecutionValidationError("submission authority ledger is invalid")
+        if type(safety) is not SubmissionSafetySnapshot:
+            raise ExecutionValidationError("submission authority safety state is invalid")
+        if type(account) is not AccountState:
+            raise ExecutionValidationError("submission authority account is invalid")
+        safety_hash = sha256_hex(
+            {
+                "account_observed_at": safety.account_observed_at,
+                "active_symbols": safety.active_symbols,
+                "ambiguous_order_exists": safety.ambiguous_order_exists,
+                "blocking_latch_exists": safety.blocking_latch_exists,
+                "data_complete": safety.data_complete,
+                "entry_disabled": safety.entry_disabled,
+                "evaluated_at": safety.evaluated_at,
+                "price_observed_at": safety.price_observed_at,
+                "reconciliation_clean": safety.reconciliation_clean,
+                "reconciliation_observed_at": safety.reconciliation_observed_at,
+                "schema": "submission-safety-snapshot-v1",
+                "security_observed_at": safety.security_observed_at,
+                "session_open": safety.session_open,
+                "shortable_symbols": safety.shortable_symbols,
+            }
+        )
+        values: dict[str, object] = {
+            "account_cash": account.cash,
+            "account_equity": account.equity,
+            "account_id_hash": account.account_id_hash,
+            "account_observed_at": account.observed_at,
+            "client_order_id": ledger.client_order_id,
+            "evaluated_at": safety.evaluated_at,
+            "ledger_snapshot_hash": ledger.content_hash,
+            "open_client_order_ids": open_client_order_ids,
+            "positions": tuple((position.symbol, position.quantity) for position in positions),
+            "safety_snapshot_hash": safety_hash,
+        }
+        return cls(
+            client_order_id=ledger.client_order_id,
+            ledger_snapshot_hash=ledger.content_hash,
+            safety_snapshot_hash=safety_hash,
+            account_id_hash=account.account_id_hash,
+            account_cash=account.cash,
+            account_equity=account.equity,
+            account_observed_at=account.observed_at,
+            positions=positions,
+            open_client_order_ids=open_client_order_ids,
+            evaluated_at=safety.evaluated_at,
+            content_hash=sha256_hex({"schema": "submission-authority-snapshot-v1", **values}),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -228,6 +445,24 @@ def _safety_reasons(
 def _decision(reasons: tuple[str, ...] | list[str]) -> SubmissionAuthorization:
     ordered = tuple(sorted(set(reasons)))
     return SubmissionAuthorization(approved=not ordered, reasons=ordered)
+
+
+def _authority_payload(authority: SubmissionAuthoritySnapshot) -> dict[str, object]:
+    return {
+        "account_cash": authority.account_cash,
+        "account_equity": authority.account_equity,
+        "account_id_hash": authority.account_id_hash,
+        "account_observed_at": authority.account_observed_at,
+        "client_order_id": authority.client_order_id,
+        "evaluated_at": authority.evaluated_at,
+        "ledger_snapshot_hash": authority.ledger_snapshot_hash,
+        "open_client_order_ids": authority.open_client_order_ids,
+        "positions": tuple(
+            (position.symbol, position.quantity) for position in authority.positions
+        ),
+        "safety_snapshot_hash": authority.safety_snapshot_hash,
+        "schema": "submission-authority-snapshot-v1",
+    }
 
 
 def _instant(value: object) -> datetime:

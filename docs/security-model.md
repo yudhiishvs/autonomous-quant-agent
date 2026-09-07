@@ -1,216 +1,191 @@
-# Security Model
+# Security model
 
-## Principle and supported boundary
+## Supported boundary
 
-External data, strategy output, and broker responses are untrusted until validated. Component
-interfaces are intended to receive only their required authority, consequential transitions are
-durable, and an ambiguous state blocks new exposure. Current process-launcher authority gaps are
-recorded below rather than treated as implemented isolation.
+Autonomous Quant Agent is self-hosted and single-operator. Offline simulation is the default;
+shadow has no broker; the only execution adapter is paper-only and remains disabled in tracked
+configuration. Real-money execution, public hosting, multi-tenancy, OAuth custody, and arbitrary
+strategy code submission are unsupported.
 
-Real-money trading and public multi-user hosting are unsupported. Tracked configuration
-disables paper submission. Current external Alpaca paths are
-`IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`; ordinary tests and CI use empty credentials and
-patch the common Python TCP connection paths used by current adapters. Process-wide socket denial
-is `NOT_IMPLEMENTED`.
+External data, local configuration, provider output, database rows, strategy proposals, API input,
+and broker responses are untrusted until validated. Missing, stale, malformed, ambiguous, or
+unauthorized state creates no new exposure.
 
 ## Protected assets
 
-- Alpaca data and paper credential pairs
-- database URLs and operator-owned account identifiers
-- order authority, durable intents, positions, fills, and reconciliation state
-- market observations, current projections, checkpoints, and collection-universe identity
-- configuration, decision receipts, incidents, latches, audit history, and report integrity
-- runtime and database availability
+- separate Alpaca data and paper credential pairs;
+- database-role URLs, operator/dashboard tokens, and approved paper-account hash;
+- market observations, effective revisions, gaps, watermarks, and dataset lineage;
+- experiment, signal, policy, risk, plan, intent, fill, position, reconciliation, latch, incident,
+  job, outbox, and audit integrity;
+- external side-effect identity and paper-order authority; and
+- service/database/artifact availability.
 
-## Actors and failure sources
+## Trust zones and least privilege
 
-- The local operator owns configuration, databases, credentials, process startup, recovery, and
-  any explicit paper-only activation.
-- Alpaca Market Data and the optional Alpaca paper account are external services. Their payloads,
-  timing, availability, and error text are untrusted even when transport authentication succeeds.
-- PostgreSQL and filesystem operators control storage availability, access policy, backups, and
-  host-level encryption; a stale process or misconfigured role is an internal threat source.
-- Installed Python packages and future locally registered signal providers are operator-trusted
-  code, not sandboxed tenants. They still must not receive broker objects or credentials through
-  platform interfaces.
-- Accidental operator error, malformed configuration, clock/calendar disagreement, process crash,
-  network partition, duplicate delivery, stale leases, and partial broker acknowledgement are
-  modeled as security-relevant failure sources because they can corrupt evidence or authority.
-- A remote multi-user adversary is outside the supported deployment model. Future private API and
-  dashboard inputs remain untrusted within the single-operator boundary.
-
-## Current trust zones
-
-| Zone | May access | Must not access |
+| Zone | Permitted authority | Prohibited authority |
 | --- | --- | --- |
-| Standalone collector | Data credential pair; runtime PostgreSQL credential; fixed data-provider hosts and configured PostgreSQL | Paper credentials, trading SDK/client, legacy execution, arbitrary provider hosts or undeclared destinations |
-| Legacy strategy/allocation | Completed history and configuration | Broker credentials, direct broker mutation, risk-policy mutation |
-| Legacy risk/execution | Approved proposal, account/market state, paper adapter when all gates pass | Real-money endpoint, unknown symbols, stale or ambiguous authorization |
-| Legacy dashboard/reporting | Read-only SQLite and generated artifacts; the local launcher may inherit unrelated ambient variables | Application code does not read credentials or mutate a broker; process-level environment scrubbing is incomplete |
-| CI and ordinary tests | Synthetic/fake inputs; loopback disposable PostgreSQL where marked | Alpaca secrets, external TCP calls through guarded paths, paper or real orders |
-| Migration operator | Separate schema-owner PostgreSQL URL | Long-running collector process |
+| market-data worker | collector DB role; data-only key pair in live profile; fixed data hosts | paper keys, trading client, order/risk mutation, arbitrary URL/shell/plugin |
+| scheduler | scheduler DB role; experiment/calendar/watermark/slot state | provider/broker keys, signal internals, orders, external network |
+| strategy | strategy DB role; immutable context; registered provider | provider/paper keys, broker/execution imports, risk/order writes, remote code |
+| execution | execution DB role; fake broker offline; paper files only in paper profile | data keys, model/plugin loading, DDL, configurable/live-money host |
+| control API | control DB role and operator token; safe reads and bounded jobs/halt/resume | Alpaca keys, broker imports, direct order/fill mutation, URL/path/code/SQL input |
+| dashboard | read-scoped API token | database or Alpaca credentials, mutation client, broker/order controls |
+| migration | deployment-only schema-owner URL | long-running runtime use and ordinary business DML |
+| CI/tests | synthetic/fake input; explicitly guarded loopback PostgreSQL | Alpaca secrets, non-loopback connections, provider/paper calls or orders |
 
-A dedicated least-privilege collector role is recommended in the current runbook but is not
-provisioned or verified by the migration. Exact platform roles and denial tests remain target work.
+PostgreSQL authorization roles and matching login principals are created separately. Runtime roles
+receive explicit table/view/sequence/function grants rather than schema-wide mutation. The
+dashboard has no database role.
 
-The target scheduler, strategy worker, execution worker, private control API, API-backed
-dashboard, and service-specific database roles are `NOT_IMPLEMENTED`. They must preserve
-the dependency direction in `../ARCHITECTURE.md` when added.
+Process separation and Compose networks reduce authority but are not a Python sandbox or host-level
+outbound firewall. Installed extension packages remain operator-trusted code.
 
-## Untrusted inputs, external services, and data in transit
+## Configuration and credentials
 
-| Boundary | Untrusted input | Current transport and control |
-| --- | --- | --- |
-| Configuration and environment | YAML values, paths, mode flags, URLs, and credential-file presence | Strict YAML parsing, explicit injected-environment snapshots, exact service/secret scopes, opaque file references, the owner-private loader, and local infrastructure-secret bootstrap are implemented; service commands and container mounts are not |
-| Standalone collector Alpaca data | REST pages, stream frames, timestamps, symbols, numeric values, rate-limit metadata, disconnects, and error categories | Direct HTTPS/WSS to fixed official data hosts using the collector data-key namespace, certificate/hostname verification, explicit timeouts, bounds, and shared canonical validation |
-| Legacy Alpaca market data | Historical/stream SDK responses, account-scoped feed access, timestamps, bars, disconnects, and SDK exceptions | Locked `alpaca-py` clients using the legacy paper credential object/namespace; feed allowlist, bounded reconnects, completed-bar checks, durable bar storage, and redacted errors; it is not process-credential-isolated from legacy paper execution |
-| Legacy Yahoo compatibility | Configured tickers/date bounds and yfinance responses | Optional `legacy-yahoo` dependency; normalization/empty-series validation applies, but fixed-host and explicit transport-timeout controls are not implemented |
-| PostgreSQL | Configured URL, stored rows, lock timing, constraint failures, and connection errors | Loopback may be plaintext; non-loopback requires TLS with `sslmode=verify-full`; SQL is parameterized and routing override keys are rejected |
-| Optional Alpaca paper boundary | Account, asset, order, fill, status, stream, and error responses | Fixed paper client with TLS through the locked SDK; construction and submission remain behind explicit legacy gates and are not externally validated |
-| Local SQLite and artifacts | Existing rows, filenames, serialized JSON/CSV, and generated reports | Host filesystem permissions are the transport boundary; current dashboard has direct read access |
-| Target private API/dashboard | Bearer token, route/query/path values, request sizes, job identifiers, and returned read models | `NOT_IMPLEMENTED`; target is loopback/private networking with bounded schemas, constant-time token checks, and no direct broker route |
+Strict frozen configuration rejects unknown fields, YAML aliases/merges/tags, duplicate keys,
+oversize/deep input, path escape/symlinks, incompatible mode/adapter combinations, and expected-hash
+mismatch. Flagship symbol authority lives only in the immutable experiment YAML. Collection,
+benchmark, context, excluded, and order allowlists remain distinct.
 
-Transport security authenticates an endpoint, not its content. Every provider/broker payload still
-requires semantic validation before persistence or authorization. Compose network segmentation is
-not an egress firewall.
+Platform services accept secret values only through these file references:
 
-## Inputs and controls
+```text
+AQA_DATABASE_URL_FILE
+AQA_OPERATOR_TOKEN_FILE
+AQA_ALPACA_DATA_API_KEY_FILE
+AQA_ALPACA_DATA_SECRET_KEY_FILE
+AQA_ALPACA_PAPER_API_KEY_FILE
+AQA_ALPACA_PAPER_SECRET_KEY_FILE
+AQA_PAPER_ACCOUNT_ID_HASH_FILE
+```
 
-- YAML configuration is strict and rejects hazardous live-trading terms.
-- Collector symbols come from immutable `collection-universe.v1`; all 29 are explicitly
-  unauthorized for execution.
-- Bar contracts validate provider/feed/adjustment/timeframe, UTC timing, OHLC consistency,
-  finite positive prices, nonnegative counts, hashes, and bounded payload protocols.
-- PostgreSQL uses parameterized statements, explicit transactions, constraints, immutable
-  triggers, monotonic checkpoints, and singleton fencing tokens.
-- Provider URLs are constants. The collector rejects proxy inheritance and endpoint
-  overrides; non-loopback PostgreSQL requires `sslmode=verify-full`.
-- The platform secret primitive accepts only the closed seven-source enum and descriptor-walks a
-  bounded canonical POSIX path without following symlinks. It requires a current-owner regular
-  file in mode 0400 or 0600, reads at most 16 KiB of UTF-8 without NUL, and removes exactly one
-  terminal LF; all rejection errors omit the path, value, and operating-system exception.
-- Platform runtime composition accepts only an explicitly injected mapping, rejects generic Alpaca
-  credential variables by presence, validates six nonsecret settings, and selects opaque
-  secret-file references from an exact service/mode matrix without reading their contents.
-- Local bootstrap creates only eight database-role passwords and one operator token beneath a
-  current-user-owned application root. It serializes threads and processes, publishes owner-only
-  files without replacement, preserves valid existing files, rejects unsafe or unresolved state,
-  and emits only relative file names. It never reads or creates Alpaca credentials.
-- Legacy broker construction fixes `paper=True`; static tests reject live endpoints,
-  generic credential names, and alternate live broker classes.
-- Durable intent precedes submission; deterministic client IDs and reconciliation contain
-  duplicate/ambiguous effects.
+The hardened loader opens descriptor-relative paths without following symlinks, pins file identity,
+requires a current-owner regular file in mode `0400` or `0600`, bounds content, rejects empty/NUL or
+invalid UTF-8, trims one newline, and returns a non-pickleable redacted wrapper. Errors omit path,
+value, and OS exception details.
 
-## Credentials and data handling
+`aqa secrets bootstrap-local` creates database-role passwords and an operator token only. It uses
+cryptographic randomness, owner-only directories/files, atomic no-replace publication, and
+idempotent validation. It never creates provider credentials or prints values.
 
-Collector variables are `APA_ALPACA_DATA_API_KEY` and
-`APA_ALPACA_DATA_SECRET_KEY`; the standalone collector image omits the Alpaca SDK and execution
-modules. The legacy Alpaca market-data provider and paper adapter both consume a
-`PaperCredentials` object loaded from the `APA_ALPACA_PAPER_*` namespace, so they are not separate
-process authorities. These controls isolate the standalone collector only, and Alpaca keys are not
-claimed to be provider-scoped as data-only.
+Data and paper keys must be different operational pairs and mounted only into their process. No
+credential belongs in YAML, `.env`, Git, image layers, database rows, fixtures, logs, metrics,
+responses, evidence, benchmark output, or backups. Follow [secret rotation](secret_rotation.md).
 
-No credential belongs in YAML, `.env.example`, Git, image layers, logs, reports, metrics,
-database rows, or test fixtures. Current collector error paths report exception types and
-credential wrappers redact their values. Legacy logging redacts known values and common
-secret-bearing key/header forms.
+## Input and data integrity
 
-The reusable platform loader keeps its result only in an immutable in-memory wrapper whose
-ordinary, container, logging, and Pydantic renderings are `<redacted>` and whose pickling is
-rejected. `RuntimeSettings` stores only opaque references whose rendering and JSON schema omit the
-path; loading still requires an explicit call at the future adapter boundary. Neither primitive
-inspects ambient process state, persists a value, or creates a client. No runtime service command
-consumes the loader yet. Installed in-process Python remains trusted; process and mount isolation,
-not object-construction tricks, is the credential security boundary.
+- Canonical JSON has bounded size/depth/nodes and rejects custom primitive subclasses, sets,
+  secrets, nonfinite values, and nondeterministic encodings.
+- Bars validate series identity, allowlist/role, aligned UTC interval, coherent positive OHLC,
+  nonnegative counts, required VWAP, source mode, payload hash, and correction lineage.
+- Duplicate events converge; corrections append a new immutable revision and atomically advance the
+  latest projection.
+- Gaps and active-basket watermarks prevent missing or ambiguous data from authorizing a slot.
+- Dataset paths are root-confined, reject symlink/traversal/conflicting overwrite, and bind physical,
+  logical, schema, input, experiment, and manifest hashes.
+- Provider hosts are constants. Public schemas contain no arbitrary URL, fetch, webhook, callback,
+  command, module, class, SQL, or upload field.
+- Unsafe deserialization, dynamic evaluation/compilation, arbitrary import, and runtime package
+  installation are absent from platform request paths.
 
-When run from the repository root as documented, the POSIX-only
-`aqa secrets bootstrap-local` command writes generated local infrastructure secrets to the ignored
-`secrets/` directory beneath that current working directory. Those values intentionally persist on
-disk for later database and API startup; they are never returned through the secret loader,
-configuration models, or CLI output during bootstrap. Existing files are validated but never
-overwritten.
+Provider TLS authenticates an endpoint, not its content. Every response is still validated before
+persistence or authority.
 
-PostgreSQL should be private and encrypted in transit; backups and encryption at rest are
-operator/provider responsibilities. SQLite, runtime logs, downloaded data, and outputs are
-ignored local files and require host-level access controls.
+## Strategy, risk, and execution containment
 
-## Likely abuse and failure cases
+Strategies return declarative `SignalEnvelope` values and have no broker authority. Envelopes bind
+provider, slot, experiment, data, policy, time, symbols, availability, action, and content hash.
+Fixture signals are non-promotable and paper-ineligible.
 
-| Case | Preventive/detective control | Recovery |
-| --- | --- | --- |
-| Malformed or oversized provider payload | Bounded decoding, schema validation, protocol failure classification | Stop or bounded retry; record safe collector event |
-| Duplicate/corrected bar | Stable observation/content identities and append-only rows | Deterministic projection and revision |
-| Stale collector after failover | Lease expiry and fencing checked on every lease-protected ingestion mutation | Takeover marks stale run failed; stale writes reject |
-| Credential disclosure | Ignore rules, redacted wrappers/logs, empty CI secrets, and direct sentinel tests for the file-loader rendering/error surfaces | Revoke/rotate, contain workload, correct leak path |
-| SQL injection or routing override | SQLAlchemy binding and rejected URL override keys | Refuse startup/request; inspect audit evidence |
-| Strategy bypass of risk | Separate strategy, risk, planner, and broker responsibilities | Block execution and add architecture regression test |
-| Submission timeout or duplicate event | Intent-first persistence, stable client ID, idempotent events | Mark ambiguous and reconcile; never blind retry |
-| Stale market/account state | Freshness and reconciliation gates | No new exposure until authoritative refresh |
-| Dashboard mutation | Read-only code path and fixed table allowlist | Stop dashboard and inspect local state |
+Signed risk receives complete positions, orders, account, prices, security metadata,
+reconciliation, data integrity, equity history, statistics, experiment, and latch state. It applies
+finite/freshness/identity gates and deterministic shrink-only constraints. Unknown or nonconvergent
+input produces flat/no-execution output. Session-loss, drawdown, operator, and reconciliation
+latches are append-only and survive restart.
 
-## Authentication and authorization
+Execution persists signed plans and deterministic intents before any broker side effect. A sign
+reversal closes and reconciles to zero before opening the opposite side. Timeout after possible
+acceptance becomes `SUBMISSION_UNKNOWN`; lookup and reconciliation resolve it, never blind retry.
+Duplicate updates/fills are idempotent by stable identity and conflicting reuse fails closed.
 
-The current system is single-operator and has no HTTP control API. Local host/file/database
-permissions are the operator boundary. The target bearer-token API, per-route authorization,
-rate limiting, request-size limits, and audited control events are `NOT_IMPLEMENTED`.
+Paper invocation requires all independent profile, acknowledgement, literal-paper adapter,
+credential, account, signal artifact, approval, freshness, reconciliation, and latch gates. Tracked
+config denies submission and the default approval verifier denies promotion. There is no
+`paper=False` or real-money endpoint.
 
-The target specification currently names one operator token while requiring the dashboard to have
-server-enforced read-only authority. Giving that same token to the dashboard would also authorize
-bounded control mutations if authorization is token-only. The API design must resolve this before
-`REQ-ARCH-007` or `REQ-UI-001` can be verified; a read-only client implementation alone is not an
-authorization boundary.
+Forced flatten disables entries, cancels conflicting openings, reconciles, persists close intents,
+processes fills, and proves exact zero. Failure creates a durable blocking incident rather than
+success.
 
-Paper submission in the legacy path requires an explicit command, tracked config enablement,
-an exact environment acknowledgement, verified paper account/credentials, fresh state,
-open session, risk approval, and clean reconciliation. Because tracked configuration leaves
-submission disabled, no default path submits.
+## API and dashboard
 
-## Operational controls
+The private FastAPI app binds loopback by default. Only liveness/readiness are unauthenticated.
+Authenticated routes use a minimum 32-byte bearer token, constant-time comparison, strict request
+models, 65,536-byte request bound, bounded pages, read/mutation rate limits, no cookies/CORS/docs by
+default, safe correlated errors, no-store/nosniff headers, and restrictive content policy where
+applicable.
 
-- Collector startup validates configuration and migration head, registers the content-addressed
-  universe row, and acquires singleton lease ownership before ingestion; status/readiness commands
-  do not load data secrets.
-- Bounded retries, deadlines, worker joins, fencing tokens, intent-first persistence, stable
-  identifiers, reconciliation, and latches contain duplicate, stale, ambiguous, or partial work.
-- Every tracked platform profile disables submission. Static `aqa doctor` and
-  `aqa config validate` use a mandatory experiment hash pin and reject symlinked configuration
-  paths, invalid mode/adapter/provider combinations, and reserved profile-name mismatches without
-  reading credentials or constructing external clients. `aqa secrets bootstrap-local` is the only
-  current platform command with write authority and confines that authority to the fixed `secrets/`
-  inventory beneath the current working directory; the directory is ignored when invoked from the
-  repository root as documented. Legacy paper operation additionally requires an explicit command,
-  exact acknowledgement, paper account verification, fresh state, open session, risk approval, and
-  clean reconciliation.
-- Current logs and durable events support local diagnosis with redaction. Credential rotation,
-  incident containment, and reporting follow `../SECURITY.md` and the existing runbooks.
-- Database access policy, TLS, backup retention, encryption at rest, host firewalling, and process
-  supervision remain deployment-operator responsibilities. The target role/grant matrix,
-  automated restore proof, audit chain, API rate limits, and platform service health contracts are
-  `NOT_IMPLEMENTED`.
+The route inventory has safe reads and bounded jobs/halt/resume only; it has no direct trade
+mutation. Job payloads are routing data, not authority. Dashboard access is server-enforced read
+only and its client cannot call mutation routes or import storage/broker modules.
+
+## Observability and audit
+
+Structured logs recursively redact credential-shaped keys/values and permit only bounded safe
+fields. Prometheus labels use reviewed finite enums; hostile symbols, IDs, paths, errors, and free
+text cannot create unbounded series. Raw headers, environment/settings dumps, URLs, payloads, and
+external exceptions are never emitted.
+
+Consequential transitions append per-stream audit events whose payload and chain hashes are
+independently verified. `aqa audit verify` fails on payload, identity, sequence, previous-hash, or
+head mismatch. Logs and metrics are diagnostic; audit/database state is authoritative.
+
+## Network and test safety
+
+Ordinary tests remove ambient Alpaca variables, force submission off, and deny common Python socket
+connections. PostgreSQL-marked tests permit only loopback and require the exact disposable
+`collector_test` guard. Provider/broker SDK behavior uses injected fakes/mocks. The offline demo
+constructs no Alpaca transport or credentials.
+
+A complete OS/process-wide outbound-denial wrapper has not been implemented; Compose network
+separation is not an egress firewall. CI and final reports must state the exact network control
+actually exercised.
+
+## Supply chain and containers
+
+Locked dependencies, pinned actions, secret/static/dependency scans, Python CodeQL, nonroot
+multi-stage images, package-build/install smoke, SBOM generation, and container scanning are
+defined as separate validation gates. A checked-in workflow is not evidence that a remote run or a
+fresh vulnerability database passed; report those results only after execution.
+
+Images exclude credentials, local state, raw data, VCS metadata, caches, and development tooling.
+Services use numeric nonroot identities, dropped capabilities, no-new-privileges, read-only roots
+where supported, bounded resources/restarts, and explicit mounts.
+
+## Backup and recovery
+
+The guarded logical backup/restore smoke accepts only a loopback disposable `collector_test`,
+populates deterministic state, restores into a fresh generated database, runs/checks migrations,
+and compares row hashes, audit root, slots, intents, fills, and reconciliation. It also rejects
+credential-shaped fixture fields. Its result is externally unvalidated when PostgreSQL client tools
+are unavailable. See [backup/restore](backup_restore.md).
+
+After recovery, reconcile deterministic broker identities/account state before enabling new
+exposure. A restored database does not authorize replay.
 
 ## Residual risks
 
-- Credential-based Alpaca behavior and hosted database operation have not been validated.
-- Legacy environment-variable secrets remain visible to their processes. Platform runtime settings
-  select service-scoped opaque references and local infrastructure bootstrap is available, but
-  service command integration, least-privilege mounts, and full sentinel integration are
-  `NOT_IMPLEMENTED`.
-- Bootstrap is supported on local macOS/Linux filesystems with the required descriptor-relative
-  operations and advisory `flock` semantics. Reported API or lock failures fail closed; ineffective
-  or node-local locking on other filesystems cannot be detected, and host-level compromise remains
-  outside this boundary.
-- The current dashboard reads SQLite directly rather than through an authenticated API.
-- The local dashboard launcher removes legacy paper variables but can inherit data-provider and
-  database variables from its parent environment; code does not consume them, but least-privilege
-  process startup is not enforced.
-- The target's single named operator token cannot yet give a compromised dashboard
-  server-enforced read-only authorization; the API design conflict remains unresolved.
-- Compose isolation is not an outbound firewall and the dashboard port is not loopback-bound.
-- Explicit collector gap lifecycle, downstream readiness, backup/restore proof, retention,
-  and artifact integrity are `NOT_IMPLEMENTED`.
-- Stored collector-universe membership is not compared with the in-process contract at startup and
-  has no immutability trigger; a database owner can change it without runtime detection.
-- Locally installed future strategy plugins will be operator-trusted code; arbitrary Python
-  sandboxing is `INTENTIONALLY_DEFERRED`.
+- No credential-based Alpaca data or paper behavior was validated in this completion work.
+- No paper order was submitted; mocked adapter tests cannot prove provider availability or account
+  configuration.
+- Host compromise defeats local file/process boundaries.
+- Locally installed Python extensions are not sandboxed.
+- Network segmentation does not provide complete outbound enforcement.
+- Hosted alert routing, centralized retention, high availability, and public denial-of-service
+  defense are outside the self-hosted single-operator scope.
+- Provider licensing, backup encryption/retention, filesystem/object-store durability, and host
+  firewalling remain operator responsibilities.
 
-Private reporting and credential-response steps are in `../SECURITY.md`.
+Private reporting and response are in [SECURITY.md](../SECURITY.md), [incident response](incident_response.md),
+and [failure modes](failure_modes.md).
