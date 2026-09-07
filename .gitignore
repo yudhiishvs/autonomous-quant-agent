@@ -1,6 +1,8 @@
 # Unreviewed hidden files and tool-state directories are local by default.
 .*
 !/.dockerignore
+!/.coveragerc
+!/.gitleaksignore
 !/.editorconfig
 !/.gitignore
 !/.pre-commit-config.yaml

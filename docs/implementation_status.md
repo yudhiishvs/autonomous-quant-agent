@@ -1,5 +1,10 @@
 # Implementation status
 
+The [2026-09-07 quality repair](evidence/quality-repair-20260907.md) records the current
+CI/security findings and local fixes. Earlier command results below remain historical
+evidence, not proof that the updated workflows have run on GitHub. Main CI passed after
+the maintainer published the prior work; the strict image gate still blocks acceptance.
+
 The non-AI runtime and operational corrections are implemented. Overall acceptance and activation
 remain **BLOCKED** by the strict image-security gate: each final local image has 54 OS package
 findings (51 HIGH/3 CRITICAL). The settled canonical `make check` passed end to end; completed evidence
