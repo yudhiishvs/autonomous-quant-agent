@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -753,3 +754,58 @@ def test_handler_can_raise_only_pre_sanitized_failure_metadata(repository: JobRe
     assert result is not None
     assert result.safe_last_error_code == "quality_failed"
     assert result.safe_last_error_message == "Data quality audit failed"
+
+
+@pytest.mark.parametrize("outbox", [False, True])
+@pytest.mark.parametrize("handler_fails", [False, True])
+def test_completion_uses_timestamp_after_last_background_heartbeat(
+    repository: JobRepository,
+    monkeypatch: pytest.MonkeyPatch,
+    outbox: bool,
+    handler_fails: bool,
+) -> None:
+    from adaptive_trader.platform.jobs.worker import _HeartbeatLeaseGuard
+
+    repository.create(_request())
+    tick = 0
+
+    def clock() -> datetime:
+        nonlocal tick
+        tick += 1
+        return _NOW + timedelta(seconds=tick)
+
+    @contextmanager
+    def final_heartbeat(guard: _HeartbeatLeaseGuard) -> Iterator[None]:
+        yield
+        # Deterministically reproduce a heartbeat completing during shutdown,
+        # after the handler returns but before the heartbeat thread is joined.
+        guard.checkpoint()
+
+    monkeypatch.setattr(_HeartbeatLeaseGuard, "keep_alive", final_heartbeat)
+
+    def handler(*, job: object, lease: object) -> None:
+        if handler_fails:
+            raise RuntimeError("synthetic failure")
+
+    if outbox:
+
+        class Publisher:
+            def publish(self, **kwargs: object) -> None:
+                if handler_fails:
+                    raise RuntimeError("synthetic failure")
+
+        assert DurableOutboxWorker(
+            repository,
+            owner="publisher-1",
+            publisher=Publisher(),
+            clock=clock,
+        ).run_one() is (not handler_fails)
+    else:
+        result = DurableJobWorker(
+            repository,
+            owner="worker-1",
+            clock=clock,
+            handlers=BoundedJobHandlers(handler, handler, handler, handler),
+        ).run_one()
+        assert result is not None
+        assert result.state is (JobState.FAILED if handler_fails else JobState.SUCCEEDED)
