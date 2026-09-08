@@ -107,3 +107,32 @@ The known exact-average paper reconciliation limitation remains fail-closed. Mai
 approval remains frozen/default-deny. Real provider contracts, hosted database/TLS and
 sustained operator-host operation remain externally unvalidated. Updated hosted workflows
 also require publication and a fresh GitHub run; local validation is not that evidence.
+
+
+## Authenticated hardened-image investigation
+
+The user completed registry authentication. The default Docker credential configuration
+continued to request an anonymous token, while an isolated configuration using the
+macOS Keychain helper successfully pulled the runtime and dev images. Authentication is
+no longer the blocker; credentials were neither read nor included in this repository.
+
+The Python 3.11 Debian 13 runtime index digest is
+`8d368822f919204a2402005a2c3e65ea4ae63da6b38c54da78fd2cf84c74e553`;
+the dev index digest is
+`2849f38b7b0738c8a4a6c23ee0c8d96d1e6b6a1149aa4c03f056e3ce2f930839`.
+Local ARM64 inspection found Python 3.11.16 at `/usr/bin/python`, default UID 65532,
+SQLite 3.46.1, and global pip/setuptools/ensurepip modules. These differ from the
+existing image contract and require migration work before adoption.
+
+Pinned Trivy 0.72.0 scanned the exported runtime with OS/library vulnerability
+classification and HIGH/CRITICAL severity: 63 HIGH and one CRITICAL finding. This is a
+raw scan without VEX suppression, not an assessment that every finding is exploitable.
+Docker's public Python VEX feed documents an ncurses backport, but its Debian SQLite
+CVE-2026-11822 and CVE-2026-11824 statements cite no-dsa classification rather than an
+applied patch. Those statements alone do not establish application-specific safety.
+No VEX exception was adopted, no scanner gate was weakened, and no Dockerfile change
+was made. The candidate has not satisfied the current acceptance gate.
+
+Sources: [Docker scanner guidance](https://docs.docker.com/dhi/how-to/scan/) and
+[Docker Python VEX feed](https://github.com/docker-hardened-images/advisories/blob/main/vex/python/dhi-python.vex.json).
+Local scan evidence: `/private/tmp/aqa-dhi-runtime.json`.
