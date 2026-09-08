@@ -136,3 +136,21 @@ was made. The candidate has not satisfied the current acceptance gate.
 Sources: [Docker scanner guidance](https://docs.docker.com/dhi/how-to/scan/) and
 [Docker Python VEX feed](https://github.com/docker-hardened-images/advisories/blob/main/vex/python/dhi-python.vex.json).
 Local scan evidence: `/private/tmp/aqa-dhi-runtime.json`.
+
+
+## Wolfi remediation verification
+
+The replacement uses public Wolfi base digest
+`918a593b8268c222afd4e2c4f06860ac984e60719b4697e4c71d796bc8fcd042`,
+Python APK `3.11.16-r5`, and SQLite APK `3.53.4-r2`. It does not require Docker
+Hardened Images credentials in CI. The Python lock and 61-file Main AI freeze remain
+unchanged. The shared runtime removes global ensurepip and installer wheels; numeric
+UID/GID 10001 and root-owned application dependencies are retained.
+
+All three ARM64 images built. Pinned Trivy 0.72.0 scanned each complete image with
+HIGH/CRITICAL severity and default secret scanning: zero findings, no VEX or ignore
+exceptions. Reports are `/private/tmp/aqa-wolfi-{platform,market-data,execution}.json`.
+The first platform fixture probe correctly rejected a local build with an unknown source
+revision; rebuilding with the actual revision corrected that verification setup error.
+Affected local tests: 45 passed. Workflow lint and Main AI freeze verification passed.
+Hosted AMD64 build and test results are still required before merge.
