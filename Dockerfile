@@ -1,6 +1,12 @@
 FROM ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a AS uv
 
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS platform-builder
+# Wolfi provides maintained glibc packages compatible with manylinux wheels.
+# Keep Python 3.11 and SQLite's patched release explicit; signed APK dependencies
+# are inventoried and scanned in every final image.
+FROM cgr.dev/chainguard/wolfi-base@sha256:918a593b8268c222afd4e2c4f06860ac984e60719b4697e4c71d796bc8fcd042 AS python-base
+RUN apk add --no-cache python-3.11=3.11.16-r5 sqlite-libs=3.53.4-r2
+
+FROM python-base AS platform-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -16,12 +22,11 @@ COPY src ./src
 
 RUN uv sync --locked --no-dev --extra dashboard --no-editable
 
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS runtime-base
+FROM python-base AS runtime-base
 
 # Installers belong only to builders. Remove the base image's unused global
 # tooling (including its vendored libraries), leaving the locked venv untouched.
-RUN /usr/local/bin/python -m pip uninstall --yes setuptools pip \
-    && rm -rf /usr/local/lib/python3.11/ensurepip
+RUN rm -rf /usr/lib/python3.11/ensurepip /usr/share/python-wheels
 
 ARG AQA_UID=10001
 ARG AQA_GID=10001
@@ -37,8 +42,8 @@ ENV HOME=/tmp \
 
 WORKDIR /app
 
-RUN groupadd --gid "${AQA_GID}" aqa \
-    && useradd --uid "${AQA_UID}" --gid "${AQA_GID}" --no-create-home --shell /usr/sbin/nologin aqa \
+RUN addgroup -g "${AQA_GID}" aqa \
+    && adduser -D -H -u "${AQA_UID}" -G aqa -s /sbin/nologin aqa \
     && chown "${AQA_UID}:${AQA_GID}" /app \
     && chmod 0555 /app \
     && install -d -o "${AQA_UID}" -g "${AQA_GID}" -m 0750 \
@@ -77,7 +82,7 @@ CMD ["aqa", "doctor"]
 
 FROM platform AS application
 
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS market-data-builder
+FROM python-base AS market-data-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -149,7 +154,7 @@ RUN test -r /etc/ssl/certs/ca-certificates.crt
 ENTRYPOINT ["python", "/app/docker/entrypoint.py"]
 CMD ["python", "-m", "adaptive_trader.collection.cli", "run"]
 
-FROM python:3.11-slim@sha256:9534e5a8e315485d4061ed659af0fd78a284c015f9b73661b41d6bab25604534 AS execution-builder
+FROM python-base AS execution-builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

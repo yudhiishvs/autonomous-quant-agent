@@ -6,7 +6,12 @@ The checked-in Compose topology uses one locked platform image for the API, dash
 worker, migration, and database-bootstrap commands. The data-only collector target remains
 separate so the live market-data process does not contain the Alpaca trading SDK. A third execution
 target isolates the default-deny paper gate from strategy code. All three targets use
-digest-pinned Python and uv images, install from `uv.lock`, and run as numeric UID/GID `10001`.
+a digest-pinned Wolfi base and uv image, install from `uv.lock`, and run as numeric UID/GID `10001`.
+Python 3.11.16 and SQLite 3.53.4 are exact APK package pins from the signed Wolfi
+repository. Transitive OS dependencies are resolved from that repository and recorded
+in each build SBOM; their versions can change between rebuilds and must pass the gate.
+The glibc runtime supports the existing locked manylinux wheels. Global Python
+installers and bundled installer wheels are removed from final stages.
 Compiler and dependency-installation tooling remains in build stages.
 
 Application services use a read-only root filesystem, an explicit `/tmp` tmpfs, dropped Linux

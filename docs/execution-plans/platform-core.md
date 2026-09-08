@@ -1053,3 +1053,14 @@ remain incomplete. Every credentialed external adapter remains unvalidated by de
 data or paper connection, real credential-file read, paper submission, or real-money path is part
 of this implementation evidence. Requirement-level remaining work and validation boundaries are
 authoritative in `docs/requirements.md`.
+
+
+## Container remediation continuation
+
+The maintainer authorized repository cleanup, repair publication, and iteration on
+`fix/ci-security-repairs`. Historical results remain intact. Evaluate a maintained
+Wolfi glibc runtime with Python 3.11.16 and SQLite 3.53.4: the raw candidate passed
+pinned Trivy 0.72.0 HIGH/CRITICAL scanning without exceptions. Preserve frozen Python
+dependencies, UID/GID 10001, immutable application files, separate runtime dependency
+groups, and default-deny paper execution. Final image builds, offline behavior and
+hosted checks remain pending; candidate scan success is not final-image acceptance.

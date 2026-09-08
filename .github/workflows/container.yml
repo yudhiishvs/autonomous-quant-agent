@@ -58,11 +58,24 @@ jobs:
 
       - name: Verify global runtime installers are absent
         run: >-
-          docker run --rm --network none --entrypoint /usr/local/bin/python
+          docker run --rm --network none --entrypoint /usr/bin/python
           "${{ matrix.image }}:${{ github.sha }}" -I -c
           'import importlib.util;
           assert all(importlib.util.find_spec(name) is None
           for name in ("pip", "setuptools", "ensurepip"))'
+
+      - name: Verify supported Python and patched SQLite
+        run: >-
+          docker run --rm --network none --entrypoint python
+          "${{ matrix.image }}:${{ github.sha }}" -c
+          'import sqlite3, sys;
+          assert sys.version_info[:2] == (3, 11);
+          assert sqlite3.sqlite_version_info >= (3, 53, 2);
+          connection = sqlite3.connect(":memory:");
+          connection.execute("CREATE VIRTUAL TABLE search USING fts5(content)");
+          connection.execute("INSERT INTO search VALUES (?)", ("fixture",));
+          assert connection.execute("SELECT content FROM search WHERE search MATCH ?",
+          ("fixture",)).fetchone() == ("fixture",)'
 
       - name: Verify data-only runtime boundary
         if: ${{ matrix.target == 'market-data' }}
