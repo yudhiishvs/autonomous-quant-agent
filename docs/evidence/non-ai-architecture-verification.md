@@ -145,7 +145,7 @@ No Alpaca data authentication/subscription/REST request, paper account access/or
   scripts: reproducible local/CI checks, real CLI image smoke and isolated package verification.
 - `AGENTS.md`, requirements/status/runbooks and evidence indexes: current scope and explicit
   acceptance evidence. Existing editor settings and local skill files were inspected; no new
-  Codex permission/configuration or skill installation was introduced.
+  development-tool permission/configuration or skill installation was introduced.
 
 The Git diff includes inherited dirty files, including protected dependency and AI changes from
 before this assignment. It must not be interpreted as a list of changes authored in this task.
