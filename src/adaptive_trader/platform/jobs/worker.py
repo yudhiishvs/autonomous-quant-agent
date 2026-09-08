@@ -278,7 +278,9 @@ class DurableJobWorker:
                 error = execution_error.error
             except Exception:
                 error = SafeJobError("worker_failure", "Job handler failed without safe details")
-            completion = lease.checkpoint()
+        # Join the background heartbeat before capturing the completion timestamp.
+        # Otherwise a final heartbeat can advance durable state past this snapshot.
+        completion = lease.checkpoint()
         if error is not None:
             result = self._repository.fail(
                 job_id=running.job_id,
@@ -356,7 +358,9 @@ class DurableOutboxWorker:
                 )
             except Exception:
                 failed = True
-            completion = lease.checkpoint()
+        # Join the background heartbeat before capturing the completion timestamp.
+        # Otherwise a final heartbeat can advance durable state past this snapshot.
+        completion = lease.checkpoint()
         if failed:
             self._repository.fail_outbox(
                 event_id=event.outbox_event_id,
