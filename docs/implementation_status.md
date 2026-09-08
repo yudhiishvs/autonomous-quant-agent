@@ -1,63 +1,60 @@
 # Implementation status
 
-The [2026-09-07 quality repair](evidence/quality-repair-20260907.md) records the current
-CI/security findings and local fixes. Earlier command results below remain historical
-evidence, not proof that the updated workflows have run on GitHub. Main CI passed after
-the maintainer published the prior work; the strict image gate still blocks acceptance.
+The offline platform and its non-AI services are implemented and tested. That does not
+establish readiness for an externally connected deployment.
 
-The non-AI runtime and operational corrections are implemented. Overall acceptance and activation
-remain **BLOCKED** by the strict image-security gate: each final local image has 54 OS package
-findings (51 HIGH/3 CRITICAL). The settled canonical `make check` passed end to end; completed evidence
-and exact commands are recorded in [the verification ledger](evidence/non-ai-architecture-verification.md).
-A build or focused test pass must not be substituted for an outstanding acceptance gate.
+The container and heartbeat repairs in PRs [#19](https://github.com/yudhiishvs/autonomous-quant-agent/pull/19)
+and [#20](https://github.com/yudhiishvs/autonomous-quant-agent/pull/20) passed all five
+workflows on the merged revision: CI, Security, Container, CodeQL, and Offline Demo.
+Git history was subsequently rewritten for documentation cleanup. Check
+[Actions](https://github.com/yudhiishvs/autonomous-quant-agent/actions) for the result
+on any later revision; historical success is not a guarantee for a new build.
 
-## Implementation and verification surfaces
+## Verified behavior
 
-| Surface | Implemented behavior | Executed evidence |
-| --- | --- | --- |
-| Configuration/security | Immutable profiles/universes, canonical hashes, UTC/Decimal contracts, private secret files and scoped roles | Freeze checks; static/type/security and negative-boundary tests |
-| Collection/data | Fixed-series adapters, canonical corrections, fenced checkpoints, exact aggregates, durable gaps and readiness; actual fixture ingest/aggregate/freeze CLI | Socket-denied tests; real PostgreSQL integration; final image public CLI creates 4,290 minute rows and 208 dataset rows |
-| Datasets | Causal bounded snapshots, immutable Parquet/manifests, lineage, registration and metadata policy | Late-observation, corruption, restart and artifact-publication tests |
-| Operational persistence | Alembic head 0015, audit, risk/execution stages, jobs/outbox, scoped views and roles | 160 PostgreSQL tests at completed checkpoint; restore verifies data, audit and effective privileges |
-| Service runtime | Current-clock scheduler, AlwaysFlat strategy, role-separated shadow and bounded durable workers | SQL integration, real SQLite job/outbox composition, lifecycle/health failure tests |
-| Risk/paper execution | Signed risk, immutable intents, two-stage reversals, reconciliation/accounting, forced flatten and actual fill-activity evidence | Broker protocol, ambiguity/cap, atomic rollback and recovery tests; external provider not exercised |
-| API/dashboard | Authenticated bounded control routes, read-only UI client, operator controls and authoritative metrics | API/client tests; local fixture browser check; metric projections/corrupt-state SQL tests |
-| Operations/harness | Canonical Makefile, packaging, regression/demo, benchmark, security/hooks, CI and isolated runtime images | All three images build; final scan evidence matches image configurations; canonical full pass in ledger |
+| Area | What is covered |
+| --- | --- |
+| Market data | Validation, duplicate/correction lineage, fenced checkpoints, aggregation, gaps and readiness |
+| Datasets | Immutable Parquet publication, manifests, causal snapshots and registration |
+| Storage | PostgreSQL migrations, scoped roles, transactions, audit verification and restore checks |
+| Workers | Durable jobs, outbox delivery, leases, health reporting and recovery paths |
+| Paper execution | Risk checks, recorded intent, reconciliation, reversal and ambiguity handling with fake providers |
+| API and dashboard | Authenticated control routes and read-only status views |
+| Packaging | Installed-wheel checks, three isolated runtime images and an offline demo |
 
-Default Compose includes PostgreSQL/bootstrap/migration, API, dashboard and offline workers.
-Optional market-data and paper profiles isolate external credentials. Paper submission remains
-disabled, and the frozen model-approval contract denies authorization. Durable health/readiness
-and source presence do not override that denial or the image-security blocker.
+The fixture pipeline produces 4,290 minute rows and a 208-row frozen dataset. The
+heartbeat repair added four deterministic regression cases covering job and outbox
+completion on both success and failure paths.
 
-## Coverage and evidence discipline
+The former container blocker—51 HIGH and three CRITICAL OS findings per Debian-based
+image—was resolved by moving to a pinned Wolfi base with Python 3.11.16 and SQLite
+3.53.4. All three rebuilt images passed the strict scanner without vulnerability
+exceptions. Future rebuilds must still pass: advisory databases and transitive OS
+packages can change.
 
-The repository floor remains 74% and platform floor 85%. Reports now use two-decimal precision;
-84.56% cannot pass by rounding up. Additional substantive failure tests raised fresh platform coverage to 85.69%; repository
-coverage is 82.19%. The final run passed 3,039 offline tests and 160 PostgreSQL tests.
-There are no production coverage exclusions added for difficult adapter or error paths.
+## Remaining limitations
 
-The [traceability index](evidence/non-ai-requirement-traceability.md) covers all 173 unique IDs.
-Earlier requirement status tables describe historical milestones; current acceptance is governed
-by executed results and explicit blockers in the final ledger, not by labels on old rows.
+Alpaca adapters are `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`. Actual data entitlements,
+paper account/order behavior, hosted PostgreSQL/TLS, and sustained service operation
+still need external validation. None is established by the offline demo.
 
-## Genuine limitations and external validation
+Paper reconciliation rejects a rounded broker average when it differs from exact fill
+evidence. It blocks on the mismatch rather than assuming an undocumented tolerance.
+This remains an integration limitation.
 
-The unresolved base-image advisories block activation. The fixed paper facade also rejects a
-rounded broker average when it differs from exact fill evidence; no undocumented tolerance is
-assumed. That precision limitation fails closed and is documented in operations.
+Main AI is `OUT_OF_SCOPE_FROZEN_AI`: the 61-file manifest and frozen dependencies are
+unchanged by these repairs. Training and model approval are outside the completed
+work. Tracked profiles disable submission, and the frozen approval gate cannot grant
+paper-order authority. Real-money trading and public multi-user hosting are unsupported.
 
-Alpaca data authentication/entitlement, paper account/order access, hosted PostgreSQL/TLS,
-deployment and remote GitHub workflow execution were intentionally not performed. Implemented
-adapters remain `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`; this label does not hide a failed local
-contract. No real credentials, provider requests, remote activation, commit or push were used.
+## Evidence
 
-## Frozen and excluded scope
+- [Development notes](development_notes.md): the two recent defects and their fixes.
+- [Quality repair ledger](evidence/quality-repair-20260907.md): dated investigation results.
+- [Architecture verification](evidence/non-ai-architecture-verification.md): earlier checks.
+- [Requirement traceability](evidence/non-ai-requirement-traceability.md): requirement-to-code map.
 
-Main AI is **OUT_OF_SCOPE_FROZEN_AI**. All 61 protected file hashes, inventory and dependency
-fingerprints match the inherited working-tree baseline. Training, features, labels, research
-strategies, models, promotion and approval behavior remain unchanged. The model approval gate
-cannot authorize paper submission in this frozen state.
-
-Real-money trading, public/multi-tenant hosting, paid/cloud provisioning, Kubernetes and release
-publication remain outside scope. The offline demo is permanently labeled
-`OFFLINE_FIXTURE_NOT_ALPACA_EVIDENCE`; test outcomes do not establish market performance.
+Read the dated ledgers chronologically. Their old failure counts describe the builds
+under investigation at that time, not the current container implementation. Coverage
+floors remain 74% for the repository and 85% for the platform, with branch measurement
+and two-decimal reporting.

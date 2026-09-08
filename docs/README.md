@@ -1,7 +1,8 @@
-# Documentation Index
+# Documentation
 
-Start with the document that owns the question. Do not infer current behavior from a target
-design or a roadmap item.
+Start with the [quickstart](../README.md), [current status](implementation_status.md),
+or [development notes](development_notes.md). The tables below link to the detailed
+references. Dated execution plans and evidence ledgers retain historical results.
 
 ## Product and delivery
 

@@ -1,6 +1,6 @@
 # Platform core execution plan
 
-## Current quality repair — 2026-09-07
+## Historical quality repair — 2026-09-07
 
 The maintainer requested a comprehensive quality repair after publishing `eba2e9a`.
 The checkout starts clean at that commit; GitHub main is merge `316427ad`. Main CI,
@@ -1075,3 +1075,12 @@ delivery, retaining fencing and lease-loss checks. Four deterministic regression
 cover success/failure for each worker and fail before the fix. The user-authorized
 repair/publication scope continues on `fix/job-heartbeat-completion`; no AI or provider
 authority changes. Validation and a fresh reviewed PR are required before merge.
+
+
+## Documentation readability — local changes only
+
+The maintainer requested a shorter, clearer README and contributor documentation, with
+no commits, pushes, or PR changes. Move the offline demo ahead of detailed reference
+material, explain design tradeoffs, and consolidate the current implementation status.
+Keep dated evidence intact and personal contribution claims out of the text unless
+supplied by the maintainer. Runtime code, safeguards, and frozen AI files are unchanged.
