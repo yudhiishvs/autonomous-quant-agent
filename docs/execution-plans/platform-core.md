@@ -1064,3 +1064,14 @@ pinned Trivy 0.72.0 HIGH/CRITICAL scanning without exceptions. Preserve frozen P
 dependencies, UID/GID 10001, immutable application files, separate runtime dependency
 groups, and default-deny paper execution. Final image builds, offline behavior and
 hosted checks remain pending; candidate scan success is not final-image acceptance.
+
+
+## Heartbeat completion race follow-up
+
+A hosted branch run reproduced a real race: the final completion checkpoint was taken
+before the heartbeat thread stopped, allowing a later heartbeat to make the completion
+timestamp stale. Move that checkpoint after heartbeat shutdown for both jobs and outbox
+delivery, retaining fencing and lease-loss checks. Four deterministic regression cases
+cover success/failure for each worker and fail before the fix. The user-authorized
+repair/publication scope continues on `fix/job-heartbeat-completion`; no AI or provider
+authority changes. Validation and a fresh reviewed PR are required before merge.
