@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -193,7 +194,9 @@ def test_compose_keeps_paper_submission_default_denied(project_root: Path) -> No
 def test_dockerfile_is_locked_multistage_and_nonroot(project_root: Path) -> None:
     text = (project_root / "Dockerfile").read_text(encoding="utf-8")
     assert "ghcr.io/astral-sh/uv:0.11.7@sha256:" in text
-    assert text.count("python:3.11-slim@sha256:") >= 3
+    assert "cgr.dev/chainguard/wolfi-base@sha256:" in text
+    assert "python-3.11=3.11.16-r5 sqlite-libs=3.53.4-r2" in text
+    assert text.count("FROM python-base AS") == 4
     assert "uv sync --locked --no-dev --extra dashboard --no-editable" in text
     assert "uv sync --locked --only-group market-data-runtime --no-install-project" in text
     assert "pip install" not in text
@@ -235,6 +238,41 @@ def test_dependabot_covers_uv_actions_and_docker(project_root: Path) -> None:
     assert all(entry["directory"] == "/" for entry in config["updates"])
 
 
+def test_dependency_updates_respect_frozen_graph_and_supported_python(project_root: Path) -> None:
+    entries = {
+        entry["package-ecosystem"]: entry
+        for entry in _yaml(project_root / ".github" / "dependabot.yml")["updates"]
+    }
+    assert entries["uv"]["open-pull-requests-limit"] == 0
+    assert "ignore" not in entries["uv"]  # Security updates must remain eligible.
+    assert entries["docker"]["open-pull-requests-limit"] > 0
+    assert entries["docker"]["ignore"] == [
+        {
+            "dependency-name": "python",
+            "update-types": ["version-update:semver-major", "version-update:semver-minor"],
+        }
+    ]
+
+
+def test_verification_configuration_is_publishable_but_private_state_is_ignored(
+    project_root: Path,
+) -> None:
+    public = {".coveragerc", ".gitleaksignore", ".secrets.baseline"}
+    private = {".env", ".env.local", ".coverage", "secrets/example.key", "runtime/example.db"}
+    result = subprocess.run(
+        ["git", "check-ignore", "--no-index", "--stdin"],
+        input="\n".join(sorted(public | private)) + "\n",
+        capture_output=True,
+        text=True,
+        cwd=project_root,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert set(result.stdout.splitlines()) == private
+    assert all((project_root / name).is_file() for name in public)
+
+
 def test_security_container_and_codeql_gates_are_wired(project_root: Path) -> None:
     workflow_paths = sorted((project_root / ".github" / "workflows").glob("*.yml"))
     workflows = {path.name: _yaml(path) for path in workflow_paths}
@@ -255,7 +293,10 @@ def test_security_container_and_codeql_gates_are_wired(project_root: Path) -> No
                     assert _ACTION_REFERENCE.fullmatch(action), action
 
     security = " ".join(yaml.safe_dump(workflows["security.yml"], sort_keys=True).split())
-    assert "gitleaks/gitleaks-action@" in security
+    assert "ghcr.io/gitleaks/gitleaks@sha256:" in security
+    assert "git /repo --log-opts=--all" in security
+    assert '--volume "${{ github.workspace }}:/repo:ro"' in security
+    assert "--redact --exit-code=1" in security
     assert "pip-audit" in security
     assert "--no-editable" in security
     assert "--require-hashes" in security

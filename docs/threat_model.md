@@ -43,8 +43,8 @@ sources of correct content.
 The entry points include FastAPI, the Streamlit server, CLI, YAML configuration, environment and
 secret files, plugin entry points, market-data REST/WebSocket payloads, the paper-broker REST API
 and trade-update stream, PostgreSQL, the Docker network, Parquet/JSON artifacts, and GitHub
-Actions/dependencies. Some are target entry points whose services are not yet implemented;
-documenting them does not claim that they are reachable today.
+Actions/dependencies. Provider-backed paths remain profile-gated and externally unvalidated;
+listing an entry point does not authorize activating it.
 
 ## Trust-boundary summary
 
@@ -182,17 +182,18 @@ documenting them does not claim that they are reachable today.
 - **Preventive controls:** **Current:** fixed official data endpoints/feed, disabled proxy
   inheritance, TLS verification, explicit bounds/timeouts, requested-symbol checks, canonical
   validation, completed-minute cutoffs, session windows, pagination bounds, and failure
-  classification. **Planned:** explicit gap/readiness contracts for all downstream decisions.
+  classification, durable gap lifecycle and downstream readiness checks.
 - **Detective controls:** **Current:** reconciliation provenance, durable collector events,
   checkpoints, content hashes, and negative REST/WebSocket tests.
 - **Recovery controls:** **Current:** capped retries, bounded overlap restart, stop on permanent
-  failures, durable run/lease cleanup, and duplicate-safe replay. **Planned:** gap repair and
+  failures, durable run/lease cleanup, duplicate-safe replay, bounded gap repair and
   downstream readiness blocking through canonical datasets.
 - **Verification test:** `tests/test_collection_alpaca.py`, `tests/test_collection_contracts.py`,
   and `tests/test_collection_service.py`.
-- **Residual risk:** Credentialed Alpaca behavior is `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`; the
-  test socket guard is not process-wide, and explicit canonical gap lifecycle is absent.
-- **Owner/status:** Market-data maintainer — `PARTIALLY_IMPLEMENTED`.
+- **Residual risk:** Credentialed Alpaca behavior is `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
+  The canonical offline command denies Python socket/DNS operations, and container probes use
+  `--network none`; this does not establish a host-wide egress firewall for deployed workers.
+- **Owner/status:** Market-data maintainer — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ### AQA-TM-006 — Replayed or corrected observation corrupts history
 
@@ -214,8 +215,8 @@ documenting them does not claim that they are reachable today.
 - **Verification test:** `tests/test_collection_contracts.py` and
   `tests/integration/test_collection_postgres.py` duplicate, correction, projection, and append-only
   cases.
-- **Residual risk:** Full frozen-dataset manifests and audit-chain verification are not implemented;
-  a database owner can disable constraints or alter data.
+- **Residual risk:** Frozen-dataset manifests and audit-chain verification are implemented, but
+  a database owner can disable constraints or alter both data and locally stored evidence.
 - **Owner/status:** Data/persistence maintainers — `IMPLEMENTED_AND_VERIFIED` for the current
   collector boundary.
 
@@ -255,18 +256,19 @@ documenting them does not claim that they are reachable today.
   parameters, or a compromised service writes tables outside its responsibility.
 - **Impact:** Data disclosure, destructive mutation, falsified audit state, or privilege expansion.
 - **Preventive controls:** **Current:** SQLAlchemy bound parameters, URL-routing override rejection,
-  non-loopback TLS requirements, separate migration URL, and collector transaction boundaries.
-  **Planned:** PostgreSQL 16 service roles with explicit grant/denial tests for every service.
+  non-loopback TLS requirements, separate migration URL, collector transaction boundaries, and
+  PostgreSQL 16 service roles with explicit grant/denial tests.
 - **Detective controls:** **Current:** schema integrity checks and parameterized persistence tests.
   **Planned:** audited authorization failures without query/credential leakage.
 - **Recovery controls:** **Current:** reject unsafe connection configuration and transaction
   failures. **Planned:** revoke role, rotate credentials, restore verified backup, and audit repair.
-- **Verification test:** Current collector persistence tests are in
-  `tests/integration/test_collection_postgres.py`; Section 31 cases 6 and 35 remain incomplete as a
-  full platform role matrix.
-- **Residual risk:** Current migration does not provision or verify the target least-privilege roles;
-  a database owner is outside the application trust boundary.
-- **Owner/status:** Persistence/security maintainers — `PARTIALLY_IMPLEMENTED`.
+- **Verification test:** `tests/integration/test_collection_postgres.py`,
+  `tests/integration/test_platform_postgres_roles.py` and
+  `tests/integration/test_platform_backup_restore.py` exercise persistence, scoped role grants,
+  denials and restored ACLs using real PostgreSQL.
+- **Residual risk:** A database owner is outside the application trust boundary; deployed role
+  configuration and TLS still require operator-host validation.
+- **Owner/status:** Persistence/security maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ### AQA-TM-009 — Paper/live submission gate bypass
 
@@ -279,18 +281,18 @@ documenting them does not claim that they are reachable today.
 - **Impact:** Unauthorized paper order; a future regression could create real-money exposure.
 - **Preventive controls:** **Current:** tracked submission disabled, literal `paper=True`, no live
   endpoint or alternate broker implementation, central legacy gate, intent-before-submit states,
-  and deterministic client IDs. **Planned:** independent signed authorization and paper account hash
-  gates in the target execution worker.
+  deterministic client IDs, independent signed authorization and paper account hash gates.
 - **Detective controls:** **Current:** static repository scans, gate reason tests, state-machine
   tests, and reconciliation checks.
 - **Recovery controls:** **Current:** deny before client construction/submission and persist legacy
-  halt state for discrepancies. **Planned:** target durable latch, reconcile, and forced-flat
-  incident workflow.
+  halt state for discrepancies; platform durable latches, reconciliation and forced-flat
+  recovery preserve ambiguity rather than retrying blind.
 - **Verification test:** `tests/safety/test_static_repository_safety.py`,
   `tests/test_live_safety_matrix.py`, and runtime/profile gate tests.
-- **Residual risk:** Legacy Alpaca paper interaction is not externally validated; the target signed
-  risk/execution pipeline is not implemented. Real-money operation remains unsupported.
-- **Owner/status:** Execution/security maintainers — `PARTIALLY_IMPLEMENTED`.
+- **Residual risk:** Alpaca paper interaction is not externally validated. The signed platform
+  pipeline is implemented and fake-tested, while Main AI approval stays default-deny and frozen.
+  Real-money operation remains unsupported.
+- **Owner/status:** Execution/security maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ### AQA-TM-010 — Ambiguous broker submission or duplicate fill
 
@@ -302,20 +304,22 @@ documenting them does not claim that they are reachable today.
 - **Attack/failure sequence:** The worker retries blindly, submits twice, applies a fill twice, or
   assumes success despite unresolved broker state.
 - **Impact:** Duplicate exposure, incorrect position/cash, or missing evidence of external effects.
-- **Preventive controls:** **Current:** legacy intent-before-submit state machine, deterministic
-  client IDs, idempotent fill/update handling, and reconciliation that blocks unknown broker state.
-  **Planned:** target durable outbox, signed authorization, ambiguity latch, and fake/paper adapter
-  parity.
-- **Detective controls:** **Current:** reconciliation compares broker orders/positions and persists
-  halt latches. **Planned:** explicit target incidents and audit-chain correlation.
-- **Recovery controls:** **Current:** block on unknown order/position and persist halt state across
-  restart. **Planned:** reconcile by client ID before any retry, then flatten or leave a durable
-  incident on failure.
-- **Verification test:** `tests/test_live_safety_matrix.py` reconciliation, latch, transition, and
-  duplicate-update cases; target Section 31 cases 28–30 and 44 remain incomplete.
-- **Residual risk:** External paper-broker timeout behavior is
-  `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`; target execution and forced-flatten workflows are absent.
-- **Owner/status:** Execution maintainer/operator — `PARTIALLY_IMPLEMENTED`.
+- **Preventive controls:** **Current:** legacy and platform intent-before-submit states,
+  deterministic client IDs, idempotent fill/update handling, signed authorization, durable
+  ambiguity latches, and reconciliation that blocks unknown broker state.
+- **Detective controls:** **Current:** reconciliation compares broker orders/positions, persists
+  halt latches and correlates durable execution/audit evidence.
+- **Recovery controls:** **Current:** block on unknown order/position, persist halt state across
+  restart, reconcile by client ID before retry, and retain durable failure evidence when flattening
+  cannot complete safely.
+- **Verification test:** `tests/test_live_safety_matrix.py`,
+  `tests/unit/test_platform_execution_failure_recovery.py`,
+  `tests/unit/test_platform_execution_evidence_boundaries.py` and
+  `tests/integration/test_platform_execution_postgres.py` exercise replay, restart, reversal and
+  durable execution evidence.
+- **Residual risk:** External paper-broker timing is unvalidated. Rounded provider average prices
+  can fail exact execution-evidence reconciliation; the failure blocks further exposure.
+- **Owner/status:** Execution maintainer/operator — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ### AQA-TM-011 — Artifact substitution, traversal, or replay
 
@@ -329,22 +333,21 @@ documenting them does not claim that they are reachable today.
 - **Impact:** Wrong data or authorization is accepted with misleading provenance.
 - **Preventive controls:** **Current:** canonical serialization/hashing, immutable experiment/config
   models, a mandatory experiment pin at composed profile loading, confined no-symlink configuration
-  and secret paths, and bounded artifact-root syntax. **Planned:** immutable dataset manifests and
-  signed signal/risk artifacts binding all required identities and freshness; strict Parquet/JSON/
-  YAML schemas and size/hash limits; and rejection of `pickle`, `joblib`, `dill`, `cloudpickle`,
-  `marshal`, untrusted `eval`/`exec`/`compile`, payload-selected subprocesses, and arbitrary dynamic
-  imports.
-- **Detective controls:** **Current:** known-answer canonical/hash and path-negative tests.
-  **Planned:** manifest verification and durable artifact-to-decision audit correlation.
+  and secret paths, bounded artifact-root syntax, immutable dataset manifests, signed signal/risk
+  artifacts binding identities and freshness, and strict Parquet/JSON/YAML schemas and limits.
+  No public artifact interface accepts executable model serialization or payload-selected commands.
+- **Detective controls:** **Current:** known-answer canonical/hash, path-negative, manifest
+  verification and durable artifact/decision binding tests.
 - **Recovery controls:** **Current:** reject mismatched configuration before service construction.
   **Planned:** quarantine corrupt artifacts and rebuild only from verified immutable evidence.
 - **Verification test:** `tests/unit/test_platform_canonical.py`,
   `tests/unit/test_platform_experiment.py`, `tests/unit/test_platform_profiles.py`, and runtime path
   tests; Section 31 cases 7–8, 17–18, 40, and 42 require completion at every artifact and dynamic-
   code boundary.
-- **Residual risk:** Frozen dataset manifests, signal signing, artifact quarantine, and the target
-  deserialization/dynamic-code static guard are not implemented; ordinary host users with
-  code-write authority remain trusted.
+- **Residual risk:** Frozen manifests, signed signal/risk contracts, confined artifact publication
+  and rejection of corrupt artifacts are implemented. Automatic operational quarantine and a
+  universal dynamic-code sandbox are not claimed; host users with code-write authority remain
+  trusted. See `test_platform_dataset_authority_boundaries.py` and `test_platform_job_artifacts.py`.
 - **Owner/status:** Data/platform security maintainers — `PARTIALLY_IMPLEMENTED`.
 
 ### AQA-TM-012 — Audit or evidence tampering
@@ -357,20 +360,20 @@ documenting them does not claim that they are reachable today.
 - **Attack/failure sequence:** Evidence is rewritten without detection, an audit event is omitted,
   or an exported report no longer matches durable source state.
 - **Impact:** Decisions and side effects cannot be reconstructed or attributed reliably.
-- **Preventive controls:** **Current:** collector raw observations are append-only and content
-  addressed. **Planned:** append-only chained audit events, immutable decision receipts, manifest
-  hashes, role-denied mutation, and transactional recording of every consequential transition.
-- **Detective controls:** **Current:** collector trigger/schema verification. **Planned:** `aqa audit
-  verify`, chain-tamper tests, and evidence-manifest comparison.
+- **Preventive controls:** **Current:** append-only content-addressed collector observations,
+  chained audit events, immutable decision receipts, manifest hashes, role-denied mutation and
+  transactional execution evidence.
+- **Detective controls:** **Current:** collector trigger/schema verification, `aqa audit verify`,
+  chain-tamper tests and evidence-manifest comparison.
 - **Recovery controls:** **Current:** preserve additional collector revisions rather than overwrite
   raw evidence. **Planned:** halt consequential work, restore from verified backup, and retain a
   durable incident describing any unrepairable gap.
-- **Verification test:** Collector append-only cases in
-  `tests/integration/test_collection_postgres.py`; Section 31 case 37 is not implemented for the
-  target audit chain.
-- **Residual risk:** Database-owner and host compromise can rewrite rows and backups; no audit-chain
-  verifier or complete immutable evidence pipeline exists.
-- **Owner/status:** Audit/persistence maintainers — `PARTIALLY_IMPLEMENTED`.
+- **Verification test:** `tests/integration/test_collection_postgres.py`,
+  `tests/integration/test_platform_audit_postgres.py`, `tests/unit/test_platform_audit_repository.py`
+  and `tests/unit/test_platform_audit_cli.py`.
+- **Residual risk:** Database-owner and host compromise can rewrite rows, evidence and backups;
+  a local hash chain cannot substitute for an independently protected external checkpoint.
+- **Owner/status:** Audit/persistence maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`.
 
 ### AQA-TM-013 — API input injection or resource abuse
 
@@ -504,8 +507,9 @@ documenting them does not claim that they are reachable today.
 - **Verification test:** `tests/test_collection_alpaca.py`, `tests/test_collection_service.py`,
   PostgreSQL lease tests, platform job/observability/control API tests, and declarative container
   health tests.
-- **Residual risk:** External provider and hosted database availability cannot be guaranteed;
-  process-wide resource isolation and target service supervision are not implemented.
+- **Residual risk:** External provider and hosted database availability cannot be guaranteed.
+  Compose resource bounds, health probes and worker signal handling are implemented; their
+  enforcement on the operator's host and sustained-load behaviour remain unvalidated.
 - **Owner/status:** Operations and service maintainers — `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`
   (deployment load and supervision evidence pending).
 

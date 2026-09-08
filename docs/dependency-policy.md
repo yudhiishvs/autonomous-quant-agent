@@ -85,3 +85,12 @@ current checked-in exceptions.
 
 Dependency updates should be grouped by purpose. Security corrections may be isolated for
 fast review, but must not silently change application behavior or bypass the locked graph.
+
+While the Main AI dependency freeze is active, routine uv version-update PRs are paused
+with `open-pull-requests-limit: 0`. Security updates and the blocking locked dependency
+audit remain active; a vulnerable frozen dependency requires a separately reviewed freeze
+exception, never a rewritten baseline merely to pass CI. Existing routine update PRs do
+not become valid by bypassing the freeze check. Restore the routine limit when the
+maintainer explicitly ends the freeze. Docker updates retain Python 3.11 and may update
+its patch releases and image digests; moving to another Python minor requires a planned
+compatibility migration across local tools, CI, images, and dependencies.

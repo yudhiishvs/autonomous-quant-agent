@@ -1,0 +1,18 @@
+# Preserve the frozen pyproject coverage policy and include real worker subprocesses.
+[run]
+branch = True
+source = adaptive_trader
+patch = subprocess
+
+[paths]
+source =
+    src
+    */test_execution_image_source_cl*/src
+
+[report]
+precision = 2
+show_missing = True
+skip_covered = False
+exclude_also =
+    if TYPE_CHECKING:
+    if __name__ == .__main__.:
