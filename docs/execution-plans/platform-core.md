@@ -1190,3 +1190,16 @@ completed the 21-slot/21-reconciliation/six-fake-fill session and restart with a
 services healthy. Both legacy regressions, format/lint/type/freeze and configured
 Bandit checks passed. Disposable services were removed and Compose volumes retained.
 No publication or order was performed. External acceptance items above remain open.
+
+## Multi-user product continuation — 2026-09-14
+
+The maintainer superseded the single-operator-only product scope and explicitly requested
+implementation and GitHub commits for the non-AI, non-backtester multi-user paper product.
+See [the active product plan](multi-user-paper-platform.md). Existing private services and
+frozen AI/dependencies remain protected; the new web boundary is additive. Commit and
+branch push are authorized for this reviewed scope, with no PR or paid deployment.
+
+The September 14 public-release instruction supersedes the intervening planning pause.
+The linked product plan is the single active implementation plan; this document retains
+the private-platform evidence. Actual broker orders and public exposure still require
+separate authorization.

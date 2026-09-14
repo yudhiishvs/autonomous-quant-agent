@@ -1,5 +1,14 @@
 # Implementation status
 
+## Public product — September 14, 2026
+
+The public multi-user product is `PARTIALLY_IMPLEMENTED`, not public-launch-ready.
+The new declarative strategy contract, target evaluator and local validator have 48
+passing focused tests. They have no execution authority. Public identity, brokerage,
+approval, execution, reporting and operating requirements are tracked separately in
+[the active plan](execution-plans/multi-user-paper-platform.md). Private-platform evidence
+below must not be read as proof that the public release is complete.
+
 The offline platform and its non-AI services are implemented and tested. That does not
 establish readiness for an externally connected deployment.
 

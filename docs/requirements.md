@@ -1,5 +1,27 @@
 # Platform requirements
 
+## Public-product continuation — September 14, 2026
+
+The [active public-product plan](execution-plans/multi-user-paper-platform.md) supersedes
+the single-operator-only product scope for new public services. Existing private-platform
+requirements and AI/backtester boundaries remain applicable to their implementations.
+
+| ID | Required public behavior | Current status |
+| --- | --- | --- |
+| PUB-001 | Verified customer lifecycle and tenant isolation across every owned surface | PARTIALLY_IMPLEMENTED |
+| PUB-002 | Each user's verified Alpaca paper OAuth connection, encrypted token lifecycle and entitlements | NOT_IMPLEMENTED |
+| PUB-003 | Immutable bounded declarative strategies; no arbitrary uploaded execution | PARTIALLY_IMPLEMENTED |
+| PUB-004 | Explicit non-AI approval bound to owner, account, version and independent account risk | NOT_IMPLEMENTED |
+| PUB-005 | Durable account-coordinated execution, uncertainty reconciliation and emergency controls | NOT_IMPLEMENTED |
+| PUB-006 | Accessible user workflow and truthful reconciled paper results | PARTIALLY_IMPLEMENTED |
+| PUB-007 | Scoped external signal API with replay protection and Python client | NOT_IMPLEMENTED |
+| PUB-008 | Public abuse controls, measured capacity, operational recovery, exports and deletion | PARTIALLY_IMPLEMENTED |
+
+The declarative contract and credential-free validator are documented in
+[public strategies](public-strategies.md). These do not authorize paper execution.
+The public application remains under local development; implementation completeness and
+public-launch readiness have not been established. No public signup capacity is promised.
+
 This ledger is the normalized specification for the platform-core program. It records current
 evidence separately from target behavior so that design prose is never treated as implementation.
 The starting point is commit `5690205b892053ea5fa12d7d590638a92003ff2c` on

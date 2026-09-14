@@ -1,5 +1,14 @@
 # Architecture
 
+## Public-product continuation
+
+The [public-product plan](docs/execution-plans/multi-user-paper-platform.md) governs the
+new multi-user release. `src/adaptive_trader/public_product` holds bounded non-AI strategy
+contracts and a current-observation target evaluator. It reuses platform canonical hashing
+and cannot authorize or submit orders. It does not change the backtester or frozen AI.
+The public identity/web boundary is being developed separately from the private services
+described below; those services must not be exposed as customer APIs.
+
 The repository contains a preserved legacy research/paper prototype and a separate non-AI
 platform implementation under `src/adaptive_trader/platform`. The current directive completes
 repository code, tests and activation configuration; it does not authorize deployment or provider

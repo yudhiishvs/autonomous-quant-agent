@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "symbol": "SPY",
+  "cadence_seconds": 60,
+  "session": "regular",
+  "asset_class": "us_equity",
+  "rule": {
+    "kind": "moving_average_target",
+    "fast_minutes": 5,
+    "slow_minutes": 20,
+    "target_shares": 1
+  },
+  "order": {"kind": "limit", "time_in_force": "day", "offset_bps": 0}
+}
