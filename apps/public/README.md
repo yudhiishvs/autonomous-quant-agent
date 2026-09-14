@@ -149,3 +149,42 @@ Alpaca responses. The browser intercepts the consent redirect; no call reaches A
 Stop this test server afterward and restart `python3 apps/public/run.py api` for the normal
 application. Never expose the test server. CI exercises both normal and contract modes.
 See [connection evidence](../../docs/evidence/public-paper-connections-20260914.md).
+
+## Explicit strategy approval
+
+Select a saved version to configure USD risk ceilings, select an owned connected paper
+account, review the server's summary and confirm it explicitly. The review lasts five
+minutes; the approval expires 1, 7 or 30 days after the review was created. Confirmation
+checks paper-account identity, connection generation and equity again. It signs the exact
+owner/account/version/limits/expiry binding. A newer approval for the same account/version
+revokes the previous one. Refreshing a balance does not invalidate approval; reconnecting
+the account does. Approvals are configuration records: **execution remains unavailable**.
+The 100-record development history limit includes drafts, expired and revoked approvals.
+Loss and exposure ceilings are inputs for the remaining independent risk implementation,
+not a guarantee of bounded losses.
+
+`AQA_PUBLIC_APPROVAL_SIGNING_KEY_FILE` must name a separate owner-private file containing
+32 random Ed25519 private-key bytes in URL-safe base64. The fresh disposable bootstrap
+creates this file for local development. Existing local fixtures can add only the missing
+key without reading or overwriting any other configuration:
+
+```sh
+apps/public/api/.venv/bin/python - <<'PY'
+import base64
+import os
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+key = base64.urlsafe_b64encode(Ed25519PrivateKey.generate().private_bytes_raw()).decode()
+fd = os.open("apps/public/.local/approval_signing_key", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+with os.fdopen(fd, "w") as stream:
+    stream.write(key)
+print("Local approval key created privately.")
+PY
+python3 apps/public/run.py migrate
+```
+
+Restart the local API after migration. Missing signing configuration disables creation and
+confirmation; it still permits revocation. Replacing the key makes existing signatures
+unverifiable and requires fresh approval. Production key custody, backup and rotation remain
+release gates. Do not rotate the key casually or reuse an encryption key for signing.
+The normal application has no synthetic signing/provider fallback.

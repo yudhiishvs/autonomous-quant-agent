@@ -49,6 +49,82 @@ test("paper consent, durable account snapshot and explicit disconnect", async ({
     await expect(
         page.getByText("Paper account snapshot refreshed.", { exact: true }),
     ).toBeVisible();
+    const versionName = `Approval browser ${Date.now()}`;
+    await page.getByLabel("Name", { exact: true }).fill(versionName);
+    await page
+        .getByRole("button", { name: "Save version", exact: true })
+        .click();
+    await expect(
+        page.getByRole("button", { name: "Review limits", exact: true }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Review limits", exact: true })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Review before approving" }),
+    ).toBeVisible();
+    await expect(
+        page.getByRole("button", {
+            name: "Approve configuration",
+            exact: true,
+        }),
+    ).toBeDisabled();
+    for (const width of [390, 768, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(
+            await page.evaluate(
+                () => document.documentElement.scrollWidth <= innerWidth,
+            ),
+        ).toBe(true);
+        expect(
+            (
+                await new AxeBuilder({ page })
+                    .withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"])
+                    .analyze()
+            ).violations,
+        ).toEqual([]);
+        await page
+            .locator(".approval-section")
+            .screenshot({ path: `test-results/approvals-${width}.png` });
+    }
+    await page
+        .getByLabel(
+            "I approve this paper strategy, account and these limits. It will not start automatically.",
+        )
+        .check();
+    await page
+        .getByRole("button", { name: "Approve configuration", exact: true })
+        .click();
+    await expect(
+        page.getByText("Approved configuration · Execution unavailable", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: new RegExp(versionName) }).click();
+    await expect(
+        page.getByText("Approved configuration · Execution unavailable", {
+            exact: true,
+        }),
+    ).toBeVisible();
+    await page
+        .getByRole("button", { name: "Revoke approval", exact: true })
+        .click();
+    await expect(
+        page.getByRole("dialog", { name: "Revoke this approval?" }),
+    ).toContainText("does not cancel broker orders or close positions");
+    await page
+        .getByRole("button", { name: "Keep approval", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Revoke approval", exact: true })
+        .click();
+    await page
+        .getByRole("button", { name: "Confirm revocation", exact: true })
+        .click();
+    await expect(
+        page.getByText("Approval revoked", { exact: true }),
+    ).toBeVisible();
     for (const width of [390, 768, 1440]) {
         await page.setViewportSize({ width, height: 900 });
         expect(

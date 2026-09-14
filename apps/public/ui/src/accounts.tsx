@@ -15,7 +15,7 @@ type Account = {
 };
 type AccountsResponse = { connection_available: boolean; accounts: Account[] };
 
-export function Accounts() {
+export function Accounts({ onChange }: { onChange: () => void }) {
     const [data, setData] = useState<AccountsResponse | null>(null);
     const [error, setError] = useState("");
     const [notice, setNotice] = useState("");
@@ -88,6 +88,7 @@ export function Accounts() {
             );
         } finally {
             await load();
+            onChange();
             setBusy(false);
         }
     }
@@ -121,6 +122,7 @@ export function Accounts() {
             );
         } finally {
             await load();
+            onChange();
             setBusy(false);
         }
     }

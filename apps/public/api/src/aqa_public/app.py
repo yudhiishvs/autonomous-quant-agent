@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
+from adaptive_trader.public_product.approvals import RiskLimits
 from adaptive_trader.public_product.strategies import StrategyDefinition
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
@@ -16,11 +17,15 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from aqa_public.broker import AlpacaConnection, BrokerRevoked, BrokerUnavailable
+from aqa_public.approval_signing import ApprovalSigner
+from aqa_public.approval_storage import ApprovalStore
+from aqa_public.broker import AlpacaConnection, BrokerRevoked, BrokerUnavailable, PaperAccount
 from aqa_public.broker_storage import BrokerStore, ConnectionConflict
 from aqa_public.identity import IdentityProvider, IdentityUnavailable
 from aqa_public.responses import (
     AccountsResponse,
+    ApprovalResponse,
+    ApprovalsResponse,
     DisconnectResponse,
     RefreshResponse,
     VersionResponse,
@@ -54,6 +59,25 @@ class DisconnectConsent(BaseModel):
     confirm: Literal["disconnect_without_cancelling_orders"]
 
 
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    account_id: UUID
+    version_id: UUID
+    request_id: UUID
+    limits: RiskLimits
+
+
+class ApprovalConsent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal["approve_paper_strategy_with_reviewed_limits"]
+    reviewed_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class RevokeConsent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal["revoke_without_cancelling_orders"]
+
+
 def create_app(
     settings: Settings,
     *,
@@ -69,6 +93,10 @@ def create_app(
         if settings.broker
         else None
     )
+    signer = (
+        ApprovalSigner(settings.approval_signing_key) if settings.approval_signing_key else None
+    )
+    approvals = ApprovalStore(database, signer)
     secure = not settings.development
     session_cookie = "aqa_session" if settings.development else "__Host-aqa_session"
     browser_cookie = "aqa_login" if settings.development else "__Host-aqa_login"
@@ -237,24 +265,21 @@ def create_app(
             "orders_cancelled": False,
         }
 
-    @app.post("/api/v1/accounts/{account_id}/refresh", response_model=RefreshResponse)
-    def refresh_account(
-        account_id: UUID, session: Annotated[CustomerSession, Depends(customer)]
-    ) -> dict[str, Any]:
+    def verified_account(owner: str, account_id: UUID) -> tuple[dict[str, Any], PaperAccount]:
         active_broker = configured_broker()
-        credential = connections.credential(session.owner, account_id)
+        credential = connections.credential(owner, account_id)
         if credential is None:
             raise HTTPException(404, "Connected paper account not found.")
         try:
             access = active_broker.decrypt(
-                owner=session.owner,
+                owner=owner,
                 account_id=credential["broker_id"],
                 ciphertext=credential["encrypted_token"],
             )
             account = active_broker.account(access)
         except BrokerRevoked:
             connections.disconnect(
-                session.owner,
+                owner,
                 account_id,
                 state="reconnect_required",
                 expected_revision=credential["revision"],
@@ -262,7 +287,7 @@ def create_app(
             raise
         if account.id != credential["broker_id"]:
             connections.disconnect(
-                session.owner,
+                owner,
                 account_id,
                 state="reconnect_required",
                 expected_revision=credential["revision"],
@@ -270,11 +295,93 @@ def create_app(
             raise BrokerUnavailable(
                 "Alpaca account identity changed. Reconnect your paper account."
             )
+        return credential, account
+
+    @app.post("/api/v1/accounts/{account_id}/refresh", response_model=RefreshResponse)
+    def refresh_account(
+        account_id: UUID, session: Annotated[CustomerSession, Depends(customer)]
+    ) -> dict[str, Any]:
+        credential, account = verified_account(session.owner, account_id)
         if not connections.refresh(session.owner, account_id, credential["revision"], account):
             raise ConnectionConflict(
                 "This connection changed during refresh. Reload the account list."
             )
         return {"accounts": connections.accounts(session.owner)}
+
+    def approval_result(owner: str, approval_id: UUID) -> dict[str, Any]:
+        result = next((row for row in approvals.list(owner) if row["id"] == approval_id), None)
+        if result is None:
+            raise HTTPException(404, "Approval not found.")
+        return result
+
+    @app.get("/api/v1/approvals", response_model=ApprovalsResponse)
+    def list_approvals(session: Annotated[CustomerSession, Depends(customer)]) -> dict[str, Any]:
+        return {
+            "approval_available": signer is not None and brokerage is not None,
+            "approvals": approvals.list(session.owner),
+        }
+
+    @app.post("/api/v1/approvals", response_model=ApprovalResponse, status_code=201)
+    def review_approval(
+        body: ApprovalRequest,
+        request: Request,
+        session: Annotated[CustomerSession, Depends(customer)],
+    ) -> dict[str, Any]:
+        if signer is None:
+            raise HTTPException(503, "Approval signing is not configured.")
+        credential, account = verified_account(session.owner, body.account_id)
+        try:
+            approval_id = approvals.draft(
+                owner=session.owner,
+                session=request.cookies[session_cookie],
+                account_id=body.account_id,
+                version_id=body.version_id,
+                limits=body.limits,
+                request_id=body.request_id,
+                verified=account,
+                revision=credential["revision"],
+            )
+        except ValueError:
+            raise HTTPException(
+                422, "Strategy targets and risk limits must fit the verified paper account equity."
+            ) from None
+        return approval_result(session.owner, approval_id)
+
+    @app.post("/api/v1/approvals/{approval_id}/confirm", response_model=ApprovalResponse)
+    def confirm_approval(
+        approval_id: UUID,
+        body: ApprovalConsent,
+        request: Request,
+        session: Annotated[CustomerSession, Depends(customer)],
+    ) -> dict[str, Any]:
+        if signer is None:
+            raise HTTPException(503, "Approval signing is not configured.")
+        previous = approval_result(session.owner, approval_id)
+        credential, account = verified_account(session.owner, previous["account_id"])
+        try:
+            approvals.confirm(
+                owner=session.owner,
+                session=request.cookies[session_cookie],
+                approval_id=approval_id,
+                reviewed_hash=body.reviewed_hash,
+                verified=account,
+                revision=credential["revision"],
+            )
+        except ValueError:
+            raise HTTPException(
+                422, "Paper account or approval validation failed. Refresh and review again."
+            ) from None
+        return approval_result(session.owner, approval_id)
+
+    @app.post("/api/v1/approvals/{approval_id}/revoke", response_model=ApprovalResponse)
+    def revoke_approval(
+        approval_id: UUID,
+        body: RevokeConsent,
+        session: Annotated[CustomerSession, Depends(customer)],
+    ) -> dict[str, Any]:
+        approval_result(session.owner, approval_id)
+        approvals.revoke(session.owner, approval_id)
+        return approval_result(session.owner, approval_id)
 
     @app.get("/health/live")
     def live() -> dict[str, str]:

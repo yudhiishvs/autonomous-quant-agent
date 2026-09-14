@@ -11,7 +11,7 @@ requirements and AI/backtester boundaries remain applicable to their implementat
 | PUB-001 | Verified customer lifecycle and tenant isolation across every owned surface | PARTIALLY_IMPLEMENTED |
 | PUB-002 | Each user's verified Alpaca paper OAuth connection, encrypted token lifecycle and entitlements | PARTIALLY_IMPLEMENTED |
 | PUB-003 | Immutable bounded declarative strategies; no arbitrary uploaded execution | PARTIALLY_IMPLEMENTED |
-| PUB-004 | Explicit non-AI approval bound to owner, account, version and independent account risk | NOT_IMPLEMENTED |
+| PUB-004 | Explicit non-AI approval bound to owner, account, version and independent account risk | PARTIALLY_IMPLEMENTED |
 | PUB-005 | Durable account-coordinated execution, uncertainty reconciliation and emergency controls | NOT_IMPLEMENTED |
 | PUB-006 | Accessible user workflow and truthful reconciled paper results | PARTIALLY_IMPLEMENTED |
 | PUB-007 | Scoped external signal API with replay protection and Python client | NOT_IMPLEMENTED |
@@ -752,3 +752,9 @@ are a single-symbol synthetic read-path benchmark, not full-universe intake capa
 External streaming acceptance requires current bars after reconnect; authentication or
 a synthetic test-feed response alone cannot satisfy it. See
 [evidence](evidence/local-hardening-20260913.md).
+
+The public approval continuation provides immutable reviewed limits, explicit signed consent,
+connection-generation invalidation and append-only revocation evidence. These records do not
+start execution. Account-wide risk/reservations and execution-time approval rechecks remain
+required before PUB-004/PUB-005 can be complete. See the
+[approval evidence](evidence/public-approvals-20260914.md).

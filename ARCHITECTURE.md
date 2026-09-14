@@ -11,7 +11,13 @@ locked FastAPI application, maintained OIDC identity, and additive PostgreSQL `a
 state. It provides verified sign-in and owned immutable strategy versions with owner-scoped
 save idempotency. It also supports fixed-host Alpaca paper consent, owned encrypted
 account connections, exact account snapshots and revision-fenced disconnect. Broker
-contracts are tested with synthetic providers; no order-submission endpoint exists. Private services described
+contracts are tested with synthetic providers; no order-submission endpoint exists.
+The public approval domain binds owner, physical paper account, immutable version, limits,
+connection generation and expiry. `approval_storage` serializes confirmation/revocation in
+PostgreSQL; `approval_signing` uses maintained Ed25519 with a separate secret file. Forced
+RLS and composite owner/object foreign keys protect receipts and append-only events. Balance
+refreshes change snapshot revision; reconnect/disconnect also change connection generation.
+Approval is separate from the still-unimplemented public account-wide risk and execution path. Private services described
 below must not be exposed as customer APIs. See the [slice evidence](docs/evidence/public-workspace-20260914.md).
 
 The repository contains a preserved legacy research/paper prototype and a separate non-AI

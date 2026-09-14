@@ -390,3 +390,42 @@ dialog {
 dialog::backdrop {
     background: rgba(15, 30, 25, 0.45);
 }
+
+.approval-section {
+    border-top: 1px solid var(--line, #d8dfda);
+    margin-top: 2rem;
+    padding-top: 2rem;
+}
+.approval-section fieldset {
+    border: 0;
+    padding: 0;
+    margin: 1.5rem 0;
+    min-width: 0;
+}
+.approval-section legend {
+    font-weight: 600;
+    margin-bottom: 1rem;
+}
+.fingerprint {
+    overflow-wrap: anywhere;
+}
+.approval-section .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.approval-section {
+    max-width: 760px;
+}
+.approval-section .actions .quiet {
+    margin-left: 0;
+}
+@media (min-width: 600px) {
+    .approval-section dl {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.5rem 1rem;
+    }
+}

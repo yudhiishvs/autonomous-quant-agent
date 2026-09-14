@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import "./style.css";
 import { api, RequestError } from "./client";
 import { Accounts } from "./accounts";
+import { Approvals } from "./approvals";
 
 type Definition = {
     schema_version: 1;
@@ -40,6 +41,7 @@ function App() {
     const [notice, setNotice] = useState("");
     const [busy, setBusy] = useState(false);
     const [selected, setSelected] = useState<Version | null>(null);
+    const [accountRevision, setAccountRevision] = useState(0);
     const [kind, setKind] = useState("moving_average_target");
     const [order, setOrder] = useState("limit");
 
@@ -178,7 +180,11 @@ function App() {
                     </div>
                 )}
                 {notice && (
-                    <p role="status" className="notice">
+                    <p
+                        role="status"
+                        aria-label="Workspace status"
+                        className="notice"
+                    >
                         {notice}
                     </p>
                 )}
@@ -234,7 +240,11 @@ function App() {
                         <aside className="status">
                             Configuration only · Execution unavailable
                         </aside>
-                        <Accounts />
+                        <Accounts
+                            onChange={() =>
+                                setAccountRevision((value) => value + 1)
+                            }
+                        />
                         <div className="layout">
                             <section aria-labelledby="create-title">
                                 <h2 id="create-title">New version</h2>
@@ -448,7 +458,10 @@ function App() {
                                         aria-label="Selected version"
                                     >
                                         <h3>{selected.name}</h3>
-                                        <p>Saved · Not approved</p>
+                                        <p>
+                                            Saved version · Account approval
+                                            managed below
+                                        </p>
                                         <dl>
                                             <dt>Version ID</dt>
                                             <dd>{selected.id}</dd>
@@ -471,6 +484,13 @@ function App() {
                                 )}
                             </section>
                         </div>
+                        {selected && (
+                            <Approvals
+                                key={`${selected.id}:${accountRevision}`}
+                                versionId={selected.id}
+                                versionName={selected.name}
+                            />
+                        )}
                     </>
                 )}
             </main>

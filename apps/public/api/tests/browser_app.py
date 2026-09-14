@@ -56,6 +56,9 @@ def main() -> None:
         issuer="http://127.0.0.1:8188/realms/paper",
         client_id="paper-web",
         development=True,
+        approval_signing_key=load_secret_file(
+            local / "approval_signing_key", source=SecretFileVariable.PUBLIC_APPROVAL_SIGNING_KEY
+        ),
         database_url=load_secret_file(
             local / "database_url", source=SecretFileVariable.DATABASE_URL
         ),

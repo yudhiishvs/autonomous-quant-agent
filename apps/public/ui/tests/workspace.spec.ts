@@ -34,9 +34,9 @@ test("two verified identities save isolated versions; CSRF and guessed IDs fail"
         const response = await saved;
         expect(response.status()).toBe(201);
         const version = await response.json();
-        await expect(a.getByRole("status")).toContainText(
-            "not approved or running",
-        );
+        await expect(
+            a.getByRole("status", { name: "Workspace status" }),
+        ).toContainText("not approved or running");
         await a.reload();
         await expect(
             a.getByRole("button", { name: new RegExp(name) }),
@@ -58,7 +58,9 @@ test("two verified identities save isolated versions; CSRF and guessed IDs fail"
         );
         expect(csrf.status()).toBe(403);
         await a.getByRole("button", { name: "Sign out" }).click();
-        await expect(a.getByRole("status")).toHaveText("Signed out.");
+        await expect(
+            a.getByRole("status", { name: "Workspace status" }),
+        ).toHaveText("Signed out.");
         expect(
             (
                 await first.request.get("http://127.0.0.1:5178/api/v1/me")
@@ -98,9 +100,9 @@ test("retry after a lost save response returns one durable version", async ({
     await page.getByRole("button", { name: "Save version" }).click();
     await expect(page.getByRole("alert")).toBeVisible();
     await page.getByRole("button", { name: "Save version" }).click();
-    await expect(page.getByRole("status")).toContainText(
-        "not approved or running",
-    );
+    await expect(
+        page.getByRole("status", { name: "Workspace status" }),
+    ).toContainText("not approved or running");
     expect(requestIds).toHaveLength(2);
     expect(requestIds[0]).toBe(requestIds[1]);
     const response = await context.request.get(

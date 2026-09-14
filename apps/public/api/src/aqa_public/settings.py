@@ -20,6 +20,7 @@ class Settings:
     client_secret: RedactedSecret = field(repr=False)
     encryption_key: RedactedSecret = field(repr=False)
     development: bool = False
+    approval_signing_key: RedactedSecret | None = field(default=None, repr=False)
     broker: BrokerSettings | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -66,6 +67,11 @@ class Settings:
             )
         return cls(
             broker=broker,
+            approval_signing_key=(
+                secret(SecretFileVariable.PUBLIC_APPROVAL_SIGNING_KEY)
+                if os.environ.get(SecretFileVariable.PUBLIC_APPROVAL_SIGNING_KEY.value)
+                else None
+            ),
             origin=os.environ["AQA_PUBLIC_ORIGIN"],
             issuer=os.environ["AQA_PUBLIC_OIDC_ISSUER"],
             client_id=os.environ["AQA_PUBLIC_OIDC_CLIENT_ID"],

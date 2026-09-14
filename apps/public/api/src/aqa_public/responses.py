@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
+from adaptive_trader.public_product.approvals import RiskLimits
 from adaptive_trader.public_product.strategies import StrategyDefinition
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
@@ -50,3 +51,21 @@ class DisconnectResponse(PublicResponse):
     disconnected: Literal[True]
     broker_revocation_confirmed: Literal[False]
     orders_cancelled: Literal[False]
+
+
+class ApprovalResponse(PublicResponse):
+    id: UUID
+    account_id: UUID
+    version_id: UUID
+    binding_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    limits: RiskLimits
+    expires_at: AwareDatetime
+    review_until: AwareDatetime
+    state: Literal["draft", "approved", "revoked"]
+    block_reason: str | None = Field(max_length=80)
+    execution_available: Literal[False]
+
+
+class ApprovalsResponse(PublicResponse):
+    approval_available: bool
+    approvals: Annotated[list[ApprovalResponse], Field(max_length=100)]

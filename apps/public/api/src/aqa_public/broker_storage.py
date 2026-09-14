@@ -127,7 +127,7 @@ class BrokerStore:
                     "RETURNING id, state, snapshot, revision, updated_at"
                     if existing is None
                     else "UPDATE aqa_public.broker_accounts SET state='connected', encrypted_token=:token, "
-                    "snapshot=CAST(:snapshot AS jsonb), revision=revision+1, updated_at=now() "
+                    "snapshot=CAST(:snapshot AS jsonb), revision=revision+1, connection_generation=connection_generation+1, updated_at=now() "
                     "WHERE owner_id=:owner AND broker_id=:broker "
                     "RETURNING id, state, snapshot, revision, updated_at"
                 )
@@ -172,7 +172,7 @@ class BrokerStore:
             row = (
                 connection.execute(
                     text(
-                        "SELECT broker_id, encrypted_token, revision FROM aqa_public.broker_accounts WHERE owner_id=:owner AND id=:id AND state='connected'"
+                        "SELECT broker_id, encrypted_token, revision, connection_generation FROM aqa_public.broker_accounts WHERE owner_id=:owner AND id=:id AND state='connected'"
                     ),
                     {"owner": owner, "id": str(account_id)},
                 )
@@ -211,7 +211,7 @@ class BrokerStore:
             self._authority(connection, owner)
             row = connection.execute(
                 text(
-                    "UPDATE aqa_public.broker_accounts SET state=:state, encrypted_token=NULL, revision=revision+1, updated_at=now() WHERE owner_id=:owner AND id=:id AND (CAST(:expected AS bigint) IS NULL OR revision=:expected) RETURNING id"
+                    "UPDATE aqa_public.broker_accounts SET state=:state, encrypted_token=NULL, revision=revision+1, connection_generation=connection_generation+1, updated_at=now() WHERE owner_id=:owner AND id=:id AND (CAST(:expected AS bigint) IS NULL OR revision=:expected) RETURNING id"
                 ),
                 {
                     "owner": owner,

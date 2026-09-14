@@ -9,8 +9,10 @@ identity and PostgreSQL ownership to save and inspect immutable versions, includ
 retries after lost responses. See [slice evidence](evidence/public-workspace-20260914.md)
 and [startup instructions](../apps/public/README.md). Paper-account OAuth, ownership and
 disconnect now have [offline/integration evidence](evidence/public-paper-connections-20260914.md);
-actual provider compatibility and entitlements remain unvalidated. Public identity lifecycle,
-approval, execution, reporting and operating requirements are tracked separately in
+actual provider compatibility and entitlements remain unvalidated. Explicit version/account/limits
+review, signed confirmation and revocation now have [approval evidence](evidence/public-approvals-20260914.md).
+Approval does not start execution. Public identity lifecycle, independent account-wide risk,
+execution, reporting and operating requirements are tracked separately in
 [the active plan](execution-plans/multi-user-paper-platform.md). Private-platform evidence
 below must not be read as proof that the public release is complete.
 

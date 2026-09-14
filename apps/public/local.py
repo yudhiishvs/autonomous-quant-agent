@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import secrets
 from pathlib import Path
 
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 def main() -> None:
@@ -24,6 +26,10 @@ def main() -> None:
     write("postgres_password", postgres)
     write("oidc_secret", oidc)
     write("encryption_key", Fernet.generate_key().decode())
+    write(
+        "approval_signing_key",
+        base64.urlsafe_b64encode(Ed25519PrivateKey.generate().private_bytes_raw()).decode(),
+    )
     write(
         "database_url",
         f"postgresql+psycopg://aqa_public_runtime:{runtime}@127.0.0.1:55438/collector_test",

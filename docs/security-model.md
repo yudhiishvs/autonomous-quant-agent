@@ -232,3 +232,18 @@ generations. Tokens are encrypted with owner/account binding; refreshes cannot o
 a newer revision. No order method exists in this slice, but a compromised API holding the
 OAuth grant could misuse its provider trading scope. Production egress isolation, key
 rotation and operational review remain required. See [connection review](evidence/public-paper-connections-20260914.md).
+
+The explicit non-AI approval continuation signs canonical owner/account/version/limits/expiry
+receipts with a separate Ed25519 key loaded through the existing private-file loader. A mutable
+state column alone is insufficient: the signature, current connection generation and permanent
+revocation events must agree. Review requests are idempotent per owner; confirmation checks a
+live local session and fresh provider account before a serialized database transition. The
+runtime role cannot edit binding content or update/delete approval events. It can revoke without
+a signing key. The API process holds both signing and recoverable provider material, so process
+compromise remains a release-blocking isolation risk; signatures do not solve that boundary.
+No execution caller exists yet. [Review](evidence/public-approvals-20260914.md).
+
+These signatures are not a defense against total runtime-database compromise: the current
+shared identity/session tables remain writable by that role, allowing session impersonation
+through the API. Hardening that authentication boundary is required before public launch;
+cryptographic receipt verification does not remove the existing identity-storage risk.

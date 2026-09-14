@@ -152,7 +152,12 @@ established by the first authentication/configuration slice.
 - Paper OAuth/account connection slice implemented and tested locally: 38 offline tests,
   51 total with actual disposable storage, five normal browser tests and one synthetic
   provider browser journey. No actual Alpaca call/order; see the connection evidence.
-- Subsequent approval/execution/product/operations milestones remain incomplete.
+- Commit b5f041a pushed; all six GitHub workflows succeeded. Container execution-image
+  build initially failed fetching Wolfi packages (permission response); its failed-job retry
+  succeeded without changing code or removing a gate.
+- Explicit non-AI approval review/confirmation/revocation implemented locally; 60 API tests
+  with disposable PostgreSQL and the synthetic provider browser journey pass. Full public
+  risk/execution/product/operations milestones remain incomplete.
 
 ## 24. Decisions made
 Maintainer explicitly delegated scoped commits and feature-branch pushes on September 14;
@@ -215,14 +220,28 @@ No dependency changes or actual provider calls. The declaration of trading conse
 not approve execution. Baseline scanner line metadata may update solely for shifted tests.
 Proposed message: feat(accounts): add isolated Alpaca paper connections.
 
+Reviewed boundary 4: root non-AI approval/limit contract and tests; separate Ed25519
+signer, approval transactions/migration public_0004 and HTTP contracts; material account
+connection generation; guided review/confirm/revoke UI and account-status refresh; one secret
+namespace and fixture configuration; PG/browser tests and current docs. Full security,
+behavior, simplification and remaining risks: docs/evidence/public-approvals-20260914.md.
+Root offline 3205 passed/10 skipped/two warnings; root typing 158 files pass; AI freeze61
+passes; existing backtest/replay no-network regressions exit0. App check passes with
+39 offline tests/21 guarded skips; opt-in API60 passes. Browser contract1 and normal
+workspace5 pass. Named workspace live-status regions remove ambiguous test selectors while
+preserving the same saved/sign-out assertions.
+No dependency changes, root lock/frozen AI/backtester changes, actual provider orders or
+public exposure. Prior untracked drafts and generated local state remain excluded.
+Proposed message: feat(approvals): bind explicit paper consent to immutable limits.
+
 ## 27. Final outcome and remaining limitations
-Implementation complete: no. Public-launch ready: no. Work is partial. Strategy and
-identity/workspace commits are pushed with passing GitHub checks. Account connections are
-implemented with synthetic provider verification and await their scoped commit/push checks.
-Next: commit/verify the account slice; then bind explicit non-AI approvals to immutable
-version, owner, account generation and independently enforced risk limits. Preserve the
-current no-order condition until reviewed execution and recovery are implemented. Complete
-identity lifecycle, exports/deletion, operations and the requested capacity targets remain.
+Implementation complete: no. Public-launch ready: no. Work is partial. Strategy,
+identity/workspace and account connection commits are pushed with passing GitHub checks.
+Explicit approval is implemented with local verification; its scoped commit/push is the
+current boundary. Next: independent account-wide risk, reservations, durable deployment and
+execution/reconciliation with current approval rechecks. Preserve the no-order condition
+until that reviewed path exists. Identity lifecycle, external integration, reporting,
+exports/deletion, operations and requested capacity targets remain incomplete.
 External gates: provider application registration/consent, data storage/redistribution and
 per-user entitlements, available hosting and budget, DNS/TLS/secrets/email, monitoring,
 restore/capacity evidence, legal/owner review, usability testing and independent security review.

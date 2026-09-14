@@ -618,3 +618,19 @@ order or runs user code; future account and execution surfaces need separate thr
 Connection code has no order method. This is not proof that a compromised runtime cannot
 misuse the OAuth grant; production egress controls and independent execution review remain
 required. See [evidence](evidence/public-paper-connections-20260914.md).
+
+### Public approval continuation — September 14, 2026
+
+- Forged/changed consent: canonical immutable bindings, configured Ed25519 verification,
+  explicit reviewed fingerprint and CSRF-protected consent; invalid signatures are blocked.
+- Cross-owner approval/account/version references: authenticated owner, composite foreign
+  keys, forced RLS and actual two-user runtime-role tests.
+- Replayed or concurrent confirmation: owner-scoped request identity and authority-row
+  serialization, unique active approval and append-only event identities.
+- Stale account/session: confirmation rechecks session and verified account revision;
+  reconnection generation invalidates older approval even if the account UUID stays fixed.
+- Erased revocation: runtime cannot edit/delete event evidence; mutable projection replay
+  cannot remove the effective revocation. Administrator/host compromise remains outside that
+  guarantee. Independent execution-time checks are still mandatory and not implemented.
+- Resource exhaustion: shared API rate limit and serialized 100-record owner quota; public
+  capacity and broader signup defenses remain unverified. See approval evidence for tests.

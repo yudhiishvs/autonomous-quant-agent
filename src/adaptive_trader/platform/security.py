@@ -58,6 +58,7 @@ class SecretFileVariable(StrEnum):
     # Environment-variable identifier, never a credential value.
     PUBLIC_ALPACA_CLIENT_SECRET = "AQA_PUBLIC_ALPACA_CLIENT_SECRET_FILE"  # pragma: allowlist secret
     PUBLIC_BROKER_ENCRYPTION_KEY = "AQA_PUBLIC_BROKER_ENCRYPTION_KEY_FILE"
+    PUBLIC_APPROVAL_SIGNING_KEY = "AQA_PUBLIC_APPROVAL_SIGNING_KEY_FILE"
 
 
 @dataclass(frozen=True, slots=True)

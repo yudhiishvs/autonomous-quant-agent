@@ -48,6 +48,7 @@ def main() -> int:
             ),
             "AQA_PUBLIC_OIDC_CLIENT_SECRET_FILE": str(local / "oidc_secret"),
             "AQA_PUBLIC_ENCRYPTION_KEY_FILE": str(local / "encryption_key"),
+            "AQA_PUBLIC_APPROVAL_SIGNING_KEY_FILE": str(local / "approval_signing_key"),
         }
     )
     if mode == "api":
