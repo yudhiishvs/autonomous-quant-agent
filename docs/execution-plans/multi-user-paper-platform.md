@@ -232,7 +232,11 @@ workspace5 pass. Named workspace live-status regions remove ambiguous test selec
 preserving the same saved/sign-out assertions.
 No dependency changes, root lock/frozen AI/backtester changes, actual provider orders or
 public exposure. Prior untracked drafts and generated local state remain excluded.
-Proposed message: feat(approvals): bind explicit paper consent to immutable limits.
+Approval implementation commit: 3b96da1 (feat(approvals): bind explicit paper consent to
+immutable limits). All configured pinned pre-commit gates pass. The scanner refreshed only
+the existing test marker's line 648 to 649 and its generated timestamp; no new finding,
+allowlist or hash was added. This metadata is retained in a separate validation commit
+without altering the already created implementation commit.
 
 ## 27. Final outcome and remaining limitations
 Implementation complete: no. Public-launch ready: no. Work is partial. Strategy,
