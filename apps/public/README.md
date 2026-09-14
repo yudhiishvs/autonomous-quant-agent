@@ -107,7 +107,7 @@ runtime database compromise remains a cross-user threat requiring further harden
 
 This is a local development slice, not a production deployment recipe. Remaining gates
 include public registration abuse controls, privileged MFA enforcement, audited administration,
-rotation/recovery of encryption keys, full recovery/deletion lifecycle verification,
+rotation/recovery of encryption keys, cross-device/admin recovery and deletion verification,
 production proxy/HTTPS/container configuration, SMTP, operational
 monitoring, backups/restore and measured capacity. No hosting or market-data rights have
 been validated for public launch. No real brokerage token or order has been used in these tests.
@@ -188,3 +188,8 @@ confirmation; it still permits revocation. Replacing the key makes existing sign
 unverifiable and requires fresh approval. Production key custody, backup and rotation remain
 release gates. Do not rotate the key casually or reuse an encryption key for signing.
 The normal application has no synthetic signing/provider fallback.
+
+The normal browser suite now includes registration, verification and password recovery through
+the local captured-mail service. It creates a unique synthetic identity, verifies that a saved
+strategy survives recovery, and checks old/replacement password behavior. It does not seed a
+real user, send external mail or claim public email delivery. See the workspace evidence.

@@ -136,3 +136,33 @@ the requested 100 active browsers/500 deployments yet; no public launch limit is
 Broker OAuth, account verification, approval/risk, external signals, durable execution,
 reconciliation/reporting and operating controls are still required. No public hosting,
 market-data rights, broker credentials, paper orders or real-money execution was activated.
+
+## Completed local registration and recovery follow-up
+
+The later `identity.spec.ts` browser journey verifies registration from an unverified address,
+401 before email verification, the captured verification link, initial password setup,
+strategy persistence, sign-out, recovery using a captured reset link, the same owner/workspace
+and saved strategy after recovery, rejection of the old password and successful replacement
+password sign-in. All six normal browser tests passed in 6.8 seconds. The account/approval
+contract journey remains a separately verified synthetic-provider test.
+
+The test uses a unique `lifecycle-<UUID>@example.invalid` recipient. Its bounded inbox query
+reads only that recipient's matching messages, and action links must point to the fixed local
+identity service. Nothing is sent to an external SMTP service. No private application file,
+real user credential, provider grant or external account is read. Temporary identity/email
+records stay in the disposable services; traces/screenshots are disabled for this test.
+
+A first test incorrectly assumed that recovery always asks for an email address. Inspection
+of the [pinned provider source](https://github.com/keycloak/keycloak/blob/26.7.3/services/src/main/java/org/keycloak/authentication/authenticators/resetcred/ResetCredentialChooseUser.java)
+confirmed that an existing SSO session selects the known identity automatically. Its reset
+email was already delivered. The corrected test follows that actual email. Experimental
+OIDC parameter/recovery-route changes were discarded; no production authentication safeguard
+or provider configuration was changed. The provider's separate forgot-credentials endpoint
+returned a ForkFlowException in this scenario and is not used by the application.
+
+The inbox helper follows the [Mailpit API contract](https://mailpit.axllent.org/docs/api-v1/).
+Review covered fixed loopback destinations, synthetic recipient validation, a five-message
+query bound, fifteen-second polling deadline, redirects disabled for inbox requests, bounded
+local action URLs, and no token logging. No dependency or schema change occurred. This
+verification does not cover public email deliverability, recovery on other devices, privileged
+MFA, bot defenses or full administrative identity lifecycle. Those remain launch gates.

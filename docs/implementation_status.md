@@ -6,7 +6,9 @@ The public multi-user product is `PARTIALLY_IMPLEMENTED`, not public-launch-read
 The new declarative strategy contract, target evaluator and local validator have 48
 passing focused tests. They have no execution authority. The local React workspace now uses verified Keycloak
 identity and PostgreSQL ownership to save and inspect immutable versions, including safe
-retries after lost responses. See [slice evidence](evidence/public-workspace-20260914.md)
+retries after lost responses. A later six-test browser suite also verifies registration,
+email verification, initial password setup and recovery of the same saved workspace, including
+rejection of the old password. See [slice evidence](evidence/public-workspace-20260914.md)
 and [startup instructions](../apps/public/README.md). Paper-account OAuth, ownership and
 disconnect now have [offline/integration evidence](evidence/public-paper-connections-20260914.md);
 actual provider compatibility and entitlements remain unvalidated. Explicit version/account/limits

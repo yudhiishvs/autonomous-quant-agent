@@ -145,7 +145,8 @@ established by the first authentication/configuration slice.
   domain/secret-loader tests passed.
 - Identity/configuration application: functioning local slice. Fourteen offline identity
   tests, actual PostgreSQL isolation/quota/idempotency tests and five real-browser tests
-  passed. Registration completion/recovery and public operations remain incomplete.
+  passed. A later follow-up adds completed local registration/email/password recovery;
+  public operations and broader identity lifecycle remain incomplete.
 - Commit 40532ec pushed to feature/multi-user-paper-platform; all five existing GitHub
   workflows succeeded for that exact SHA. No PR or deployment created.
 - Commit 8db016a pushed; all six GitHub workflows (including Public workspace) succeeded.
@@ -238,11 +239,21 @@ the existing test marker's line 648 to 649 and its generated timestamp; no new f
 allowlist or hash was added. This metadata is retained in a separate validation commit
 without altering the already created implementation commit.
 
+Reviewed boundary 5: apps/public/ui/tests/identity.spec.ts and the matching README,
+implementation status, workspace evidence and this plan. Six normal browser tests pass,
+including real local registration, email verification, initial password, persistent strategy,
+recovery, old-password rejection and replacement-password sign-in. Only synthetic recipient
+messages are read from the loopback captured-mail service; no external email/provider request,
+new dependency, schema or production auth change. Pinned provider source explained automatic
+SSO identity selection; no authentication policy was weakened to satisfy the test.
+Proposed message: test(auth): verify registration and workspace recovery.
+
 ## 27. Final outcome and remaining limitations
 Implementation complete: no. Public-launch ready: no. Work is partial. Strategy,
 identity/workspace and account connection commits are pushed with passing GitHub checks.
-Explicit approval is implemented with local verification; its scoped commit/push is the
-current boundary. Next: independent account-wide risk, reservations, durable deployment and
+Explicit approval commits 3b96da1 and f7f4665 are pushed. Five workflows have passed;
+main CI was still running at the last inspection. The six-test normal browser suite now also
+verifies basic local registration and recovery. Its test/evidence commit is the current boundary. Next: independent account-wide risk, reservations, durable deployment and
 execution/reconciliation with current approval rechecks. Preserve the no-order condition
 until that reviewed path exists. Identity lifecycle, external integration, reporting,
 exports/deletion, operations and requested capacity targets remain incomplete.
