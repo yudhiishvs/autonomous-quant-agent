@@ -3,7 +3,7 @@ FROM ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333
 # Wolfi provides maintained glibc packages compatible with manylinux wheels.
 # Keep Python 3.11 and SQLite's patched release explicit; signed APK dependencies
 # are inventoried and scanned in every final image.
-FROM cgr.dev/chainguard/wolfi-base@sha256:918a593b8268c222afd4e2c4f06860ac984e60719b4697e4c71d796bc8fcd042 AS python-base
+FROM cgr.dev/chainguard/wolfi-base@sha256:9a8d954d8f03a21bcf2be73d4628f0ad26d35c3275469925de63a34eebd58f13 AS python-base
 RUN apk add --no-cache python-3.11=3.11.16-r5 sqlite-libs=3.53.4-r2
 
 FROM python-base AS platform-builder
