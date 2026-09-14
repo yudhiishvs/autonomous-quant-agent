@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:0.11.7@sha256:240fb85ab0f263ef12f492d8476aa3a2e4e1e333f7d67fbdd923d00a506a516a AS uv
+FROM ghcr.io/astral-sh/uv:0.12.13@sha256:b485bd65cc2cf1c9a93b3554012c9c3778cf7b1b5fd3d3096ce9e1226c97e1e6 AS uv
 
 # Wolfi provides maintained glibc packages compatible with manylinux wheels.
 # Keep Python 3.11 and SQLite's patched release explicit; signed APK dependencies
