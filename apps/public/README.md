@@ -3,8 +3,9 @@
 This slice provides verified OIDC sign-in, revocable server sessions and user-owned immutable
 strategy configurations in a React application. It is **not the completed paper-trading
 product**. Alpaca paper OAuth/account connections are implemented with offline contract
-verification and require a separately registered provider application. Approval, deployment,
-execution and performance are not implemented. The [active plan](../../docs/execution-plans/multi-user-paper-platform.md) tracks
+verification and require a separately registered provider application. Explicit, signed
+configuration approval is implemented; deployment, execution and performance are not.
+The [active plan](../../docs/execution-plans/multi-user-paper-platform.md) tracks
 the remaining release work. Do not expose this development stack publicly.
 
 ## Local startup

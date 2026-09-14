@@ -246,15 +246,34 @@ recovery, old-password rejection and replacement-password sign-in. Only syntheti
 messages are read from the loopback captured-mail service; no external email/provider request,
 new dependency, schema or production auth change. Pinned provider source explained automatic
 SSO identity selection; no authentication policy was weakened to satisfy the test.
-Proposed message: test(auth): verify registration and workspace recovery.
+Committed and pushed: 6ffa209, test(auth): verify registration and workspace recovery.
+
+Fill-summary follow-up: the September 11 F5 compatibility limitation still exists in
+platform/execution/alpaca_paper.py. The adapter requires exact agreement between the
+reported average and execution-weighted average. The official
+[Order model](https://alpaca.markets/sdks/python/api_reference/trading/models.html) and
+[account-activities reference](https://docs.alpaca.markets/us/reference/getaccountactivitiesbyactivitytype-1)
+were checked on September 14; neither establishes a rounding mode and scale for this
+comparison. Request quantity precision is not a fill-average precision contract. No
+arbitrary tolerance or execution-ID bypass was introduced. F5 remains unresolved and
+must not be described as fixed by the public approval work.
 
 ## 27. Final outcome and remaining limitations
 Implementation complete: no. Public-launch ready: no. Work is partial. Strategy,
 identity/workspace and account connection commits are pushed with passing GitHub checks.
-Explicit approval commits 3b96da1 and f7f4665 are pushed. Five workflows have passed;
-main CI was still running at the last inspection. The six-test normal browser suite now also
-verifies basic local registration and recovery. Its test/evidence commit is the current boundary. Next: independent account-wide risk, reservations, durable deployment and
-execution/reconciliation with current approval rechecks. Preserve the no-order condition
+Explicit approval commits 3b96da1 and f7f4665 are pushed. Registration/recovery verification
+6ffa209 is pushed. Its Security, CodeQL, Container, Offline demo and Public workspace
+workflows passed; main CI (34877157815) was still running at the last inspection. The
+preceding f7f4665 main CI was cancelled and is not claimed as a pass. The six-test normal
+browser suite verifies basic local registration and recovery.
+
+Exact next implementation slice: add account-scoped risk reservations in the separate
+public schema, with owner isolation, an account-level transaction lock, current signed
+approval and connection-generation checks, idempotent reservation identity, bounded
+expiry and concurrent oversubscription tests. Integrate these with durable deployment
+state before exposing start/pause/stop controls. Continue with order intents, ambiguous
+submission recovery and reconciliation; establish the documented fill-summary policy
+before adapting the legacy broker path. Preserve the no-order condition
 until that reviewed path exists. Identity lifecycle, external integration, reporting,
 exports/deletion, operations and requested capacity targets remain incomplete.
 External gates: provider application registration/consent, data storage/redistribution and
