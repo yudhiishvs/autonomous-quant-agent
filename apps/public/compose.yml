@@ -1,0 +1,64 @@
+name: aqa-public-disposable
+services:
+  postgres:
+    image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+    entrypoint:
+      - bash
+      - -ceu
+      - |
+        install -o postgres -g postgres -m 0600 /run/private-init.sql /docker-entrypoint-initdb.d/001-init.sql
+        exec /usr/local/bin/docker-entrypoint.sh postgres
+    environment:
+      POSTGRES_DB: collector_test
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - ./.local/init.sql:/run/private-init.sql:ro
+      - public-pg:/var/lib/postgresql/data
+    ports: ["127.0.0.1:55438:5432"]
+    labels:
+      aqa.disposable: "public-product-development"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d collector_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  identity-config:
+    image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
+    user: "0:0"
+    entrypoint:
+      - bash
+      - -ceu
+      - |
+        install -d -o 1000 -g 0 -m 0700 /configuration
+        install -o 1000 -g 0 -m 0600 /run/private-realm.json /configuration/realm.json
+    volumes:
+      - ./.local/realm.json:/run/private-realm.json:ro
+      - public-realm:/configuration
+    network_mode: none
+    read_only: true
+  identity:
+    image: quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4
+    command: ["start-dev", "--import-realm", "--hostname=http://127.0.0.1:8188"]
+    env_file: ./.local/keycloak.env
+    depends_on:
+      identity-config:
+        condition: service_completed_successfully
+    volumes:
+      - public-realm:/opt/keycloak/data/import:ro
+      - public-identity:/opt/keycloak/data
+    ports: ["127.0.0.1:8188:8080"]
+  mail:
+    image: axllent/mailpit:v1.31.1@sha256:98b916bd3c8d61f7633a52d3ea2f58d00620cb01ca57ab59edde68c347a95365
+    environment:
+      MP_UI_AUTH_FILE: ""
+      MP_MAX_MESSAGES: "200"
+      MP_ALLOWED_HOSTS: "127.0.0.1,localhost"
+    ports: ["127.0.0.1:8128:8025"]
+volumes:
+  public-pg:
+  public-identity:
+  public-realm:
+secrets:
+  postgres_password:
+    file: ./.local/postgres_password

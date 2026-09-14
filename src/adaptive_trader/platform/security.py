@@ -52,6 +52,9 @@ class SecretFileVariable(StrEnum):
     ALPACA_PAPER_API_KEY = "AQA_ALPACA_PAPER_API_KEY_FILE"
     ALPACA_PAPER_SECRET_KEY = "AQA_ALPACA_PAPER_SECRET_KEY_FILE"
     PAPER_ACCOUNT_ID_HASH = "AQA_PAPER_ACCOUNT_ID_HASH_FILE"
+    # Environment-variable identifier, never a credential value.
+    PUBLIC_OIDC_CLIENT_SECRET = "AQA_PUBLIC_OIDC_CLIENT_SECRET_FILE"  # pragma: allowlist secret
+    PUBLIC_ENCRYPTION_KEY = "AQA_PUBLIC_ENCRYPTION_KEY_FILE"
 
 
 @dataclass(frozen=True, slots=True)

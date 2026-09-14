@@ -1,0 +1,250 @@
+"""Same-origin browser API for verified identity and owned strategy versions."""
+
+import asyncio
+import hmac
+import secrets
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from typing import Annotated, Any
+from urllib.parse import urlsplit
+from uuid import UUID
+
+from adaptive_trader.public_product.strategies import StrategyDefinition
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+from aqa_public.identity import IdentityProvider, IdentityUnavailable
+from aqa_public.settings import Settings
+from aqa_public.storage import CustomerSession, Store, verifier
+
+
+class VersionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    name: str = Field(min_length=1, max_length=80)
+    definition: StrategyDefinition
+
+    @field_validator("name")
+    @classmethod
+    def meaningful_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(ord(c) < 32 for c in value):
+            raise ValueError("Name must contain visible text.")
+        return value
+
+
+def create_app(
+    settings: Settings, *, store: Store | None = None, identity: IdentityProvider | None = None
+) -> FastAPI:
+    database = store or Store(settings.database_url.reveal())
+    provider = identity or IdentityProvider(settings)
+    secure = not settings.development
+    session_cookie = "aqa_session" if settings.development else "__Host-aqa_session"
+    browser_cookie = "aqa_login" if settings.development else "__Host-aqa_login"
+    csrf_cookie = "aqa_csrf" if settings.development else "__Host-aqa_csrf"
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        database.readiness()
+        yield
+        database.engine.dispose()
+
+    app = FastAPI(
+        title="Paper workspace", version="1.0.0", lifespan=lifespan, docs_url=None, redoc_url=None
+    )
+    app.add_middleware(
+        TrustedHostMiddleware, allowed_hosts=[str(urlsplit(settings.origin).hostname)]
+    )
+
+    def cookie(
+        response: Response, name: str, value: str, seconds: int, *, httponly: bool = True
+    ) -> None:
+        response.set_cookie(
+            name, value, max_age=seconds, secure=secure, httponly=httponly, samesite="lax", path="/"
+        )
+
+    @app.middleware("http")
+    async def browser_boundary(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+            if request.headers.get("origin") != settings.origin:
+                return JSONResponse({"detail": "Request origin rejected."}, status_code=403)
+            # Enforce body size even when Transfer-Encoding is chunked.
+            chunks = bytearray()
+            try:
+                async with asyncio.timeout(10):
+                    async for chunk in request.stream():
+                        chunks.extend(chunk)
+                        if len(chunks) > 16_384:
+                            return JSONResponse(
+                                {"detail": "Request exceeds 16 KiB."}, status_code=413
+                            )
+            except TimeoutError:
+                return JSONResponse({"detail": "Request body deadline exceeded."}, status_code=408)
+            request._body = bytes(chunks)
+        response = await call_next(request)
+        response.headers.update(
+            {
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Referrer-Policy": "no-referrer",
+                "X-Frame-Options": "DENY",
+                "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+            }
+        )
+        if secure:
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        return response
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request: Request, error: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            {"detail": "Invalid request. Check the documented field limits."}, status_code=422
+        )
+
+    @app.exception_handler(IdentityUnavailable)
+    async def identity_failure(request: Request, error: IdentityUnavailable) -> JSONResponse:
+        return JSONResponse({"detail": str(error)}, status_code=503)
+
+    def customer(request: Request) -> CustomerSession:
+        token = request.cookies.get(session_cookie, "")
+        if not token or len(token) > 128:
+            raise HTTPException(401, "Sign in to continue.")
+        session = database.session(token)
+        if session is None:
+            raise HTTPException(401, "Session expired. Sign in again.")
+        if not database.rate_limit("api:" + session.owner, limit=120, window=60):
+            raise HTTPException(429, "Request limit reached. Try again in a minute.")
+        if not provider.active(session.encrypted_token):
+            database.sign_out(token)
+            raise HTTPException(401, "Session revoked. Sign in again.")
+        if request.method not in {"GET", "HEAD"} and not hmac.compare_digest(
+            verifier(request.headers.get("x-csrf-token", "")), session.csrf_hash
+        ):
+            raise HTTPException(403, "Request verification failed. Reload and try again.")
+        return session
+
+    @app.get("/health/live")
+    def live() -> dict[str, str]:
+        return {"status": "alive"}
+
+    @app.get("/health/ready")
+    def ready() -> dict[str, str]:
+        database.readiness()
+        return {"status": "ready"}
+
+    @app.get("/auth/login")
+    def login(request: Request) -> Response:
+        address = request.client.host if request.client else "unknown"
+        if not database.rate_limit("login:" + address, limit=20, window=60):
+            raise HTTPException(429, "Sign-in limit reached. Try again in a minute.")
+        browser, state, nonce, code_verifier = (secrets.token_urlsafe(32) for _ in range(4))
+        database.begin_login(
+            browser, state, nonce, provider.cipher.encrypt(code_verifier.encode()).decode()
+        )
+        response = RedirectResponse(
+            provider.authorization_url(state=state, nonce=nonce, verifier=code_verifier),
+            status_code=303,
+        )
+        cookie(response, browser_cookie, browser, 300)
+        return response
+
+    @app.get("/auth/callback")
+    def callback(request: Request, state: str = "", code: str = "") -> Response:
+        if not 1 <= len(state) <= 128 or not 1 <= len(code) <= 4096:
+            raise HTTPException(400, "Sign-in response rejected. Start again.")
+        attempt = database.consume_login(request.cookies.get(browser_cookie, ""), state)
+        if attempt is None:
+            raise HTTPException(400, "Sign-in expired or already used. Start again.")
+        nonce, encrypted_verifier = attempt
+        result = provider.exchange(
+            code=code,
+            nonce=nonce,
+            verifier=provider.cipher.decrypt(encrypted_verifier.encode()).decode(),
+        )
+        old_token = request.cookies.get(session_cookie)
+        if old_token:
+            database.sign_out(old_token)
+        token, csrf = database.sign_in(
+            settings.issuer,
+            result.subject,
+            result.email,
+            result.encrypted_access_token,
+            result.expires_at,
+        )
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie(
+            browser_cookie, path="/", secure=secure, httponly=True, samesite="lax"
+        )
+        cookie(response, session_cookie, token, 900)
+        # CSRF nonce is not an authentication credential; the session stays HttpOnly.
+        cookie(response, csrf_cookie, csrf, 900, httponly=False)
+        return response
+
+    @app.post("/auth/logout")
+    def logout(request: Request) -> Response:
+        # Local revocation must work even when the provider is unavailable.
+        token = request.cookies.get(session_cookie, "")
+        session = database.session(token)
+        if session and not hmac.compare_digest(
+            verifier(request.headers.get("x-csrf-token", "")), session.csrf_hash
+        ):
+            raise HTTPException(403, "Request verification failed.")
+        database.sign_out(token)
+        provider_revoked = True
+        if session:
+            try:
+                provider.revoke(session.encrypted_token)
+            except IdentityUnavailable:
+                provider_revoked = False
+        response = JSONResponse(
+            {"signed_out": True, "provider_revocation_confirmed": provider_revoked}
+        )
+        for name in (session_cookie, csrf_cookie):
+            response.delete_cookie(
+                name, path="/", secure=secure, httponly=name == session_cookie, samesite="lax"
+            )
+        return response
+
+    @app.get("/api/v1/me")
+    def me(session: Annotated[CustomerSession, Depends(customer)]) -> dict[str, Any]:
+        return {
+            "user_id": session.owner,
+            "paper_only": True,
+            "limits": {"strategy_versions": 100},
+            "execution_available": False,
+        }
+
+    @app.get("/api/v1/strategy-versions")
+    def versions(session: Annotated[CustomerSession, Depends(customer)]) -> list[dict[str, Any]]:
+        return database.versions(session.owner)
+
+    @app.get("/api/v1/strategy-versions/{version_id}")
+    def version(
+        version_id: UUID, session: Annotated[CustomerSession, Depends(customer)]
+    ) -> dict[str, Any]:
+        result = database.version(session.owner, version_id)
+        if result is None:
+            raise HTTPException(404, "Strategy version not found.")
+        return result
+
+    @app.post("/api/v1/strategy-versions", status_code=201)
+    def save_version(
+        body: VersionRequest, session: Annotated[CustomerSession, Depends(customer)]
+    ) -> dict[str, Any]:
+        try:
+            return database.save_version(
+                session.owner, body.name, body.definition, request_id=body.request_id
+            )
+        except ValueError as error:
+            raise HTTPException(409, str(error)) from None
+
+    return app
+
+
+def configured_app() -> FastAPI:
+    return create_app(Settings.from_environment())

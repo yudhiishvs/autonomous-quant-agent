@@ -214,3 +214,14 @@ fixed endpoint, prints state/count/timestamp summaries and suppresses provider e
 text. It requires a provider acknowledgement and a bounded duration. It neither persists
 market payloads nor accesses trading credentials. See the dated
 [review and limits](evidence/local-hardening-20260913.md).
+
+## Public workspace continuation (September 14, 2026)
+
+The new loopback development application under `apps/public` uses maintained Keycloak
+identity, confidential OIDC/PKCE, verified issuer/subject and server-only encrypted provider
+tokens. It reuses `load_secret_file()` with distinct OIDC/encryption namespaces. Customer
+strategy records use authenticated ownership plus forced RLS under a restricted login;
+existing private state has no new owner. Session-bound CSRF and exact Origin checks protect
+mutations. See the [review and remaining risks](evidence/public-workspace-20260914.md).
+This partial application must not be exposed publicly. Brokerage authority, production
+identity policy, key rotation, administration and operational validation are incomplete.

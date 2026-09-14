@@ -94,3 +94,12 @@ not become valid by bypassing the freeze check. Restore the routine limit when t
 maintainer explicitly ends the freeze. Docker updates retain Python 3.11 and may update
 its patch releases and image digests; moving to another Python minor requires a planned
 compatibility migration across local tools, CI, images, and dependencies.
+
+## Public application dependency boundary
+
+`apps/public/api/pyproject.toml` and its uv lock are separate from the frozen root graph;
+`apps/public/ui/package-lock.json` pins the browser toolchain. Use `make -C apps/public
+check` and `make -C apps/public audit`. The [September 14 review](evidence/public-workspace-20260914.md)
+records current callers, licenses, binary costs, advisory remediation and remaining image
+validation. Root dependency/freeze gates remain unchanged. New app checks run in the
+Public workspace workflow, with synthetic loopback infrastructure for integration tests.

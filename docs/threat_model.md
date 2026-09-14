@@ -3,8 +3,9 @@
 ## Scope and evidence rule
 
 This STRIDE model covers the self-hosted, single-operator platform, its preserved legacy path,
-and the target paper-only platform boundary. Real-money trading and public multi-user hosting are
-unsupported. A named control is **current** only when code and repository-local verification exist;
+and the target paper-only platform boundary. The public-product continuation adds the
+local customer workspace described below; public hosting is not yet supported. Real-money
+trading remains outside scope. A named control is **current** only when code and repository-local verification exist;
 otherwise it is explicitly **planned**. External provider, hosted-database, container-runtime, and
 operator recovery procedures are not treated as verified merely because they are documented.
 
@@ -591,3 +592,16 @@ Update this register when an entry point, authority boundary, external dependenc
 machine, or recovery procedure changes. A status may advance only with the corresponding executable
 test or an actually executed external procedure; documentation, mocks, and planned CI jobs alone do
 not establish external validation.
+
+## Public workspace threats — September 14, 2026
+
+| Threat | Current mitigation and evidence | Residual / status |
+| --- | --- | --- |
+| Forged or replayed customer identity | Maintained RS256/issuer/audience/nonce validation; PKCE; browser-bound atomic state consumption; signed-token and PostgreSQL tests | Hosted identity policy/recovery incomplete; PARTIALLY_IMPLEMENTED |
+| Cross-customer saved-version access | Server-derived owner, parameterized predicates and forced RLS; actual runtime-role tests cover missing context, pool reuse, guessed IDs and forbidden writes | Compromised API/runtime credentials can impersonate context; PARTIALLY_IMPLEMENTED |
+| CSRF and duplicate saves after lost responses | Exact Origin, session-bound CSRF, owner/request unique key and transactional quota; two-user and dropped-response browser tests | Production proxy policy and full lifecycle incomplete; PARTIALLY_IMPLEMENTED |
+| Credential exposure | File-only loading, encrypted provider tokens, no access logs/browser token storage, sanitized provider errors | Key rotation, backup/recovery and admin audit incomplete; PARTIALLY_IMPLEMENTED |
+| Public resource exhaustion | Shared request counters, finite bodies/provider/SQL deadlines, bounded version counts | Signup abuse, retention, ingress/global capacity and load validation incomplete; PARTIALLY_IMPLEMENTED |
+
+See [review evidence](evidence/public-workspace-20260914.md). No new route submits a broker
+order or runs user code; future account and execution surfaces need separate threat reviews.

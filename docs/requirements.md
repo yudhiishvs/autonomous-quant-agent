@@ -18,7 +18,9 @@ requirements and AI/backtester boundaries remain applicable to their implementat
 | PUB-008 | Public abuse controls, measured capacity, operational recovery, exports and deletion | PARTIALLY_IMPLEMENTED |
 
 The declarative contract and credential-free validator are documented in
-[public strategies](public-strategies.md). These do not authorize paper execution.
+[public strategies](public-strategies.md). The [local public workspace](../apps/public/README.md)
+provides verified sign-in and owned immutable saves; [verification](evidence/public-workspace-20260914.md)
+includes two-user isolation and lost-response retries. These do not authorize paper execution.
 The public application remains under local development; implementation completeness and
 public-launch readiness have not been established. No public signup capacity is promised.
 

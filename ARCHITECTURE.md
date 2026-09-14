@@ -6,8 +6,11 @@ The [public-product plan](docs/execution-plans/multi-user-paper-platform.md) gov
 new multi-user release. `src/adaptive_trader/public_product` holds bounded non-AI strategy
 contracts and a current-observation target evaluator. It reuses platform canonical hashing
 and cannot authorize or submit orders. It does not change the backtester or frozen AI.
-The public identity/web boundary is being developed separately from the private services
-described below; those services must not be exposed as customer APIs.
+The public identity/web boundary lives in `apps/public`: React/TypeScript, a separately
+locked FastAPI application, maintained OIDC identity, and additive PostgreSQL `aqa_public`
+state. It provides verified sign-in and owned immutable strategy versions with owner-scoped
+save idempotency. It has no brokerage or execution endpoint. Private services described
+below must not be exposed as customer APIs. See the [slice evidence](docs/evidence/public-workspace-20260914.md).
 
 The repository contains a preserved legacy research/paper prototype and a separate non-AI
 platform implementation under `src/adaptive_trader/platform`. The current directive completes

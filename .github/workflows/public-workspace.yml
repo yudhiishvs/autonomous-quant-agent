@@ -1,0 +1,84 @@
+name: Public workspace
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.11.7"
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Install separate locked application dependencies
+        run: |
+          uv sync --project apps/public/api --locked --python 3.11
+          npm ci --prefix apps/public/ui
+          cd apps/public/ui
+          npx playwright install --with-deps chromium
+      - name: Offline checks and dependency audits
+        run: |
+          make -C apps/public check
+          make -C apps/public audit
+      - name: Create synthetic loopback services
+        run: |
+          apps/public/api/.venv/bin/python apps/public/local.py
+          docker compose -f apps/public/compose.yml up -d
+          python apps/public/wait_local.py identity
+          python apps/public/run.py migrate
+      - name: Verify the disposable database boundary
+        shell: bash
+        run: |
+          test "$(docker inspect aqa-public-disposable-postgres-1 --format '{{index .Config.Labels "aqa.disposable"}}')" = "public-product-development"
+          test "$(docker inspect aqa-public-disposable-postgres-1 --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostIp}}')" = "127.0.0.1"
+          test "$(docker inspect aqa-public-disposable-postgres-1 --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}')" = "55438"
+      - name: Actual runtime-role isolation and recovery tests
+        env:
+          PYTHONPATH: src
+          APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE: "YES"
+          APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES: "YES"
+          AQA_PUBLIC_DISPOSABLE_TESTS: "YES"
+        run: apps/public/api/.venv/bin/python -m pytest -q apps/public/api/tests
+      - name: Start local application with synthetic identities
+        env:
+          PYTHONPATH: src
+        run: |
+          apps/public/api/.venv/bin/python apps/public/seed_users.py
+          python apps/public/run.py api > "${RUNNER_TEMP}/public-api.log" 2>&1 &
+          npm run dev --prefix apps/public/ui > "${RUNNER_TEMP}/public-ui.log" 2>&1 &
+          python apps/public/wait_local.py api
+          python apps/public/wait_local.py ui
+      - name: Real browser journeys and accessibility
+        run: make -C apps/public browser
+      - name: Verify tracked files stayed unchanged
+        run: |
+          git diff --check
+          git diff --exit-code
+          test -z "$(git status --porcelain --untracked-files=all)"
+      - name: Stop only disposable services
+        if: ${{ always() }}
+        run: docker compose -f apps/public/compose.yml down

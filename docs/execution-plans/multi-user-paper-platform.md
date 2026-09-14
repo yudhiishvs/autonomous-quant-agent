@@ -142,9 +142,11 @@ established by the first authentication/configuration slice.
 - Declarative contract/evaluator/CLI implemented; 48 focused tests passed.
 - Existing secret loader extended with two names for new identity callers; 127 combined
   domain/secret-loader tests passed.
-- Identity/configuration application: in progress. 11 offline identity tests and five actual
-  PostgreSQL tests passed. React production build passed. Real browser reached signup and
-  verification email; full two-user browser journey and remaining reviews still pending.
+- Identity/configuration application: functioning local slice. Fourteen offline identity
+  tests, actual PostgreSQL isolation/quota/idempotency tests and five real-browser tests
+  passed. Registration completion/recovery and public operations remain incomplete.
+- Commit 40532ec pushed to feature/multi-user-paper-platform; all five existing GitHub
+  workflows succeeded for that exact SHA. No PR or deployment created.
 - Subsequent execution/product/operations milestones NOT_IMPLEMENTED.
 
 ## 24. Decisions made
@@ -186,12 +188,24 @@ passed, 10 PostgreSQL skips, two warnings in 186.96s. Frozen manifest still pass
 Root typecheck passes (157 source files). Scoped format/lint/type checks pass; whole-tree
 format/lint still report only the pre-existing unused web/schema.py draft. Bandit scoped
 to public_product reports no findings. Both legacy regressions passed as above.
-Proposed first message: feat(strategies): add bounded declarative paper targets.
+First committed message: feat(strategies): add bounded declarative paper targets.
+
+Reviewed boundary 2: apps/public API, UI, additive migrations, synthetic development
+fixture/runner, locked dependencies and dedicated CI; the two shared secret namespace
+names and their exact tests; status/security/dependency/evidence documentation. Complete
+review and commands: docs/evidence/public-workspace-20260914.md. Confirmed scoped delegation
+from section 24 applies. Only generated private local state and prior drafts remain outside
+this boundary. Proposed message: feat(auth): add isolated customer strategy workspaces.
+Fourteen offline identity tests, twenty opt-in API tests (including six actual PostgreSQL
+cases) and five browser tests pass, including an actual lost-save
+response followed by an idempotent retry. Audits report no known Python/npm vulnerabilities.
+Production app packaging, identity administration/abuse and provider activation are pending.
 
 ## 27. Final outcome and remaining limitations
-Implementation complete: no. Public-launch ready: no. Current work is local and partial.
-Next: finish two-user browser/API recovery coverage, harden request/provider boundaries,
-review dependencies/schema/UX and commit each verified slice; then continue broker OAuth.
+Implementation complete: no. Public-launch ready: no. Work is partial; the strategy slice is pushed and the identity/workspace slice is being
+committed after final checks. Next: verify its dedicated GitHub workflow, then implement
+Alpaca OAuth account connection with strict paper consent and ownership, followed by
+independent approval/risk/execution. Complete account lifecycle and operational gates remain.
 External gates: provider application registration/consent, data storage/redistribution and
 per-user entitlements, available hosting and budget, DNS/TLS/secrets/email, monitoring,
 restore/capacity evidence, legal/owner review, usability testing and independent security review.
