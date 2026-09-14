@@ -13,9 +13,9 @@ from cryptography.fernet import Fernet
 from joserfc import jwt
 from joserfc.jwk import KeySet
 from joserfc.jws import JWSRegistry
-from requests import Response
 
 from aqa_public.settings import Settings
+from aqa_public.transport import ProviderSession
 
 
 class IdentityUnavailable(Exception):
@@ -30,39 +30,6 @@ class VerifiedIdentity:
     expires_at: float
 
 
-class IdentitySession(OAuth2Session):
-    """Fixed provider origin, bounded response bodies and finite network deadlines."""
-
-    def __init__(self, *, origin: str, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        self.origin = origin
-        self.trust_env = False
-
-    def request(self, method: str, url: str, **kwargs: Any) -> Response:
-        parsed = urlsplit(url)
-        if (
-            parsed.scheme + "://" + parsed.netloc != self.origin
-            or parsed.username
-            or parsed.password
-        ):
-            raise IdentityUnavailable("Identity destination rejected.")
-        kwargs.update(timeout=(3.05, 10), allow_redirects=False, stream=True)
-        started = time.monotonic()
-        response: Response = super().request(method, url, **kwargs)
-        try:
-            content = bytearray()
-            for chunk in response.iter_content(chunk_size=8192):
-                content.extend(chunk)
-                if len(content) > 262_144 or time.monotonic() - started > 20:
-                    raise IdentityUnavailable("Identity response limit exceeded.")
-            response._content = bytes(content)
-            # Let requests mark its fully buffered content as consumed before closing.
-            _ = response.content
-            return response
-        finally:
-            response.close()
-
-
 class IdentityProvider:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -71,7 +38,7 @@ class IdentityProvider:
 
     def _client(self) -> OAuth2Session:
         parsed = urlsplit(self.settings.issuer)
-        client = IdentitySession(
+        client = ProviderSession(
             origin=parsed.scheme + "://" + parsed.netloc,
             client_id=self.settings.client_id,
             client_secret=self.settings.client_secret.reveal(),

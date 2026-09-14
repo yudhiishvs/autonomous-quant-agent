@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "check": "tsc --noEmit",
     "test:e2e": "playwright test",
-    "format:check": "prettier --check src tests *.ts *.json index.html"
+    "format:check": "prettier --check src tests *.ts *.json index.html",
+    "test:broker": "playwright test --config playwright.broker.config.ts"
   },
   "dependencies": {
     "react": "^19.2.0",

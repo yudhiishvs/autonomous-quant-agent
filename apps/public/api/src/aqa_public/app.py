@@ -5,18 +5,26 @@ import hmac
 import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 from uuid import UUID
 
 from adaptive_trader.public_product.strategies import StrategyDefinition
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from aqa_public.broker import AlpacaConnection, BrokerRevoked, BrokerUnavailable
+from aqa_public.broker_storage import BrokerStore, ConnectionConflict
 from aqa_public.identity import IdentityProvider, IdentityUnavailable
+from aqa_public.responses import (
+    AccountsResponse,
+    DisconnectResponse,
+    RefreshResponse,
+    VersionResponse,
+)
 from aqa_public.settings import Settings
 from aqa_public.storage import CustomerSession, Store, verifier
 
@@ -36,11 +44,31 @@ class VersionRequest(BaseModel):
         return value
 
 
+class PaperConsent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    consent: Literal["paper_only"]
+
+
+class DisconnectConsent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal["disconnect_without_cancelling_orders"]
+
+
 def create_app(
-    settings: Settings, *, store: Store | None = None, identity: IdentityProvider | None = None
+    settings: Settings,
+    *,
+    store: Store | None = None,
+    identity: IdentityProvider | None = None,
+    broker: AlpacaConnection | None = None,
 ) -> FastAPI:
     database = store or Store(settings.database_url.reveal())
     provider = identity or IdentityProvider(settings)
+    connections = BrokerStore(database)
+    brokerage = broker or (
+        AlpacaConnection(settings.broker, settings.origin + "/broker/alpaca/callback")
+        if settings.broker
+        else None
+    )
     secure = not settings.development
     session_cookie = "aqa_session" if settings.development else "__Host-aqa_session"
     browser_cookie = "aqa_login" if settings.development else "__Host-aqa_login"
@@ -106,6 +134,14 @@ def create_app(
             {"detail": "Invalid request. Check the documented field limits."}, status_code=422
         )
 
+    @app.exception_handler(ResponseValidationError)
+    async def invalid_response(request: Request, error: ResponseValidationError) -> JSONResponse:
+        # Validation errors can include the rejected internal record. Never serialize/log it.
+        return JSONResponse(
+            {"detail": "The saved response could not be verified. Try again shortly."},
+            status_code=503,
+        )
+
     @app.exception_handler(IdentityUnavailable)
     async def identity_failure(request: Request, error: IdentityUnavailable) -> JSONResponse:
         return JSONResponse({"detail": str(error)}, status_code=503)
@@ -127,6 +163,118 @@ def create_app(
         ):
             raise HTTPException(403, "Request verification failed. Reload and try again.")
         return session
+
+    @app.exception_handler(BrokerUnavailable)
+    async def broker_failure(request: Request, error: BrokerUnavailable) -> JSONResponse:
+        return JSONResponse({"detail": str(error)}, status_code=503)
+
+    @app.exception_handler(ConnectionConflict)
+    async def connection_conflict(request: Request, error: ConnectionConflict) -> JSONResponse:
+        return JSONResponse({"detail": str(error)}, status_code=409)
+
+    def configured_broker() -> AlpacaConnection:
+        if brokerage is None:
+            raise HTTPException(503, "Alpaca connections are not configured on this installation.")
+        return brokerage
+
+    @app.get("/api/v1/accounts", response_model=AccountsResponse)
+    def accounts(session: Annotated[CustomerSession, Depends(customer)]) -> dict[str, Any]:
+        return {
+            "connection_available": brokerage is not None,
+            "accounts": connections.accounts(session.owner),
+        }
+
+    @app.post("/api/v1/accounts/connect")
+    def connect_account(
+        body: PaperConsent, request: Request, session: Annotated[CustomerSession, Depends(customer)]
+    ) -> dict[str, str]:
+        active_broker = configured_broker()
+        state = secrets.token_urlsafe(32)
+        connections.begin(session.owner, request.cookies[session_cookie], state)
+        return {"authorization_url": active_broker.authorization_url(state)}
+
+    @app.get("/broker/alpaca/callback")
+    def broker_callback(
+        request: Request,
+        session: Annotated[CustomerSession, Depends(customer)],
+        state: str = "",
+        code: str = "",
+    ) -> Response:
+        if not 1 <= len(state) <= 128:
+            raise HTTPException(400, "Paper connection state was invalid. Start again.")
+        active_broker = configured_broker()
+        token = request.cookies[session_cookie]
+        generation = connections.consume(session.owner, token, state)
+        if not 1 <= len(code) <= 4096:
+            raise HTTPException(
+                400,
+                "Paper connection was denied or invalid. Return to the workspace and start again.",
+            )
+        access = active_broker.exchange(code)
+        account = active_broker.account(access)
+        connections.connect(
+            owner=session.owner,
+            session=token,
+            generation=generation,
+            account=account,
+            encrypted_token=active_broker.encrypt(
+                owner=session.owner, account_id=account.id, access=access
+            ),
+        )
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/api/v1/accounts/{account_id}/disconnect", response_model=DisconnectResponse)
+    def disconnect_account(
+        account_id: UUID,
+        body: DisconnectConsent,
+        session: Annotated[CustomerSession, Depends(customer)],
+    ) -> dict[str, Any]:
+        if not connections.disconnect(session.owner, account_id):
+            raise HTTPException(404, "Paper account not found.")
+        return {
+            "disconnected": True,
+            "broker_revocation_confirmed": False,
+            "orders_cancelled": False,
+        }
+
+    @app.post("/api/v1/accounts/{account_id}/refresh", response_model=RefreshResponse)
+    def refresh_account(
+        account_id: UUID, session: Annotated[CustomerSession, Depends(customer)]
+    ) -> dict[str, Any]:
+        active_broker = configured_broker()
+        credential = connections.credential(session.owner, account_id)
+        if credential is None:
+            raise HTTPException(404, "Connected paper account not found.")
+        try:
+            access = active_broker.decrypt(
+                owner=session.owner,
+                account_id=credential["broker_id"],
+                ciphertext=credential["encrypted_token"],
+            )
+            account = active_broker.account(access)
+        except BrokerRevoked:
+            connections.disconnect(
+                session.owner,
+                account_id,
+                state="reconnect_required",
+                expected_revision=credential["revision"],
+            )
+            raise
+        if account.id != credential["broker_id"]:
+            connections.disconnect(
+                session.owner,
+                account_id,
+                state="reconnect_required",
+                expected_revision=credential["revision"],
+            )
+            raise BrokerUnavailable(
+                "Alpaca account identity changed. Reconnect your paper account."
+            )
+        if not connections.refresh(session.owner, account_id, credential["revision"], account):
+            raise ConnectionConflict(
+                "This connection changed during refresh. Reload the account list."
+            )
+        return {"accounts": connections.accounts(session.owner)}
 
     @app.get("/health/live")
     def live() -> dict[str, str]:
@@ -219,11 +367,11 @@ def create_app(
             "execution_available": False,
         }
 
-    @app.get("/api/v1/strategy-versions")
+    @app.get("/api/v1/strategy-versions", response_model=list[VersionResponse])
     def versions(session: Annotated[CustomerSession, Depends(customer)]) -> list[dict[str, Any]]:
         return database.versions(session.owner)
 
-    @app.get("/api/v1/strategy-versions/{version_id}")
+    @app.get("/api/v1/strategy-versions/{version_id}", response_model=VersionResponse)
     def version(
         version_id: UUID, session: Annotated[CustomerSession, Depends(customer)]
     ) -> dict[str, Any]:
@@ -232,7 +380,7 @@ def create_app(
             raise HTTPException(404, "Strategy version not found.")
         return result
 
-    @app.post("/api/v1/strategy-versions", status_code=201)
+    @app.post("/api/v1/strategy-versions", status_code=201, response_model=VersionResponse)
     def save_version(
         body: VersionRequest, session: Annotated[CustomerSession, Depends(customer)]
     ) -> dict[str, Any]:

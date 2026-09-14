@@ -70,8 +70,8 @@ The new domain's content hash is identity, not an approval or an authorization t
 ## 12. Data-flow changes
 Verified OIDC -> opaque session -> owned immutable definition -> account-bound approval ->
 durable deployment -> proposal -> independent account risk -> intent -> fixed paper broker
--> fills/reconciliation -> owned UI. Only the identity/configuration segment exists so far;
-no public proposal currently reaches a broker.
+-> fills/reconciliation -> owned UI. Identity/configuration and paper-account consent/read/disconnect exist locally; no public
+proposal currently reaches a broker.
 
 ## 13. State-ownership changes
 A new schema stores issuer/subject identities, server sessions and owned versions. Strategy
@@ -84,7 +84,8 @@ Tenant context must be set locally per transaction from authenticated server sta
 Declarative v1 contract supports constant targets and moving-average targets. Defaults enter
 canonical hashes. Maximum 200 consecutive completed minute bars, 100,000 target shares and
 one-minute-to-one-day cadence are contract bounds, not safe execution limits. Public API
-v1 currently supports sign-in, sign-out and saved versions; no trading endpoint is exposed.
+v1 supports sign-in, sign-out, saved versions and paper-account consent/read/disconnect;
+no order-submission endpoint is exposed.
 
 ## 15. Security implications
 Exact issuer/audience/nonce/signature/expiry and verified email; PKCE for OIDC; backend-only
@@ -147,7 +148,11 @@ established by the first authentication/configuration slice.
   passed. Registration completion/recovery and public operations remain incomplete.
 - Commit 40532ec pushed to feature/multi-user-paper-platform; all five existing GitHub
   workflows succeeded for that exact SHA. No PR or deployment created.
-- Subsequent execution/product/operations milestones NOT_IMPLEMENTED.
+- Commit 8db016a pushed; all six GitHub workflows (including Public workspace) succeeded.
+- Paper OAuth/account connection slice implemented and tested locally: 38 offline tests,
+  51 total with actual disposable storage, five normal browser tests and one synthetic
+  provider browser journey. No actual Alpaca call/order; see the connection evidence.
+- Subsequent approval/execution/product/operations milestones remain incomplete.
 
 ## 24. Decisions made
 Maintainer explicitly delegated scoped commits and feature-branch pushes on September 14;
@@ -201,11 +206,23 @@ cases) and five browser tests pass, including an actual lost-save
 response followed by an idempotent retry. Audits report no known Python/npm vulnerabilities.
 Production app packaging, identity administration/abuse and provider activation are pending.
 
+Reviewed boundary 3: fixed-endpoint Alpaca OAuth/account provider; owner-scoped storage
+and migration public_0003; closed responses; paper consent/account/disconnect UI; reused
+bounded transport; two credential namespace entries and exact inventory tests; synthetic
+provider/PG/browser verification and workflow; associated current docs. Full behavior,
+security, simplification and residual review: docs/evidence/public-paper-connections-20260914.md.
+No dependency changes or actual provider calls. The declaration of trading consent does
+not approve execution. Baseline scanner line metadata may update solely for shifted tests.
+Proposed message: feat(accounts): add isolated Alpaca paper connections.
+
 ## 27. Final outcome and remaining limitations
-Implementation complete: no. Public-launch ready: no. Work is partial; the strategy slice is pushed and the identity/workspace slice is being
-committed after final checks. Next: verify its dedicated GitHub workflow, then implement
-Alpaca OAuth account connection with strict paper consent and ownership, followed by
-independent approval/risk/execution. Complete account lifecycle and operational gates remain.
+Implementation complete: no. Public-launch ready: no. Work is partial. Strategy and
+identity/workspace commits are pushed with passing GitHub checks. Account connections are
+implemented with synthetic provider verification and await their scoped commit/push checks.
+Next: commit/verify the account slice; then bind explicit non-AI approvals to immutable
+version, owner, account generation and independently enforced risk limits. Preserve the
+current no-order condition until reviewed execution and recovery are implemented. Complete
+identity lifecycle, exports/deletion, operations and the requested capacity targets remain.
 External gates: provider application registration/consent, data storage/redistribution and
 per-user entitlements, available hosting and budget, DNS/TLS/secrets/email, monitoring,
 restore/capacity evidence, legal/owner review, usability testing and independent security review.

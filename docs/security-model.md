@@ -225,3 +225,10 @@ existing private state has no new owner. Session-bound CSRF and exact Origin che
 mutations. See the [review and remaining risks](evidence/public-workspace-20260914.md).
 This partial application must not be exposed publicly. Brokerage authority, production
 identity policy, key rotation, administration and operational validation are incomplete.
+
+The paper-connection continuation adds separate OAuth-client and broker-encryption key
+files, one-use session-bound state, global paper-account claims, forced RLS and disconnect
+generations. Tokens are encrypted with owner/account binding; refreshes cannot overwrite
+a newer revision. No order method exists in this slice, but a compromised API holding the
+OAuth grant could misuse its provider trading scope. Production egress isolation, key
+rotation and operational review remain required. See [connection review](evidence/public-paper-connections-20260914.md).

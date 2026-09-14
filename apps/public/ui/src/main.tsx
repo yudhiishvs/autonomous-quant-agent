@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import { api, RequestError } from "./client";
+import { Accounts } from "./accounts";
 
 type Definition = {
     schema_version: 1;
@@ -27,42 +29,6 @@ type Version = {
     content_hash: string;
     created_at: string;
 };
-class RequestError extends Error {
-    constructor(
-        public status: number,
-        message: string,
-    ) {
-        super(message);
-    }
-}
-
-async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const csrf =
-        document.cookie
-            .split("; ")
-            .find(
-                (value) =>
-                    value.startsWith("aqa_csrf=") ||
-                    value.startsWith("__Host-aqa_csrf="),
-            )
-            ?.split("=")[1] ?? "";
-    const response = await fetch(path, {
-        ...init,
-        credentials: "same-origin",
-        headers: {
-            "Content-Type": "application/json",
-            "X-CSRF-Token": csrf,
-            ...init.headers,
-        },
-    });
-    const data = await response.json();
-    if (!response.ok)
-        throw new RequestError(
-            response.status,
-            data.detail ?? "Request failed. Please try again.",
-        );
-    return data as T;
-}
 
 function App() {
     const pendingSave = useRef<{ payload: string; id: string } | null>(null);
@@ -205,7 +171,7 @@ function App() {
                     </button>
                 )}
             </header>
-            <main id="main">
+            <main id="main" tabIndex={-1}>
                 {error && (
                     <div role="alert" className="error">
                         {error}
@@ -244,9 +210,9 @@ function App() {
                             identity provider.
                         </p>
                         <aside>
-                            Development release: brokerage connections and
-                            execution are not available yet. Saving a strategy
-                            does not place an order.
+                            Development release: execution is not available yet.
+                            Paper-account connections require installation
+                            setup. Saving a strategy does not place an order.
                         </aside>
                     </section>
                 )}
@@ -266,9 +232,9 @@ function App() {
                             </span>
                         </div>
                         <aside className="status">
-                            Configuration only · No brokerage connected ·
-                            Execution unavailable
+                            Configuration only · Execution unavailable
                         </aside>
+                        <Accounts />
                         <div className="layout">
                             <section aria-labelledby="create-title">
                                 <h2 id="create-title">New version</h2>

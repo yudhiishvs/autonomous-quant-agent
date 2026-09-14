@@ -55,6 +55,8 @@ def test_secret_file_variable_inventory_is_exact() -> None:
     assert {variable.value for variable in SecretFileVariable} == {
         "AQA_PUBLIC_OIDC_CLIENT_SECRET_FILE",
         "AQA_PUBLIC_ENCRYPTION_KEY_FILE",
+        "AQA_PUBLIC_ALPACA_CLIENT_SECRET_FILE",
+        "AQA_PUBLIC_BROKER_ENCRYPTION_KEY_FILE",
         "AQA_DATABASE_URL_FILE",
         "AQA_OPERATOR_TOKEN_FILE",
         "AQA_ALPACA_DATA_API_KEY_FILE",

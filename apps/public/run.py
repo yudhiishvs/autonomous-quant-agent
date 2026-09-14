@@ -50,6 +50,9 @@ def main() -> int:
             "AQA_PUBLIC_ENCRYPTION_KEY_FILE": str(local / "encryption_key"),
         }
     )
+    if mode == "api":
+        os.chdir(repo)
+        os.execve(commands[mode][0], commands[mode], environment)
     return subprocess.call(commands[mode], env=environment, cwd=repo)
 
 

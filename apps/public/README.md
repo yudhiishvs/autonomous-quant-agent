@@ -2,8 +2,9 @@
 
 This slice provides verified OIDC sign-in, revocable server sessions and user-owned immutable
 strategy configurations in a React application. It is **not the completed paper-trading
-product**: no brokerage connection, approval, deployment, execution or performance endpoint
-is exposed. The [active plan](../../docs/execution-plans/multi-user-paper-platform.md) tracks
+product**. Alpaca paper OAuth/account connections are implemented with offline contract
+verification and require a separately registered provider application. Approval, deployment,
+execution and performance are not implemented. The [active plan](../../docs/execution-plans/multi-user-paper-platform.md) tracks
 the remaining release work. Do not expose this development stack publicly.
 
 ## Local startup
@@ -109,4 +110,42 @@ include public registration abuse controls, privileged MFA enforcement, audited 
 rotation/recovery of encryption keys, full recovery/deletion lifecycle verification,
 production proxy/HTTPS/container configuration, SMTP, operational
 monitoring, backups/restore and measured capacity. No hosting or market-data rights have
-been validated for public launch. No brokerage token or order has been used in these tests.
+been validated for public launch. No real brokerage token or order has been used in these tests.
+
+
+## Paper-account connection configuration
+
+The normal application has no synthetic provider fallback. Without all three settings below,
+it reports that Alpaca connections are unavailable; partial configuration fails startup:
+
+- `AQA_PUBLIC_ALPACA_CLIENT_ID`: registered OAuth application ID.
+- `AQA_PUBLIC_ALPACA_CLIENT_SECRET_FILE`: owner-private file containing that application's secret.
+- `AQA_PUBLIC_BROKER_ENCRYPTION_KEY_FILE`: a separate owner-private Fernet key (32 random bytes,
+  URL-safe base64 encoded). Do not reuse the identity encryption key.
+
+The registered callback must match `AQA_PUBLIC_ORIGIN` plus `/broker/alpaca/callback`.
+These are activation requirements, not values supplied by the local fixture. Collector API
+keys are not OAuth application credentials. Actual provider validation has not occurred.
+The API only exchanges consent and reads `/v2/account` on the fixed paper host. It has no
+order-submission route. Account snapshots preserve exact decimal strings and record the
+last verification time; they are not strategy performance or current execution permission.
+
+Disconnect removes local access and fences pending consent. It does not revoke Alpaca's
+provider grant or cancel open orders. Use Alpaca to manage those separately. The same
+broker account cannot be claimed by another customer, even after disconnect. Three account
+claims and five pending consent attempts are development bounds; deletion/claim release
+and capacity policy remain unfinished.
+
+For the additional **synthetic brokerage** browser contract, first stop the normal API
+terminal (keep the UI and disposable Compose stack running). Then run:
+
+```sh
+PYTHONPATH=src APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE=YES APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES=YES AQA_PUBLIC_DISPOSABLE_TESTS=YES apps/public/api/.venv/bin/python apps/public/api/tests/browser_app.py
+```
+
+In another terminal, run `npm run test:broker --prefix apps/public/ui`. The test server checks
+the exact disposable DB/role and uses real local identity/storage with injected synthetic
+Alpaca responses. The browser intercepts the consent redirect; no call reaches Alpaca.
+Stop this test server afterward and restart `python3 apps/public/run.py api` for the normal
+application. Never expose the test server. CI exercises both normal and contract modes.
+See [connection evidence](../../docs/evidence/public-paper-connections-20260914.md).

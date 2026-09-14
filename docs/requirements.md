@@ -9,7 +9,7 @@ requirements and AI/backtester boundaries remain applicable to their implementat
 | ID | Required public behavior | Current status |
 | --- | --- | --- |
 | PUB-001 | Verified customer lifecycle and tenant isolation across every owned surface | PARTIALLY_IMPLEMENTED |
-| PUB-002 | Each user's verified Alpaca paper OAuth connection, encrypted token lifecycle and entitlements | NOT_IMPLEMENTED |
+| PUB-002 | Each user's verified Alpaca paper OAuth connection, encrypted token lifecycle and entitlements | PARTIALLY_IMPLEMENTED |
 | PUB-003 | Immutable bounded declarative strategies; no arbitrary uploaded execution | PARTIALLY_IMPLEMENTED |
 | PUB-004 | Explicit non-AI approval bound to owner, account, version and independent account risk | NOT_IMPLEMENTED |
 | PUB-005 | Durable account-coordinated execution, uncertainty reconciliation and emergency controls | NOT_IMPLEMENTED |

@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 
 from adaptive_trader.platform.security import RedactedSecret, SecretFileVariable, load_secret_file
 
+from aqa_public.broker import BrokerSettings
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -18,6 +20,7 @@ class Settings:
     client_secret: RedactedSecret = field(repr=False)
     encryption_key: RedactedSecret = field(repr=False)
     development: bool = False
+    broker: BrokerSettings | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         for value in (self.origin, self.issuer):
@@ -47,7 +50,22 @@ class Settings:
         def secret(source: SecretFileVariable) -> RedactedSecret:
             return load_secret_file(os.environ[source.value], source=source)
 
+        broker = None
+        broker_names = (
+            "AQA_PUBLIC_ALPACA_CLIENT_ID",
+            SecretFileVariable.PUBLIC_ALPACA_CLIENT_SECRET.value,
+            SecretFileVariable.PUBLIC_BROKER_ENCRYPTION_KEY.value,
+        )
+        if any(os.environ.get(name) for name in broker_names):
+            if not all(os.environ.get(name) for name in broker_names):
+                raise ValueError("Alpaca connection configuration is incomplete.")
+            broker = BrokerSettings(
+                client_id=os.environ[broker_names[0]],
+                client_secret=secret(SecretFileVariable.PUBLIC_ALPACA_CLIENT_SECRET),
+                encryption_key=secret(SecretFileVariable.PUBLIC_BROKER_ENCRYPTION_KEY),
+            )
         return cls(
+            broker=broker,
             origin=os.environ["AQA_PUBLIC_ORIGIN"],
             issuer=os.environ["AQA_PUBLIC_OIDC_ISSUER"],
             client_id=os.environ["AQA_PUBLIC_OIDC_CLIENT_ID"],

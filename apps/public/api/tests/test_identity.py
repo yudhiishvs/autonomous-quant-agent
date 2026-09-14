@@ -5,38 +5,11 @@ from contextlib import contextmanager
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
-from adaptive_trader.platform.security import SecretFileVariable, load_secret_file
-from cryptography.fernet import Fernet
 from joserfc import jwt
 from joserfc.jwk import RSAKey
 
-from aqa_public.identity import IdentityProvider, IdentitySession, IdentityUnavailable
-from aqa_public.settings import Settings
-
-
-@pytest.fixture
-def settings(tmp_path):
-    def secret(name, value, source):
-        path = tmp_path / name
-        path.write_text(value)
-        path.chmod(0o600)
-        return load_secret_file(path, source=source)
-
-    return Settings(
-        origin="http://127.0.0.1:5178",
-        issuer="http://127.0.0.1:8188/realms/paper",
-        client_id="paper-web",
-        development=True,
-        database_url=secret("db", "postgresql+psycopg://unused", SecretFileVariable.DATABASE_URL),
-        client_secret=secret(
-            "oidc",
-            "SYNTHETIC-ONLY-NO-EXTERNAL-AUTHORITY",
-            SecretFileVariable.PUBLIC_OIDC_CLIENT_SECRET,
-        ),
-        encryption_key=secret(
-            "encryption", Fernet.generate_key().decode(), SecretFileVariable.PUBLIC_ENCRYPTION_KEY
-        ),
-    )
+from aqa_public.identity import IdentityProvider, IdentityUnavailable
+from aqa_public.transport import ProviderSession, ProviderTransportError
 
 
 class Response:
@@ -135,15 +108,15 @@ def test_provider_outage_does_not_accept_session(settings, monkeypatch):
 def test_identity_transport_rejects_other_hosts_and_bounds_bodies(monkeypatch):
     from requests import Response as HttpResponse
 
-    with IdentitySession(origin="https://identity.example.invalid", client_id="test") as client:
-        with pytest.raises(IdentityUnavailable, match="destination"):
+    with ProviderSession(origin="https://identity.example.invalid", client_id="test") as client:
+        with pytest.raises(ProviderTransportError, match="destination"):
             client.get("https://attacker.invalid/token", withhold_token=True)
         response = HttpResponse()
         response.status_code = 200
         response._content = b"x" * 262145
         response._content_consumed = True
         monkeypatch.setattr(client, "send", lambda *args, **kwargs: response)
-        with pytest.raises(IdentityUnavailable, match="limit"):
+        with pytest.raises(ProviderTransportError, match="limit"):
             client.get("https://identity.example.invalid/certs", withhold_token=True)
 
 

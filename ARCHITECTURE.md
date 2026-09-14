@@ -9,7 +9,9 @@ and cannot authorize or submit orders. It does not change the backtester or froz
 The public identity/web boundary lives in `apps/public`: React/TypeScript, a separately
 locked FastAPI application, maintained OIDC identity, and additive PostgreSQL `aqa_public`
 state. It provides verified sign-in and owned immutable strategy versions with owner-scoped
-save idempotency. It has no brokerage or execution endpoint. Private services described
+save idempotency. It also supports fixed-host Alpaca paper consent, owned encrypted
+account connections, exact account snapshots and revision-fenced disconnect. Broker
+contracts are tested with synthetic providers; no order-submission endpoint exists. Private services described
 below must not be exposed as customer APIs. See the [slice evidence](docs/evidence/public-workspace-20260914.md).
 
 The repository contains a preserved legacy research/paper prototype and a separate non-AI

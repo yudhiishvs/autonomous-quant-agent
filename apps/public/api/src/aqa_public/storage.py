@@ -57,7 +57,7 @@ class Store:
                 connection.execute(
                     text("SELECT version_num FROM aqa_public.alembic_version")
                 ).scalar_one()
-                != "public_0002"
+                != "public_0003"
             ):
                 raise ValueError("Public schema migration required.")
 

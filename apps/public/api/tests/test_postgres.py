@@ -269,3 +269,367 @@ def test_same_save_request_is_durable_idempotent_and_owner_scoped(store, setting
         )
     finally:
         other.engine.dispose()
+
+
+def test_broker_claims_and_credentials_are_owner_isolated(store):
+    from test_broker import account_data
+
+    from aqa_public.broker import PaperAccount
+    from aqa_public.broker_storage import BrokerStore, ConnectionConflict
+
+    token, _, alice = sign_in(store)
+    bob_token, _, bob = sign_in(store)
+    accounts = BrokerStore(store)
+    account = PaperAccount.model_validate(account_data())
+    accounts.begin(alice, token, token + "alice-state")
+    generation = accounts.consume(alice, token, token + "alice-state")
+    saved = accounts.connect(
+        owner=alice,
+        session=token,
+        generation=generation,
+        account=account,
+        encrypted_token="synthetic-encrypted",
+    )
+    accounts.begin(bob, bob_token, bob_token + "bob-state")
+    generation = accounts.consume(bob, bob_token, bob_token + "bob-state")
+    with pytest.raises(ConnectionConflict, match="cannot be connected"):
+        accounts.connect(
+            owner=bob,
+            session=bob_token,
+            generation=generation,
+            account=account,
+            encrypted_token="different",
+        )
+    assert accounts.accounts(bob) == []
+    assert accounts.credential(bob, saved["id"]) is None
+    assert not accounts.disconnect(bob, saved["id"])
+    assert "encrypted_token" not in accounts.accounts(alice)[0]
+    assert accounts.accounts(alice)[0]["snapshot"]["cash"] == "10000.123456789"
+    with store.engine.connect() as connection:
+        assert (
+            connection.execute(text("SELECT count(*) FROM aqa_public.broker_accounts")).scalar_one()
+            == 0
+        )
+
+
+def test_disconnect_fences_inflight_callback_refresh_and_stale_session(store):
+    from test_broker import account_data
+
+    from aqa_public.broker import PaperAccount
+    from aqa_public.broker_storage import BrokerStore, ConnectionConflict
+
+    token, _, owner = sign_in(store)
+    accounts = BrokerStore(store)
+    account = PaperAccount.model_validate(account_data())
+    accounts.begin(owner, token, token + "first")
+    generation = accounts.consume(owner, token, token + "first")
+    saved = accounts.connect(
+        owner=owner,
+        session=token,
+        generation=generation,
+        account=account,
+        encrypted_token="first-token",
+    )
+    accounts.begin(owner, token, token + "inflight")
+    old_generation = accounts.consume(owner, token, token + "inflight")
+    assert accounts.disconnect(owner, saved["id"])
+    assert accounts.credential(owner, saved["id"]) is None
+    with pytest.raises(ConnectionConflict, match="superseded"):
+        accounts.connect(
+            owner=owner,
+            session=token,
+            generation=old_generation,
+            account=account,
+            encrypted_token="late-token",
+        )
+    accounts.begin(owner, token, token + "reconnect")
+    generation = accounts.consume(owner, token, token + "reconnect")
+    reconnected = accounts.connect(
+        owner=owner,
+        session=token,
+        generation=generation,
+        account=account,
+        encrypted_token="new-token",
+    )
+    assert reconnected["id"] == saved["id"]
+    assert not accounts.refresh(owner, saved["id"], saved["revision"], account)
+    assert not accounts.disconnect(
+        owner, saved["id"], state="reconnect_required", expected_revision=saved["revision"]
+    )
+    assert accounts.credential(owner, saved["id"])["encrypted_token"] == "new-token"
+    accounts.begin(owner, token, token + "signout-race")
+    generation = accounts.consume(owner, token, token + "signout-race")
+    store.sign_out(token)
+    with pytest.raises(ConnectionConflict, match="session expired"):
+        accounts.connect(
+            owner=owner,
+            session=token,
+            generation=generation,
+            account=account,
+            encrypted_token="stale-session-token",
+        )
+
+
+def test_broker_state_is_session_bound_one_use_expiring_and_bounded(store):
+    from aqa_public.broker_storage import BrokerStore, ConnectionConflict
+    from aqa_public.storage import verifier
+
+    token, _, owner = sign_in(store)
+    accounts = BrokerStore(store)
+    accounts.begin(owner, token, token + "bound")
+    with pytest.raises(ConnectionConflict):
+        accounts.consume(owner, "different-session", token + "bound")
+    assert accounts.consume(owner, token, token + "bound") == 0
+    with pytest.raises(ConnectionConflict):
+        accounts.consume(owner, token, token + "bound")
+    with store.tenant(owner) as connection:
+        connection.execute(
+            text(
+                "INSERT INTO aqa_public.broker_oauth_attempts VALUES (:state,:owner,:session,0,now()-interval '1 second')"
+            ),
+            {"state": verifier(token + "expired"), "owner": owner, "session": verifier(token)},
+        )
+    with pytest.raises(ConnectionConflict):
+        accounts.consume(owner, token, token + "expired")
+    for number in range(5):
+        accounts.begin(owner, token, token + str(number))
+    with pytest.raises(ConnectionConflict, match="Five"):
+        accounts.begin(owner, token, token + "sixth")
+
+
+def test_concurrent_broker_claims_cannot_link_one_account_to_two_users(store, settings):
+    from test_broker import account_data
+
+    from aqa_public.broker import PaperAccount
+    from aqa_public.broker_storage import BrokerStore, ConnectionConflict
+
+    first_token, _, first_owner = sign_in(store)
+    second_token, _, second_owner = sign_in(store)
+    other = Store(settings.database_url.reveal())
+    account = PaperAccount.model_validate(account_data())
+
+    def claim(arguments):
+        database, owner, token = arguments
+        connection = BrokerStore(database)
+        connection.begin(owner, token, "claim-" + owner)
+        generation = connection.consume(owner, token, "claim-" + owner)
+        try:
+            connection.connect(
+                owner=owner,
+                session=token,
+                generation=generation,
+                account=account,
+                encrypted_token="synthetic-token",
+            )
+            return "connected"
+        except ConnectionConflict:
+            return "rejected"
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(
+                pool.map(
+                    claim, [(store, first_owner, first_token), (other, second_owner, second_token)]
+                )
+            )
+        assert sorted(results) == ["connected", "rejected"]
+    finally:
+        other.engine.dispose()
+
+
+def test_broker_api_consent_callback_ownership_revocation_and_configuration(store, settings):
+    from urllib.parse import parse_qs, urlsplit
+
+    from test_broker import account_data
+
+    from aqa_public.broker import AlpacaConnection, BrokerRevoked, BrokerSettings, PaperAccount
+
+    token, csrf, _owner = sign_in(store)
+    other_token, other_csrf, _ = sign_in(store)
+
+    class LocalBroker(AlpacaConnection):
+        exchanges = 0
+        revoked = False
+        account_value = PaperAccount.model_validate(account_data())
+
+        def exchange(self, code):
+            self.exchanges += 1
+            return "synthetic-grant"
+
+        def account(self, access):
+            if self.revoked:
+                raise BrokerRevoked("Access revoked. Reconnect your paper account.")
+            return self.account_value
+
+    broker = LocalBroker(
+        BrokerSettings("local", settings.client_secret, settings.encryption_key),
+        settings.origin + "/broker/alpaca/callback",
+    )
+    app = create_app(settings, store=store, identity=LocalIdentity(settings), broker=broker)
+    headers = {"Origin": settings.origin, "X-CSRF-Token": csrf}
+    with TestClient(app, base_url=settings.origin) as client:
+        client.cookies.set("aqa_session", token)
+        assert (
+            client.post("/api/v1/accounts/connect", json={"consent": "paper_only"}).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/v1/accounts/connect", json={"consent": "live"}, headers=headers
+            ).status_code
+            == 422
+        )
+        response = client.post(
+            "/api/v1/accounts/connect", json={"consent": "paper_only"}, headers=headers
+        )
+        assert response.status_code == 200
+        query = parse_qs(urlsplit(response.json()["authorization_url"]).query)
+        state = query["state"][0]
+        assert query["env"] == ["paper"]
+        client.cookies.set("aqa_session", other_token)
+        assert (
+            client.get(
+                "/broker/alpaca/callback",
+                params={"state": state, "code": "local"},
+                follow_redirects=False,
+            ).status_code
+            == 409
+        )
+        assert broker.exchanges == 0
+        client.cookies.set("aqa_session", token)
+        assert (
+            client.get(
+                "/broker/alpaca/callback",
+                params={"state": state, "code": "local"},
+                follow_redirects=False,
+            ).status_code
+            == 303
+        )
+        assert (
+            client.get(
+                "/broker/alpaca/callback",
+                params={"state": state, "code": "local"},
+                follow_redirects=False,
+            ).status_code
+            == 409
+        )
+        assert broker.exchanges == 1
+        denied = client.post(
+            "/api/v1/accounts/connect", json={"consent": "paper_only"}, headers=headers
+        )
+        denied_state = parse_qs(urlsplit(denied.json()["authorization_url"]).query)["state"][0]
+        assert (
+            client.get(
+                "/broker/alpaca/callback", params={"state": denied_state, "error": "access_denied"}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.get(
+                "/broker/alpaca/callback", params={"state": denied_state, "code": "late"}
+            ).status_code
+            == 409
+        )
+        assert broker.exchanges == 1
+        response = client.get("/api/v1/accounts")
+        account = response.json()["accounts"][0]
+        assert "synthetic-grant" not in response.text and "encrypted_token" not in response.text
+        client.cookies.set("aqa_session", other_token)
+        assert client.get("/api/v1/accounts").json()["accounts"] == []
+        assert (
+            client.post(
+                "/api/v1/accounts/" + account["id"] + "/disconnect",
+                json={"confirm": "disconnect_without_cancelling_orders"},
+                headers={"Origin": settings.origin, "X-CSRF-Token": other_csrf},
+            ).status_code
+            == 404
+        )
+        client.cookies.set("aqa_session", token)
+        broker.revoked = True
+        assert (
+            client.post(
+                "/api/v1/accounts/" + account["id"] + "/refresh", headers=headers
+            ).status_code
+            == 503
+        )
+        assert client.get("/api/v1/accounts").json()["accounts"][0]["state"] == "reconnect_required"
+        response = client.post(
+            "/api/v1/accounts/" + account["id"] + "/disconnect",
+            json={"confirm": "disconnect_without_cancelling_orders"},
+            headers=headers,
+        )
+        assert response.json() == {
+            "disconnected": True,
+            "broker_revocation_confirmed": False,
+            "orders_cancelled": False,
+        }
+    with TestClient(
+        create_app(settings, store=store, identity=LocalIdentity(settings)),
+        base_url=settings.origin,
+    ) as client:
+        client.cookies.set("aqa_session", token)
+        assert client.get("/api/v1/accounts").json()["connection_available"] is False
+        assert (
+            client.post(
+                "/api/v1/accounts/connect", json={"consent": "paper_only"}, headers=headers
+            ).status_code
+            == 503
+        )
+
+
+def test_account_quota_preserves_existing_claims_and_permits_reconnect(store):
+    from test_broker import account_data
+
+    from aqa_public.broker import PaperAccount
+    from aqa_public.broker_storage import BrokerStore, ConnectionConflict
+
+    token, _, owner = sign_in(store)
+    accounts = BrokerStore(store)
+    original = PaperAccount.model_validate(account_data())
+    for number in range(4):
+        account = original if number == 0 else PaperAccount.model_validate(account_data())
+        accounts.begin(owner, token, token + str(number))
+        generation = accounts.consume(owner, token, token + str(number))
+        if number == 3:
+            with pytest.raises(ConnectionConflict, match="three paper accounts"):
+                accounts.connect(
+                    owner=owner,
+                    session=token,
+                    generation=generation,
+                    account=account,
+                    encrypted_token="quota-test",
+                )
+        else:
+            accounts.connect(
+                owner=owner,
+                session=token,
+                generation=generation,
+                account=account,
+                encrypted_token="quota-test",
+            )
+    accounts.begin(owner, token, token + "reconnect-at-quota")
+    generation = accounts.consume(owner, token, token + "reconnect-at-quota")
+    accounts.connect(
+        owner=owner,
+        session=token,
+        generation=generation,
+        account=original,
+        encrypted_token="new-quota-token",
+    )
+    assert len(accounts.accounts(owner)) == 3
+
+
+def test_unexpected_internal_response_fields_are_redacted(store, settings, monkeypatch, caplog):
+    token, _, _owner = sign_in(store)
+    monkeypatch.setattr(
+        store, "versions", lambda owner: [{"encrypted_token": "synthetic-private-response"}]
+    )
+    with TestClient(
+        create_app(settings, store=store, identity=LocalIdentity(settings)),
+        base_url=settings.origin,
+    ) as client:
+        client.cookies.set("aqa_session", token)
+        response = client.get("/api/v1/strategy-versions")
+        assert response.status_code == 503
+        assert "synthetic-private-response" not in response.text
+        assert "synthetic-private-response" not in caplog.text

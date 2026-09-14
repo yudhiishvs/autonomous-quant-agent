@@ -168,6 +168,8 @@ def test_runtime_service_and_setting_inventories_are_exact() -> None:
     assert {source.value for source in SecretFileVariable} == {
         "AQA_PUBLIC_OIDC_CLIENT_SECRET_FILE",
         "AQA_PUBLIC_ENCRYPTION_KEY_FILE",
+        "AQA_PUBLIC_ALPACA_CLIENT_SECRET_FILE",
+        "AQA_PUBLIC_BROKER_ENCRYPTION_KEY_FILE",
         "AQA_DATABASE_URL_FILE",
         "AQA_OPERATOR_TOKEN_FILE",
         "AQA_ALPACA_DATA_API_KEY_FILE",

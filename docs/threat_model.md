@@ -605,3 +605,16 @@ not establish external validation.
 
 See [review evidence](evidence/public-workspace-20260914.md). No new route submits a broker
 order or runs user code; future account and execution surfaces need separate threat reviews.
+
+## Public paper-connection continuation
+
+| Threat | Current control and evidence | Residual / status |
+| --- | --- | --- |
+| Live-account or excessive consent | Fixed `env=paper`, only trading scope, fixed paper account verification; prepared HTTP and malformed grant tests | Actual provider consent unvalidated; IMPLEMENTED_NOT_EXTERNALLY_VALIDATED |
+| Cross-customer broker claim/token swap | Globally unique account ID, forced RLS, owner/account-bound encryption; two-user and concurrent-claim PG tests | API/DB/key compromise and claim-release policy remain; PARTIALLY_IMPLEMENTED |
+| Late OAuth/refresh restores disconnected access | One-use session state, owner generation and account revision; disconnect/reconnect/logout race tests | Future execution workers must recheck these fences; PARTIALLY_IMPLEMENTED |
+| Disconnect misrepresents broker effects | Explicit confirmation and returned false cancellation/revocation flags; persisted browser journey | Provider revocation and existing orders remain external; IMPLEMENTED_NOT_EXTERNALLY_VALIDATED |
+
+Connection code has no order method. This is not proof that a compromised runtime cannot
+misuse the OAuth grant; production egress controls and independent execution review remain
+required. See [evidence](evidence/public-paper-connections-20260914.md).

@@ -331,3 +331,62 @@ footer {
         scroll-behavior: auto !important;
     }
 }
+.accounts {
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid #d8e0dc;
+}
+.account-list {
+    list-style: none;
+    padding: 0;
+}
+.account-list > li {
+    padding: 1rem 0;
+    border-top: 1px solid #d8e0dc;
+}
+.account-heading,
+.account-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.account-heading > span {
+    font-size: 0.85rem;
+    color: #54655f;
+}
+.account-balances {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3rem;
+}
+.account-balances dd {
+    font-size: 1.1rem;
+    color: #192e32;
+}
+.checkbox {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+}
+.checkbox input {
+    width: 20px;
+    height: 20px;
+    min-height: 20px;
+    flex-shrink: 0;
+}
+button.secondary {
+    background: #e4ece7;
+    color: #254c43;
+}
+dialog {
+    border: 1px solid #acbbb3;
+    border-radius: 8px;
+    padding: 2rem;
+    max-width: 560px;
+    width: calc(100% - 2rem);
+    color: #192e32;
+}
+dialog::backdrop {
+    background: rgba(15, 30, 25, 0.45);
+}

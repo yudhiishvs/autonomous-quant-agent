@@ -7,7 +7,9 @@ The new declarative strategy contract, target evaluator and local validator have
 passing focused tests. They have no execution authority. The local React workspace now uses verified Keycloak
 identity and PostgreSQL ownership to save and inspect immutable versions, including safe
 retries after lost responses. See [slice evidence](evidence/public-workspace-20260914.md)
-and [startup instructions](../apps/public/README.md). Public identity lifecycle, brokerage,
+and [startup instructions](../apps/public/README.md). Paper-account OAuth, ownership and
+disconnect now have [offline/integration evidence](evidence/public-paper-connections-20260914.md);
+actual provider compatibility and entitlements remain unvalidated. Public identity lifecycle,
 approval, execution, reporting and operating requirements are tracked separately in
 [the active plan](execution-plans/multi-user-paper-platform.md). Private-platform evidence
 below must not be read as proof that the public release is complete.

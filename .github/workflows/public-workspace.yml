@@ -69,11 +69,27 @@ jobs:
         run: |
           apps/public/api/.venv/bin/python apps/public/seed_users.py
           python apps/public/run.py api > "${RUNNER_TEMP}/public-api.log" 2>&1 &
+          printf '%s\n' "$!" > "${RUNNER_TEMP}/public-api.pid"
           npm run dev --prefix apps/public/ui > "${RUNNER_TEMP}/public-ui.log" 2>&1 &
           python apps/public/wait_local.py api
           python apps/public/wait_local.py ui
       - name: Real browser journeys and accessibility
         run: make -C apps/public browser
+      - name: Browser account contracts with synthetic Alpaca and real storage
+        env:
+          PYTHONPATH: src
+          APA_TEST_POSTGRES_ALLOW_DESTRUCTIVE: "YES"
+          APA_TEST_POSTGRES_ALLOW_CLUSTER_ROLES: "YES"
+          AQA_PUBLIC_DISPOSABLE_TESTS: "YES"
+        run: |
+          kill "$(cat "${RUNNER_TEMP}/public-api.pid")"
+          for attempt in $(seq 1 30); do
+            if ! kill -0 "$(cat "${RUNNER_TEMP}/public-api.pid")" 2>/dev/null; then break; fi
+            sleep 1
+          done
+          apps/public/api/.venv/bin/python apps/public/api/tests/browser_app.py > "${RUNNER_TEMP}/broker-contract-api.log" 2>&1 &
+          python apps/public/wait_local.py api
+          npm run test:broker --prefix apps/public/ui
       - name: Verify tracked files stayed unchanged
         run: |
           git diff --check
