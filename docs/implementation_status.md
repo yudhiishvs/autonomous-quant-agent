@@ -58,3 +58,31 @@ Read the dated ledgers chronologically. Their old failure counts describe the bu
 under investigation at that time, not the current container implementation. Coverage
 floors remain 74% for the repository and 85% for the platform, with branch measurement
 and two-decimal reporting.
+
+Local activation on 2026-09-10 exposed a migration-cleanup defect: schema upgrades
+completed, but deployment experiment registration lost its INSERT grants. The local
+repair preserves the existing revision-0010 append-only exception. Live data validation
+remains pending; schema migration alone does not establish successful activation.
+The rebuilt local image subsequently completed migration successfully: database revision
+0015 and one registered experiment were verified. The repair passed 90 PostgreSQL
+migration/role tests, including fresh registration and idempotent retry.
+
+On 2026-09-10, an isolated authenticated Alpaca IEX historical sample passed storage,
+graceful restart, replay and aggregate checks (17,325 minute bars, 29 symbols). See
+[evidence](evidence/alpaca-historical-validation-20260910.md). This narrow external
+validation leaves streaming, full-history availability and research readiness pending.
+
+Local hardening on 2026-09-12 verified the complete default offline Compose session and
+restart with restricted PostgreSQL logins, plus full-platform logical restore. Revision
+0016 exposes metadata-only startup compatibility checks. See
+[evidence](evidence/local-hardening-20260912.md). Unattended production readiness remains
+`PARTIALLY_IMPLEMENTED`; live streaming, archive capacity and provider precision remain
+unverified. These changes are local and unpublished.
+
+The 2026-09-13 continuation adds verified in-process history reuse, transactional
+projection invalidation (revision 0017), populated archive measurement and an explicit
+IEX receipt verifier. Local implementation evidence is recorded in
+[evidence](evidence/local-hardening-20260913.md). IEX authentication/subscription and
+the provider's synthetic test stream worked on Sunday; real minute-bar receipt and
+persistence after reconnect remain `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED`. The entire
+system remains `PARTIALLY_IMPLEMENTED` for unattended production readiness.

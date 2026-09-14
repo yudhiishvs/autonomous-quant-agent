@@ -1084,3 +1084,109 @@ no commits, pushes, or PR changes. Move the offline demo ahead of detailed refer
 material, explain design tradeoffs, and consolidate the current implementation status.
 Keep dated evidence intact and personal contribution claims out of the text unless
 supplied by the maintainer. Runtime code, safeguards, and frozen AI files are unchanged.
+
+## Local deployment registration repair
+
+The first operational migration reached 0015 but failed to register its experiment.
+Alembic's final business-DML cleanup erased the append-only registration grants from
+0010. Restore only SELECT/INSERT on the two experiment tables and audit table after
+that revision, retaining immutable triggers and runtime authority separation. Verify
+fresh deployment, retry idempotency, and the remaining privilege denials on a separate
+disposable PostgreSQL cluster. No commits, publication, AI changes, or order submission.
+
+Verification: the regression fails on the original cleanup and passes after repair.
+All 90 affected PostgreSQL migration/role tests, 30 offline migration tests, and eight
+documentation tests pass; lint, formatting, migration typing, and AI freeze checks pass.
+Security review confirms the three-table append-only exception from 0010, unchanged
+runtime grants, retained mutation denials, and graph-gated restoration on retry. No
+provider I/O or financial authority was introduced. The rebuilt local image completed
+`db migrate: ok; revision=head` against the operator database, which reports revision
+0015 and exactly one experiment. The disposable test container was removed. Changes
+remain local and uncommitted; live collection has not yet been validated.
+
+## Isolated Alpaca historical validation
+
+The maintainer authorized actual data-only historical requests using saved credentials.
+Use Compose project `aqa-data-validation-20260910` with its own database volume/network;
+never run destructive pytest fixtures against it or the operational database. Validate
+2026-09-08 through 2026-09-10 (exclusive), data integrity, repeatability and restart
+behavior before selecting operational coverage. Credentials remain file-backed and
+unprinted, trading remains disabled, and no commits or PRs are authorized.
+
+Isolated historical validation completed: authenticated IEX download, graceful stop and
+restart, full replay, 17,325 stable minute bars, 319 independently checked aggregates,
+and 29 completed checkpoints. See `docs/evidence/alpaca-historical-validation-20260910.md`.
+Sparse canonical gaps keep research readiness false; oldest-history and listing coverage
+remain unvalidated. The operational database is unchanged. Preserve the isolated sample
+volume with its database stopped; no publication or live daemon was started.
+
+## Repository-wide production audit — 2026-09-11
+
+Audit the current working tree, including unpublished migration repair, across runtime,
+data, execution, API, persistence, packaging, CI, and operations. Use offline checks and
+a new disposable PostgreSQL cluster only; no provider requests, order submission, live
+activation, source fixes, commits or PRs. Report reproducible findings separately from
+missing external validation and preserve the frozen AI implementation unchanged.
+
+Audit completed; report: `docs/evidence/repository-audit-20260911.md`. Six findings
+separate a locally fixed but unpublished migration defect, the reproduced README-anchor
+CI failure, default build revision mismatch, long-history capacity risk, rounded-average
+compatibility and request-body deadline hardening. Offline: 3045 pass/1 fail; PostgreSQL:
+159 pass, with an additional data-only restore pass. Full-platform backup proof was
+unavailable without native utilities. Dependency, image and static gates passed under
+the report's scope; old local refs account for history scanner metadata matches. No
+runtime edits or publication were performed. The disposable audit cluster was removed.
+
+## Local production hardening — 2026-09-12
+
+Maintainer authorized local repairs and validation of non-AI infrastructure. Preserve
+all existing changes and the AI freeze; no publication, trading or operational database
+reset. First repair the authority link, default build provenance and API body deadline.
+Then validate long-history capacity and provider contracts, local Compose startup and
+recovery. Keep unavailable external validation explicit instead of declaring production
+readiness from local tests alone.
+
+Local hardening repaired the confirmed startup and resource-boundary defects and added revision 0016
+for metadata-only worker startup checks. Real restricted-login offline cycles and local
+Compose startup/restart now complete. See `docs/evidence/local-hardening-20260912.md`
+for validation and the remaining archive-capacity/provider-contract limitations. No
+publication or operator database mutation is authorized by this local verification.
+
+Final verification: 3,051 offline tests passed; 169 PostgreSQL tests passed with no
+skips (including logical restore and restricted-login restart). The final affected
+offline selection passed 55 tests. All eight isolated Compose services were healthy;
+21 completed slots, 21 reconciliations and six synthetic fills survived worker restart.
+Lint, formatting, typing, freeze and configured Bandit gates passed. Test containers
+were removed; isolated Compose volumes were preserved. No commits or remote changes.
+
+## Remaining readiness validation — 2026-09-13
+
+Continue local non-AI work under the maintainer's request. Preserve existing edits and
+trading denial. Verify external data-only streaming with saved file-backed credentials
+using bounded sessions; do not turn synthetic test-feed events into research data.
+Investigate populated historical capacity and the broker summary precision contract.
+Record external observations separately from deterministic tests. No publication,
+operator-database reset, or broker order submission is authorized by this work.
+
+Added process-local readiness prefixes with exact full-scan equivalence, correction/gap
+invalidation and database-enforced external projection invalidation (revision 0017).
+No serialized cache or new runtime privilege is introduced. The explicit stream verifier
+was exercised with saved data credentials: both IEX subscriptions succeeded, but Sunday
+produced no current bars, so its result correctly failed external acceptance. An app
+follow-up named "Validate market-session data" continues bounded validation weekdays
+at 10:00 America/New_York; the local machine and app must be running. It must not
+place orders or publish changes, and must pause after completion or a user-action blocker.
+
+See `docs/evidence/local-hardening-20260913.md` for final local measurements and review.
+Production acceptance remains open for real-session durable receipt/reconnect, full
+universe ingestion/gap classification, broker precision, sustained operation, off-host
+recovery and alert delivery. Those are not waived by passing local tests.
+
+Final local verification on September 13: 3,065 offline tests passed; 171 PostgreSQL
+tests passed with only the explicit capacity opt-in skip; that capacity test passed
+separately on 976,680 synthetic minute bars. Cached and full readiness were identical
+(0.099-second warm scan, 267.91-second cold scan). The final revision-0017 image
+completed the 21-slot/21-reconciliation/six-fake-fill session and restart with all eight
+services healthy. Both legacy regressions, format/lint/type/freeze and configured
+Bandit checks passed. Disposable services were removed and Compose volumes retained.
+No publication or order was performed. External acceptance items above remain open.

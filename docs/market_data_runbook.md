@@ -341,3 +341,47 @@ details do not belong in evidence or Git.
 
 Provider contract references: [Alpaca stock stream](https://docs.alpaca.markets/us/docs/real-time-stock-pricing-data)
 and [historical stock bars](https://docs.alpaca.markets/reference/stockbarsingle-1).
+
+### Migration reaches head but deployment registration fails
+
+The migration command also registers immutable experiment metadata after applying the
+schema. A database at `20260906_0015` can therefore still have an incomplete deployment.
+Migration cleanup preserves the revision-0010 SELECT/INSERT exception for experiments,
+experiment symbols, and their audit evidence; UPDATE/DELETE/TRUNCATE remain denied.
+After installing a repaired image, rerun the migration command against the existing
+database. Do not delete its volume: registration retries are idempotent.
+
+### Local hardening validation (2026-09-12)
+
+The working tree now includes migration 0016 for restricted worker schema-version reads.
+Build the current image and run the existing migration step before starting workers;
+old images do not contain this repair. Expected-calendar inventory is processed in daily
+batches, but readiness still scans the configured historical range. Validate throughput
+before requesting maximum history. Default Compose logs rotate at 10 MB with five files
+per service. [Local validation](evidence/local-hardening-20260912.md) covers synthetic
+startup/restart and logical restore, not live collection.
+
+## Bounded market-session receipt check
+
+`scripts/verify_iex_stream.py` uses the existing data-only credential file environment
+variables. During a regular market session, after checking that another collector is
+not occupying the provider connection allowance, run:
+
+```bash
+.venv/bin/python scripts/verify_iex_stream.py --allow-provider --seconds 120
+```
+
+It opens two sequential connections and requires current AMD minute bars on both.
+Exit 2 means verification did not pass, including weekends with successful subscriptions
+but no bars. The report contains no payloads or credentials. This only verifies adapter
+receipt and reconnection; separately check durable persistence, deduplication, lag, gap
+classification, restart and unattended operation before declaring operational readiness.
+
+For synthetic archive read-path capacity, use the guarded disposable PostgreSQL fixture:
+`APA_CAPACITY_YEARS=10` with the normal loopback `collector_test` URL and both destructive
+and disposable-cluster acknowledgements, then run
+`pytest -q -s tests/integration/test_historical_readiness_capacity.py`. This resets that
+test database. Never use an operator database. It seeds immutable synthetic rows, checks
+full and cached readiness equality, and reports timing/RSS; it does not measure provider
+download or complete intake throughput. Cold starts still scan the archive. See
+[dated results](evidence/local-hardening-20260913.md).

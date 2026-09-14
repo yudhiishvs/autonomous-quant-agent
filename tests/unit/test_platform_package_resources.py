@@ -56,7 +56,7 @@ def test_doctor_default_is_independent_of_current_directory(
 def test_shipped_migration_resources_expose_the_single_head() -> None:
     assert packaged_alembic_ini().is_file()
     assert (packaged_migration_root() / "env.py").is_file()
-    assert platform_migration_head() == "20260906_0015"
+    assert platform_migration_head() == "20260913_0017"
 
 
 def test_public_api_package_preserves_control_plane_contracts() -> None:

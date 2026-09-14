@@ -225,6 +225,7 @@ def serve_control_api(
             proxy_headers=False,
             server_header=False,
             timeout_graceful_shutdown=30,
+            limit_concurrency=128,
             workers=1,
         )
     finally:

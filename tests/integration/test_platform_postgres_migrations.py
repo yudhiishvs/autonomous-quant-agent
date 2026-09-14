@@ -338,7 +338,7 @@ def test_upgrade_from_empty_database_creates_both_schemas(empty_database: str) -
     try:
         current, expected = database_revision(empty_database)
         inspector = inspect(engine)
-        assert current == expected == "20260906_0015"
+        assert current == expected == "20260913_0017"
         assert frozenset(inspector.get_table_names(schema=PLATFORM_SCHEMA)) == PLATFORM_TABLE_NAMES
         assert "collection_universes" in inspector.get_table_names(schema=COLLECTION_SCHEMA)
         assert _metadata_differences(engine) == []
@@ -647,7 +647,7 @@ def test_downgrade_refusal_preserves_platform_state(empty_database: str) -> None
                 .select_from(aqa_experiments)
                 .where(aqa_experiments.c.experiment_hash == experiment_hash)
             )
-        assert current == expected == "20260906_0015"
+        assert current == expected == "20260913_0017"
         assert retained_rows == 1
         assert (
             frozenset(inspect(engine).get_table_names(schema=PLATFORM_SCHEMA))

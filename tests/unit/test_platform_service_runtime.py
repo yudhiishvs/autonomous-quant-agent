@@ -61,6 +61,7 @@ def test_control_api_entry_builds_private_app_with_bounded_server_options(
         "proxy_headers": False,
         "server_header": False,
         "timeout_graceful_shutdown": 30,
+        "limit_concurrency": 128,
         "workers": 1,
     }
 

@@ -230,7 +230,7 @@ def configure_json_logging(*, service: str, stream: TextIO) -> StructuredLogger:
     for name in _EXTERNAL_LOGGERS:
         external = logging.getLogger(name)
         external.handlers.clear()
-        external.setLevel(logging.INFO)
+        external.setLevel(logging.WARNING)
         external.propagate = True
     return StructuredLogger(logger, service=service)
 

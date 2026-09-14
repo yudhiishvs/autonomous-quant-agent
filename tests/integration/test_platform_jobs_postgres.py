@@ -173,7 +173,7 @@ def test_revision_nine_refuses_nonempty_provisional_job_tables(empty_database: s
 
         current, expected = database_revision(empty_database)
         assert current == "20260905_0008"
-        assert expected == "20260906_0015"
+        assert expected == "20260913_0017"
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT count(*) FROM aqa.aqa_jobs")) == 1
     finally:

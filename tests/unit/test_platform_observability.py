@@ -242,3 +242,13 @@ def test_liveness_is_process_local_and_readiness_fails_closed() -> None:
     assert ready.healthy is False
     assert ready.checks == (("database", True), ("migration", False))
     assert "TEST_VALUE_MUST_NOT_LEAK" not in repr(ready)
+
+
+def test_routine_database_queries_do_not_become_security_error_noise() -> None:
+    stream = io.StringIO()
+    configure_json_logging(service="control_api", stream=stream)
+    logging.getLogger("sqlalchemy.engine").info("SELECT synthetic_query")
+    assert stream.getvalue() == ""
+    logging.getLogger("sqlalchemy.engine").error("TEST_VALUE_MUST_NOT_LEAK")
+    assert "TEST_VALUE_MUST_NOT_LEAK" not in stream.getvalue()
+    assert json.loads(stream.getvalue())["event_type"] == "security.unstructured_log_rejected"

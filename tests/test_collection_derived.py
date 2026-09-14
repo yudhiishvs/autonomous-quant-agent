@@ -540,13 +540,44 @@ def test_streamed_quality_hash_preserves_existing_canonical_preimage(
     )
     streamed = compute_symbol_readiness_from_batches(
         series=series,
-        expected_intervals=expected,
+        expected_intervals=iter(expected),
         effective_event_batches=((first,), (), (last,)),
         unresolved_gaps=(gap,),
     )
     assert streamed.quality_hash == expected_hash
     assert streamed.contiguous_through == _OPEN + _MINUTE
     assert streamed.blocking_gap_ids == (gap.gap_id,)
+    for cut in (1, 2, 3):
+        checkpoints = []
+        boundary = expected[cut - 1].end_at
+        compute_symbol_readiness_from_batches(
+            series=series,
+            expected_intervals=expected,
+            effective_event_batches=(events,),
+            unresolved_gaps=(gap,),
+            checkpoint_at=boundary,
+            checkpoint_sink=checkpoints.append,
+        )
+        assert len(checkpoints) == 1
+        for _ in range(2):
+            resumed = compute_symbol_readiness_from_batches(
+                series=series,
+                expected_intervals=expected[cut:],
+                effective_event_batches=(
+                    tuple(e for e in events if e.identity.start_at >= boundary),
+                ),
+                unresolved_gaps=(gap,),
+                prefix=checkpoints[0],
+            )
+            assert resumed == streamed
+        with pytest.raises(ReadinessValidationError, match="overlaps"):
+            compute_symbol_readiness_from_batches(
+                series=series,
+                expected_intervals=expected,
+                effective_event_batches=(events,),
+                unresolved_gaps=(gap,),
+                prefix=checkpoints[0],
+            )
     assert streamed == compute_symbol_readiness(
         series=series, expected_intervals=expected, effective_events=events, unresolved_gaps=(gap,)
     )
@@ -557,6 +588,14 @@ def test_streamed_quality_hash_preserves_existing_canonical_preimage(
             effective_event_batches=((first, last), (last,)),
             unresolved_gaps=(gap,),
         )
+    for invalid in (iter(()), iter((expected[0], expected[0])), iter(reversed(expected))):
+        with pytest.raises(ReadinessValidationError):
+            compute_symbol_readiness_from_batches(
+                series=series,
+                expected_intervals=invalid,
+                effective_event_batches=((first,), (last,)),
+                unresolved_gaps=(gap,),
+            )
 
 
 @pytest.mark.parametrize("changed_timeframe", ("1Min", "15Min"))
@@ -1133,3 +1172,58 @@ def test_invalid_drain_bound_leaves_queue_untouched(
     with pytest.raises(ValueError, match="limit"):
         _processor(engine, experiment).drain(limit=limit)
     assert _count(engine) == 1
+
+
+@pytest.mark.parametrize("change", ("current", "old_correction", "old_gap"))
+def test_verified_history_prefix_reuse_and_invalidation(
+    engine: Engine,
+    experiment: ExperimentDefinition,
+    monkeypatch: pytest.MonkeyPatch,
+    change: str,
+) -> None:
+    next_open = _OPEN + timedelta(days=1)
+    _seed(engine, 390)
+    _seed(engine, 15, start=next_open)
+    _dirty(engine, through=_OPEN + 390 * _MINUTE)
+    _dirty(engine, through=next_open + 15 * _MINUTE, session_start=next_open)
+    processor = _processor(engine, experiment)
+    assert processor.drain() == 2
+    assert len(processor._readiness_prefixes) == 2
+    _seed(engine, 30, start=next_open)
+    _dirty(engine, through=next_open + 30 * _MINUTE, session_start=next_open)
+    if change == "old_correction":
+        MarketDataRepository(engine).append(_bar(14, close=110))
+        _dirty(engine, through=_OPEN + 390 * _MINUTE)
+    elif change == "old_gap":
+        processor._gaps.record(
+            GapDetection(
+                experiment.content_hash,
+                DataSeries("alpaca", "iex", "raw", "AMD", "1Min"),
+                _OPEN,
+                _OPEN + _MINUTE,
+                "missing_expected_bar",
+                processor._now(),
+            )
+        )
+    seen = []
+    original = processor._read_intervals
+
+    def record(series, intervals):
+        seen.extend(i.start_at for i in intervals)
+        return original(series, intervals)
+
+    monkeypatch.setattr(processor, "_read_intervals", record)
+    assert processor.drain() == (2 if change == "old_correction" else 1)
+    assert bool(any(start < next_open for start in seen)) is (change != "current")
+    cached_hashes = {}
+    with engine.connect() as connection:
+        for row in connection.execute(select(aqa_symbol_watermarks)).mappings():
+            cached_hashes[row["timeframe"]] = row["quality_hash"]
+    _dirty(engine, through=next_open + 30 * _MINUTE, session_start=next_open)
+    cold = DerivedDataProcessor(engine, experiment, _OPEN, processor._clock)
+    assert cold.drain() == 1
+    with engine.connect() as connection:
+        assert {
+            row["timeframe"]: row["quality_hash"]
+            for row in connection.execute(select(aqa_symbol_watermarks)).mappings()
+        } == cached_hashes

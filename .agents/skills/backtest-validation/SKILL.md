@@ -12,6 +12,6 @@ description: "Validate historical simulation, model evaluation, or reported stra
 5. Compare against predeclared passive and active benchmarks under identical timing, costs, data, and risk constraints.
 6. Repeat the run from frozen inputs and require stable decisions, ledgers, metrics, artifacts, and hashes except for documented runtime metadata.
 7. Evaluate walk-forward and split design, per-symbol and per-regime stability, negative controls, cost stress, and sensitivity without post-hoc rule changes.
-8. Check every reported metric and claim against [README.md](../../../README.md#verification-and-test-plan), including uncertainty, undefined values, limitations, and valid negative results.
+8. Check every reported metric and claim against [README.md](../../../README.md#development) and [testing-strategy.md](../../../docs/testing-strategy.md), including uncertainty, undefined values, limitations, and valid negative results.
 
 Backtests must remain broker-free. Do not present simulated, replay, or paper evidence as live execution performance or a guarantee.

@@ -309,14 +309,26 @@ class SchedulerCycle:
             recorded_at=_OFFLINE_SESSION_OPEN - timedelta(minutes=1),
         )
         work_units = len(schedule.slots) if not before else 0
-        basket = WatermarkRepository(
-            self._engine,
-            calendar=calendar,
-        ).active_basket_watermark(
-            experiment_hash=experiment.content_hash,
-            timeframe="15Min",
-        )
-        watermark = None if basket is None or not basket.is_ready else basket.contiguous_through
+        if self._engine.dialect.name == "postgresql":
+            with self._engine.connect() as connection:
+                watermark = connection.scalar(
+                    text(
+                        "SELECT contiguous_through FROM aqa.aqa_operational_readiness_v "
+                        "WHERE experiment_hash = :experiment AND timeframe = '15Min' "
+                        "AND role = 'active' AND status = 'ready' "
+                        "AND NOT pending_work AND NOT unresolved_gaps"
+                    ),
+                    {"experiment": experiment.content_hash},
+                )
+        else:
+            basket = WatermarkRepository(
+                self._engine,
+                calendar=calendar,
+            ).active_basket_watermark(
+                experiment_hash=experiment.content_hash,
+                timeframe="15Min",
+            )
+            watermark = None if basket is None or not basket.is_ready else basket.contiguous_through
         terminal = {SlotState.COMPLETED, SlotState.SKIPPED, SlotState.EXPIRED, SlotState.FAILED}
         for scheduled in schedule.strategy_slots:
             slot = repository.get(scheduled.slot_id)
@@ -914,7 +926,10 @@ def _effective_aggregate_rows(
     )
 
     with engine.begin() as connection:
-        if engine.dialect.name == "postgresql":
+        collector_owned = engine.dialect.name == "postgresql" and connection.scalar(
+            text("SELECT current_user")
+        ) in {"aqa_collector", "aqa_collector_login"}
+        if engine.dialect.name == "postgresql" and not collector_owned:
             clauses = [
                 "provider = :provider",
                 "timeframe = :timeframe",

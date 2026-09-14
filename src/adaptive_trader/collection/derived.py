@@ -5,9 +5,10 @@ one regular session of minute identities and is acknowledged only after all deri
 transactions commit. A concurrent intake increments its generation, keeping the item
 pending for replay. The caller must include pending work in its readiness gate.
 
-Symbol readiness checks the complete configured history once per symbol per drain. Bulk
-reads verify bounded batches of immutable revision chains; hashing happens outside leased
-database transactions. Publication checks the original work-generation/configuration/gap
+Symbol readiness verifies the complete history on cold start, then reuses a process-local
+hash prefix when queued work and gap fingerprints exclude older changes. Historical
+corrections invalidate that prefix. Bulk reads verify bounded immutable revision chains;
+hashing happens outside leased database transactions. Publication checks the work/configuration/gap
 fence in the same leased transaction as the watermark write. Concurrent intake invalidates
 that snapshot and leaves work queued. No missing history or revision is skipped.
 """
@@ -19,6 +20,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from itertools import chain
 from threading import Lock
 
 from sqlalchemy import Connection, Engine, delete, event, func, select
@@ -38,6 +40,7 @@ from adaptive_trader.platform.data.watermarks import (
     GapRepairCoverage,
     GapRepository,
     GapStatus,
+    ReadinessPrefix,
     WatermarkRepository,
     compute_symbol_readiness_from_batches,
     detect_data_gaps,
@@ -141,6 +144,11 @@ class DerivedDataProcessor:
         self._lease_validator = lease_validator
         self._transaction_guard = transaction_guard
         self._local_drain_lock = Lock()
+        # Bounded by the immutable experiment's series inventory. Restart always
+        # rebuilds these process-local prefixes from verified database events.
+        self._readiness_prefixes: dict[
+            DataSeries, tuple[ReadinessPrefix, tuple[tuple[str, int, str], ...]]
+        ] = {}
         self._drain_connection: Connection | None = None
         self._drain_backend_pid: int | None = None
         if transaction_guard is not None:
@@ -473,20 +481,72 @@ class DerivedDataProcessor:
             # locked consumer can delete queue rows, preventing a generation ABA.
             with self._engine.begin() as connection:
                 source_fence, gaps = self._snapshot_fence(connection, series)
+                earliest_dirty = connection.scalar(
+                    select(func.min(canonical_work.c.session_date)).where(
+                        canonical_work.c.symbol == series.symbol
+                    )
+                )
             end = self._inspected_through(work)
             if end <= self._history_start:
                 continue
-            expected = self._calendar.expected_intervals(
-                start_at=self._history_start, end_at=end, timeframe=timeframe
-            )
-            if not expected:
-                continue
 
+            def prefix_gaps(
+                before: datetime, selected_gaps: tuple[DataGap, ...] = gaps
+            ) -> tuple[tuple[str, int, str], ...]:
+                return tuple(
+                    (gap.gap_id, gap.version, gap.content_hash)
+                    for gap in selected_gaps
+                    if gap.start_at < before
+                )
+
+            cached = self._readiness_prefixes.pop(series, None)
+            prefix = None
+            if cached is not None:
+                candidate, previous_gaps = cached
+                if (
+                    earliest_dirty is not None
+                    and earliest_dirty >= candidate.resume_at.date()
+                    and candidate.resume_at <= end
+                    and previous_gaps == prefix_gaps(candidate.resume_at)
+                ):
+                    prefix = candidate
+            scan_start = self._history_start if prefix is None else prefix.resume_at
+            checkpoint_at = end.replace(hour=0, minute=0, second=0, microsecond=0)
+            checkpoints: list[ReadinessPrefix] = []
+
+            def interval_batches(
+                _end: datetime = end,
+                _timeframe: str = timeframe,
+                _start: datetime = scan_start,
+            ) -> Iterator[tuple[TradingInterval, ...]]:
+                cursor = _start
+                while cursor < _end:
+                    midnight = cursor.replace(hour=0, minute=0, second=0, microsecond=0)
+                    boundary = min(midnight + timedelta(days=1), _end)
+                    yield self._calendar.expected_intervals(
+                        start_at=cursor, end_at=boundary, timeframe=_timeframe
+                    )
+                    cursor = boundary
+
+            # Recreate bounded calendar batches for the event reader; neither traversal
+            # retains the full archive's expected-minute inventory in memory.
+            expected = (interval for batch in interval_batches() for interval in batch)
+
+            first = next(expected, None)
+            if first is None and prefix is None:
+                continue
             readiness = compute_symbol_readiness_from_batches(
                 series=series,
-                expected_intervals=expected,
-                effective_event_batches=self._snapshot_batches(series, expected),
+                expected_intervals=chain(() if first is None else (first,), expected),
+                effective_event_batches=(
+                    events
+                    for batch in interval_batches()
+                    for events in self._snapshot_batches(series, batch)
+                ),
                 unresolved_gaps=gaps,
+                prefix=prefix,
+                checkpoint_at=checkpoint_at,
+                checkpoint_sink=checkpoints.append,
             )
 
             def verify_snapshot(
@@ -514,8 +574,11 @@ class DerivedDataProcessor:
                 adjustment="raw",
                 timeframe=timeframe,
                 updated_at=self._now(),
-                required_through=expected[-1].end_at,
+                required_through=readiness.range_end_at,
             )
+            if checkpoints:
+                checkpoint = checkpoints[-1]
+                self._readiness_prefixes[series] = (checkpoint, prefix_gaps(checkpoint.resume_at))
 
     def _snapshot_batches(
         self, series: DataSeries, expected: tuple[TradingInterval, ...]

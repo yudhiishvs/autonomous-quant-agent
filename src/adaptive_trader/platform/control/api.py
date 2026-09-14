@@ -1,5 +1,6 @@
 """Private, authenticated FastAPI control plane with no direct trading routes."""
 
+import asyncio
 import re
 from collections.abc import Callable
 from datetime import datetime
@@ -57,6 +58,7 @@ from adaptive_trader.platform.observability.metrics import LatchMetricType, Plat
 from adaptive_trader.platform.risk.latches import RiskLatchKind
 
 MAX_REQUEST_BYTES = 65_536
+REQUEST_BODY_TIMEOUT_SECONDS = 10.0
 _RESOURCE_ID_PATTERN = r"^[a-z0-9][a-z0-9._:-]{0,127}$"
 _CORRELATION_ID = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -140,29 +142,38 @@ class RequestSecurityMiddleware:
                 )
                 return
 
-        messages: list[Message] = []
-        received_bytes = 0
-        while True:
-            message = await receive()
-            messages.append(message)
-            if message["type"] == "http.disconnect":
-                break
-            body = message.get("body", b"")
-            received_bytes += len(body)
-            if received_bytes > MAX_REQUEST_BYTES:
-                await _send_middleware_error(
-                    send,
-                    status=413,
-                    code="request_too_large",
-                    correlation_id=correlation_id,
-                )
-                return
-            if not message.get("more_body", False):
-                break
+        body = bytearray()
+        try:
+            async with asyncio.timeout(REQUEST_BODY_TIMEOUT_SECONDS):
+                while True:
+                    message = await receive()
+                    if message["type"] == "http.disconnect":
+                        return
+                    chunk = message.get("body", b"")
+                    if len(body) + len(chunk) > MAX_REQUEST_BYTES:
+                        await _send_middleware_error(
+                            send,
+                            status=413,
+                            code="request_too_large",
+                            correlation_id=correlation_id,
+                        )
+                        return
+                    body.extend(chunk)
+                    if not message.get("more_body", False):
+                        break
+        except TimeoutError:
+            await _send_middleware_error(
+                send, status=408, code="request_timeout", correlation_id=correlation_id
+            )
+            return
+
+        delivered = False
 
         async def replay() -> Message:
-            if messages:
-                return messages.pop(0)
+            nonlocal delivered
+            if not delivered:
+                delivered = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
             return {"type": "http.disconnect"}
 
         async def secure_send(message: Message) -> None:
@@ -565,6 +576,8 @@ async def _send_middleware_error(
                 "code": code,
                 "message": "Request exceeded the control-plane boundary"
                 if status == 413
+                else "Request body deadline exceeded"
+                if status == 408
                 else "Request framing is invalid",
                 "correlation_id": correlation_id,
             }

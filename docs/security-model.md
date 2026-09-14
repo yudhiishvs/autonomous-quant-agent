@@ -189,3 +189,28 @@ exposure. A restored database does not authorize replay.
 
 Private reporting and response are in [SECURITY.md](../SECURITY.md), [incident response](incident_response.md),
 and [failure modes](failure_modes.md).
+
+Local hardening on 2026-09-12 bounds unauthenticated API body reception to ten seconds
+and 65,536 bytes; the single Uvicorn process also limits concurrency to 128. Runtime
+workers verify database compatibility through `aqa.aqa_schema_version_v` (migration
+0016), a metadata-only SELECT view, without collector-schema access. Routine SQL INFO
+logs are suppressed and warning/error redaction remains enforced. See
+[local verification](evidence/local-hardening-20260912.md) for tested boundaries and
+remaining operational limits.
+
+## Readiness cache boundary (2026-09-13)
+
+Readiness prefixes are trusted, process-local hash state, never pickled, persisted or
+accepted through an API. Reuse depends on unchanged earlier work and gap fingerprints;
+publication retains its transactional fence. Revision 0017 uses SECURITY INVOKER and
+fully qualified tables to invalidate external minute/aggregate projection changes with
+existing collector privileges. It grants no business-table access and cannot submit
+orders. Historical tampering, correction, gap changes, rollback and restricted-role
+writes remain tested. A compromised database administrator can bypass database
+controls; this cache does not claim protection against that authority.
+
+The explicit IEX verification script loads only data credential files, uses the adapter's
+fixed endpoint, prints state/count/timestamp summaries and suppresses provider exception
+text. It requires a provider acknowledgement and a bounded duration. It neither persists
+market payloads nor accesses trading credentials. See the dated
+[review and limits](evidence/local-hardening-20260913.md).

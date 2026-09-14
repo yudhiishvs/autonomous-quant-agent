@@ -103,3 +103,26 @@ See [requirements](docs/requirements.md), [tooling](docs/tooling.md),
 [security architecture](docs/security_architecture.md),
 [threat model](docs/threat_model.md), [ADR index](docs/adr/README.md), and
 [market-data runbook](docs/market_data_runbook.md).
+
+Local runtime verification (2026-09-12) exercised the default offline Compose pipeline
+under its separate PostgreSQL logins through complete fake execution and restart.
+Migration 0016 provides a metadata-only schema-version view for worker startup; scheduler
+readiness uses the existing safe operational view. Historical expected intervals are
+streamed in daily batches, while readiness still scans the configured archive range.
+See [local hardening evidence](docs/evidence/local-hardening-20260912.md); this does not
+establish a live-data strategy pipeline or unattended production readiness.
+
+## Verified history reuse (2026-09-13)
+
+The collector keeps an in-process readiness hash prefix through the previous UTC day.
+It reuses that prefix only when the earliest queued session is not older and historical
+gap fingerprints are unchanged. A cold start or an older correction rebuilds the full
+verified digest in daily batches. Publication still checks the original generation,
+configuration and gap fence. Prefix state is never serialized or accepted as input.
+
+Revision `20260913_0017` queues changes to external minute and aggregate projections
+inside their transaction, including direct collector-role writes and replacement of
+external provenance. Aggregate creation can advance the generation and require a
+second idempotent drain; duplicate materialization does not create another revision.
+The trigger uses existing caller privileges and a fixed search path. See the
+[dated measurements](docs/evidence/local-hardening-20260913.md) for capacity limits.

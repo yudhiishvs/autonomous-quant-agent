@@ -140,6 +140,21 @@ def run_migrations_online() -> None:
                     # to seed or transform their pre-governance state.
                     connection.execute(_GOVERNED_BUSINESS_DML_REVOKE)
                     restore_referential_integrity_owner_privileges(connection)
+                    # Revision 0010 permits immutable deployment registration. The blanket
+                    # cleanup above must not erase that narrow append-only exception.
+                    ancestors = {
+                        revision.revision
+                        for revision in ScriptDirectory.from_config(config).iterate_revisions(
+                            current_revision, "base"
+                        )
+                    }
+                    if "20260905_0010" in ancestors:
+                        connection.execute(
+                            text(
+                                "GRANT SELECT, INSERT ON TABLE aqa.aqa_experiments, "
+                                "aqa.aqa_experiment_symbols, aqa.aqa_audit_events TO aqa_migrate"
+                            )
+                        )
                     connection.execute(_GOVERNED_VERSION_TABLE_GRANT)
                 else:
                     # Revisions before the role-governance boundary include data backfills and

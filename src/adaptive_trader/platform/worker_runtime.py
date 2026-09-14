@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import FrameType
 
-from sqlalchemy import Engine
+from sqlalchemy import Engine, text
 
 from adaptive_trader.platform.config import RuntimeService, RuntimeSettings, load_runtime_settings
 from adaptive_trader.platform.observability.logging import (
@@ -167,14 +167,12 @@ def service_is_healthy(
 
 def _prepare_offline_database(settings: RuntimeSettings, engine: Engine) -> None:
     if engine.dialect.name != "sqlite":
-        from alembic.migration import MigrationContext
-
         from adaptive_trader.platform.storage.migration_runner import platform_migration_head
 
         with engine.connect() as connection:
-            heads = MigrationContext.configure(
-                connection, opts={"version_table_schema": "market_data"}
-            ).get_current_heads()
+            heads = tuple(
+                connection.scalars(text("SELECT version_num FROM aqa.aqa_schema_version_v"))
+            )
         if heads != (platform_migration_head(),):
             raise ServiceRuntimeError("worker database is not at the installed migration head")
         return

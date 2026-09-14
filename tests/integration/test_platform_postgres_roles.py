@@ -85,6 +85,7 @@ _ROLES = AUTHORIZATION_ROLES
 _RUNTIME_ROLES = _ROLES[1:]
 _SAFE_VIEWS = frozenset(
     {
+        "aqa_schema_version_v",
         "aqa_audit_events_v",
         "aqa_audit_status_v",
         "aqa_basket_watermarks_v",
@@ -239,6 +240,7 @@ def _grant_set(
 _EXPECTED_GRANTS = {
     "aqa_collector": _grant_set(
         select_from=(
+            "aqa_schema_version_v",
             "aqa_experiments",
             "aqa_experiment_symbols",
             "aqa_security_metadata_events",
@@ -258,6 +260,7 @@ _EXPECTED_GRANTS = {
     ),
     "aqa_scheduler": _grant_set(
         select_from=(
+            "aqa_schema_version_v",
             "aqa_operational_readiness_v",
             "aqa_decision_slots",
             "aqa_reconciliations_v",
@@ -275,6 +278,7 @@ _EXPECTED_GRANTS = {
     ),
     "aqa_strategy": _grant_set(
         select_from=(
+            "aqa_schema_version_v",
             "aqa_operational_readiness_v",
             "aqa_signal_envelopes",
             "aqa_experiment_context_v",
@@ -291,6 +295,7 @@ _EXPECTED_GRANTS = {
     ),
     "aqa_execution": _grant_set(
         select_from=(
+            "aqa_schema_version_v",
             "aqa_effective_bars_v",
             "aqa_operational_readiness_v",
             *_EXECUTION_READ_INPUTS,
@@ -383,7 +388,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "20260905_0010_probe"
-down_revision = "20260906_0015"
+down_revision = "20260913_0017"
 branch_labels = None
 depends_on = None
 
@@ -1154,12 +1159,23 @@ def test_migration_owner_has_only_the_exact_foreign_key_row_lock_column_acls(
         assert observed_columns == expected_columns
         for schema_name, table_name in expected_relations:
             for privilege in ("INSERT", "UPDATE", "DELETE", "TRUNCATE"):
-                assert not connection.scalar(
-                    text("SELECT has_table_privilege('aqa_migrate', :qualified_name, :privilege)"),
-                    {
-                        "qualified_name": f"{schema_name}.{table_name}",
-                        "privilege": privilege,
-                    },
+                registration_insert = (
+                    privilege == "INSERT"
+                    and schema_name == "aqa"
+                    and table_name
+                    in {"aqa_experiments", "aqa_experiment_symbols", "aqa_audit_events"}
+                )
+                assert (
+                    connection.scalar(
+                        text(
+                            "SELECT has_table_privilege('aqa_migrate', :qualified_name, :privilege)"
+                        ),
+                        {
+                            "qualified_name": f"{schema_name}.{table_name}",
+                            "privilege": privilege,
+                        },
+                    )
+                    is registration_insert
                 )
 
 
@@ -1828,9 +1844,17 @@ def test_schema_database_and_ownership_boundaries_are_fail_closed(
                 "DELETE",
                 "TRUNCATE",
             ):
-                assert not connection.scalar(
-                    text("SELECT has_table_privilege('aqa_migrate', :table_name, :privilege)"),
-                    {"table_name": qualified_name, "privilege": privilege},
+                registration_insert = privilege == "INSERT" and table_name in {
+                    "aqa_experiments",
+                    "aqa_experiment_symbols",
+                    "aqa_audit_events",
+                }
+                assert (
+                    connection.scalar(
+                        text("SELECT has_table_privilege('aqa_migrate', :table_name, :privilege)"),
+                        {"table_name": qualified_name, "privilege": privilege},
+                    )
+                    is registration_insert
                 )
             for privilege in ("REFERENCES", "TRIGGER"):
                 assert connection.scalar(
@@ -1880,7 +1904,7 @@ def test_migration_role_can_apply_ddl_and_maintain_alembic_revision(
     with _connection_as(provisioned_engine, "aqa_migrate") as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM market_data.alembic_version"))
-            == "20260906_0015"
+            == "20260913_0017"
         )
         assert connection.scalar(
             text("SELECT has_schema_privilege('aqa_migrate', 'market_data', 'CREATE')")
@@ -2174,6 +2198,19 @@ def test_shadow_strategy_and_execution_use_distinct_real_login_authority(
                 slot_id=slot.slot_id,
                 now=now,
             )["reason_code"]
+            == "canonical_readiness_unavailable"
+        )
+        # This aggregate-only fixture explicitly computed all watermarks above.
+        # Acknowledge its synthetic queue as fixture setup; runtime roles cannot do so.
+        with provisioned_engine.begin() as connection:
+            connection.execute(text("DELETE FROM market_data.canonical_work"))
+        assert (
+            run_shadow_once(
+                engine=engines["aqa_execution"],
+                settings=execution_settings,
+                slot_id=slot.slot_id,
+                now=now,
+            )["reason_code"]
             == "approved_signal_unavailable"
         )
         cycle = OperationalStrategyCycle(
@@ -2407,3 +2444,194 @@ def test_durable_status_rejects_other_real_logins_before_reading(
                 )
     finally:
         engine.dispose()
+
+
+def test_deployment_registration_survives_migration_cleanup_and_retry(
+    tmp_path: Path,
+    platform_login_database_urls: Mapping[str, str],
+) -> None:
+    from adaptive_trader.platform.config import load_experiment
+
+    root = _role_bootstrap_root(tmp_path / "registration", platform_login_database_urls)
+    url_file = root / "migration-url"
+    _write_owner_private(url_file, platform_login_database_urls["aqa_migrate"])
+    secret = load_secret_file(url_file, source=SecretFileVariable.DATABASE_URL)
+    experiment = load_experiment(
+        Path("experiments/semiconductor_network_intraday_v1.yaml"),
+        config_root=_PROJECT_ROOT / "configs",
+    )
+    _drop_disposable_test_schemas()
+    engine = _engine(application_name="registration-regression")
+    try:
+        for _ in range(2):
+            migration_runner.migrate_platform_database(
+                secret,
+                application_root=root,
+                experiment=experiment,
+                registered_at=datetime(2026, 9, 10, tzinfo=UTC),
+            )
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT count(*) FROM aqa.aqa_experiments")) == 1
+            assert (
+                connection.scalar(
+                    text(
+                        "SELECT count(*) FROM aqa.aqa_audit_events WHERE event_type = 'experiment.registered'"
+                    )
+                )
+                == 1
+            )
+    finally:
+        engine.dispose()
+        _drop_disposable_test_schemas()
+
+
+def test_collector_checks_fixture_history_using_its_existing_table_authority(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+) -> None:
+    from datetime import date
+
+    from adaptive_trader.platform.service_cycles import _complete_history
+
+    engine = create_engine(
+        normalize_postgres_url(platform_login_database_urls["aqa_collector"]),
+        hide_parameters=True,
+        connect_args=postgres_connect_args("collector-history-regression"),
+    )
+    try:
+        assert (
+            _complete_history(engine, active_symbols=("AAOI",), before_session=date(2026, 7, 6))
+            is None
+        )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize("role", _RUNTIME_ROLES)
+def test_runtime_login_reads_only_schema_version_metadata(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+    role: str,
+) -> None:
+    engine = create_engine(
+        normalize_postgres_url(platform_login_database_urls[role]),
+        hide_parameters=True,
+        connect_args=postgres_connect_args("worker-version-regression"),
+    )
+    try:
+        with engine.connect() as connection:
+            assert tuple(
+                connection.scalars(text("SELECT version_num FROM aqa.aqa_schema_version_v"))
+            ) == ("20260913_0017",)
+        with engine.begin() as connection, pytest.raises(DBAPIError):
+            connection.execute(
+                text("UPDATE aqa.aqa_schema_version_v SET version_num = version_num")
+            )
+    finally:
+        engine.dispose()
+
+
+def test_offline_workers_complete_and_restart_with_real_restricted_logins(
+    provisioned_engine: Engine,
+    platform_login_database_urls: Mapping[str, str],
+) -> None:
+    from datetime import date
+
+    from adaptive_trader.platform.config import RuntimeService, load_runtime_settings
+    from adaptive_trader.platform.scheduling import DecisionSlotRepository, SlotState
+    from adaptive_trader.platform.service_cycles import WorkerCycleState, build_worker_cycle
+    from adaptive_trader.platform.storage.execution import SignedExecutionRepository
+    from adaptive_trader.platform.storage.experiments import ExperimentRepository
+    from adaptive_trader.platform.worker_runtime import _prepare_offline_database
+
+    services = (
+        (RuntimeService.MARKET_DATA_WORKER, "aqa_collector"),
+        (RuntimeService.SCHEDULER_WORKER, "aqa_scheduler"),
+        (RuntimeService.STRATEGY_WORKER, "aqa_strategy"),
+        (RuntimeService.EXECUTION_WORKER, "aqa_execution"),
+    )
+    settings = {
+        service: load_runtime_settings({}, service=service, application_root=_PROJECT_ROOT)
+        for service, _ in services
+    }
+    experiment = settings[services[0][0]].platform.experiment.definition
+    ExperimentRepository(provisioned_engine).register(
+        experiment, registered_at=datetime(2026, 7, 6, 13, 30, tzinfo=UTC)
+    )
+
+    def run(service: RuntimeService, role: str):
+        engine = create_engine(
+            normalize_postgres_url(platform_login_database_urls[role]),
+            hide_parameters=True,
+            connect_args=postgres_connect_args("offline-worker-login-proof"),
+        )
+        try:
+            _prepare_offline_database(settings[service], engine)
+            return build_worker_cycle(settings[service], engine).run_cycle()
+        finally:
+            engine.dispose()
+
+    assert run(*services[0]).state is WorkerCycleState.PROGRESSED
+    for _ in range(45):
+        for service, role in services[1:]:
+            assert run(service, role).state is not WorkerCycleState.BLOCKED
+    slots = DecisionSlotRepository(provisioned_engine).list_for_session(
+        experiment_hash=experiment.content_hash, session_date=date(2026, 7, 6)
+    )
+    assert slots and {slot.state for slot in slots} == {SlotState.COMPLETED}
+    execution = SignedExecutionRepository(provisioned_engine)
+    receipts = sorted(execution.reconciliations(), key=lambda row: row.completed_at)
+    assert len(receipts) == 21
+    assert all(row.status.value == "CLEAN" for row in receipts)
+    assert receipts[-1].expected_positions == ()
+    assert len(execution.fills()) == 6
+    before = tuple(row.content_hash for row in receipts)
+    for service, role in services:
+        assert run(service, role).state is WorkerCycleState.IDLE
+    assert (
+        tuple(
+            row.content_hash
+            for row in sorted(execution.reconciliations(), key=lambda row: row.completed_at)
+        )
+        == before
+    )
+
+
+@pytest.mark.parametrize("timeframe", ("1Min", "15Min"))
+def test_direct_canonical_projection_change_invalidates_readiness_in_same_transaction(
+    provisioned_engine: Engine,
+    timeframe: str,
+) -> None:
+    from dataclasses import replace
+
+    from adaptive_trader.collection.schema import canonical_work
+    from adaptive_trader.platform.storage.market_data import MarketDataRepository
+    from tests.test_collection_derived import _bar
+
+    bar = _bar(0)
+    identity = replace(
+        bar.identity,
+        timeframe=timeframe,
+        end_at=bar.identity.start_at + timedelta(minutes=1 if timeframe == "1Min" else 15),
+    )
+    bar = replace(bar, received_at=identity.end_at + timedelta(seconds=1))
+    repository = MarketDataRepository(provisioned_engine)
+    repository.append(replace(bar, identity=identity))
+    with provisioned_engine.connect() as connection:
+        before = connection.scalar(select(canonical_work.c.generation))
+    assert before is not None
+    with _connection_as(provisioned_engine, "aqa_collector") as connection:
+        connection.execute(
+            text(
+                "UPDATE aqa.aqa_bar_latest SET projected_at = projected_at WHERE bar_identity_id = :identity"
+            ),
+            {"identity": identity.bar_identity_id},
+        )
+        assert connection.scalar(select(canonical_work.c.generation)) == before + 1
+    # The role fixture rolls back; invalidation is atomic with the projection change.
+    with provisioned_engine.connect() as connection:
+        assert connection.scalar(select(canonical_work.c.generation)) == before
+    # Replacing external evidence with a different provenance must invalidate too.
+    repository.append(replace(bar, identity=identity, source_mode="offline_fixture"))
+    with provisioned_engine.connect() as connection:
+        assert connection.scalar(select(canonical_work.c.generation)) == before + 1

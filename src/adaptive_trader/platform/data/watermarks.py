@@ -456,13 +456,36 @@ def compute_symbol_readiness(
     return _compute_symbol_readiness_stream(series, expected, iter(events), gaps, quality_policy)
 
 
+@dataclass(frozen=True, slots=True)
+class ReadinessPrefix:
+    """Process-local verified prefix, never serialized or accepted from external input.
+
+    Reuse requires the caller to exclude changes before ``resume_at`` and to invalidate
+    on historical gap changes. The digest is copied before every continuation.
+    """
+
+    series: DataSeries
+    policy_hash: str
+    resume_at: datetime
+    first_interval: TradingInterval
+    last_interval: TradingInterval
+    digest: Any
+    contiguous_through: datetime | None
+    latest_event: StoredBarEvent | None
+    blocking_interval: TradingInterval | None
+    blocking_gap_ids: tuple[str, ...]
+
+
 def compute_symbol_readiness_from_batches(
     *,
     series: DataSeries,
-    expected_intervals: Sequence[TradingInterval],
+    expected_intervals: Iterable[TradingInterval],
     effective_event_batches: Iterable[Sequence[StoredBarEvent]],
     unresolved_gaps: Sequence[DataGap],
     quality_policy: BarQualityPolicy = STRICT_COMPLETE_QUALITY,
+    prefix: ReadinessPrefix | None = None,
+    checkpoint_at: datetime | None = None,
+    checkpoint_sink: Callable[[ReadinessPrefix], None] | None = None,
 ) -> SymbolReadiness:
     """Compute the identical readiness digest while retaining one verified event batch.
 
@@ -472,9 +495,7 @@ def compute_symbol_readiness_from_batches(
 
     if type(series) is not DataSeries:
         raise ReadinessValidationError("watermark series is invalid")
-    expected = _require_interval_sequence(expected_intervals, series.timeframe)
-    if not expected:
-        raise ReadinessValidationError("watermark computation requires expected intervals")
+    expected = _validated_interval_iterator(expected_intervals, series.timeframe)
     if type(quality_policy) is not BarQualityPolicy:
         raise ReadinessValidationError("watermark quality policy is invalid")
     gaps = _require_gaps(unresolved_gaps, series)
@@ -488,17 +509,54 @@ def compute_symbol_readiness_from_batches(
                 previous = event
                 yield event
 
+    if prefix is not None and (
+        type(prefix) is not ReadinessPrefix
+        or prefix.series != series
+        or prefix.policy_hash != quality_policy.policy_hash
+    ):
+        raise ReadinessValidationError("readiness prefix does not match its series and policy")
+    if checkpoint_at is not None:
+        checkpoint_at = require_utc_instant(checkpoint_at, field_name="checkpoint_at")
+    if (checkpoint_at is None) != (checkpoint_sink is None):
+        raise ReadinessValidationError("checkpoint boundary and sink must be supplied together")
     return _compute_symbol_readiness_stream(
-        series, expected, verified_events(), gaps, quality_policy
+        series,
+        expected,
+        verified_events(),
+        gaps,
+        quality_policy,
+        prefix=prefix,
+        checkpoint_at=checkpoint_at,
+        checkpoint_sink=checkpoint_sink,
     )
+
+
+def _validated_interval_iterator(
+    values: Iterable[TradingInterval], timeframe: str
+) -> Iterator[TradingInterval]:
+    if not isinstance(values, Iterable) or isinstance(values, (str, bytes, dict)):
+        raise ReadinessValidationError("trading intervals must be iterable")
+    duration = _timeframe_duration(timeframe)
+    previous = None
+    for interval in values:
+        if type(interval) is not TradingInterval or interval.end_at - interval.start_at != duration:
+            raise ReadinessValidationError("trading intervals do not match their timeframe")
+        if previous is not None and interval <= previous:
+            raise ReadinessValidationError("trading intervals must be uniquely ordered")
+        previous = interval
+        yield interval
 
 
 def _compute_symbol_readiness_stream(
     series: DataSeries,
-    expected: Sequence[TradingInterval],
+    expected: Iterable[TradingInterval],
     events: Iterator[StoredBarEvent],
     gaps: Sequence[DataGap],
     quality_policy: BarQualityPolicy,
+    *,
+    prefix: ReadinessPrefix | None = None,
+    checkpoint_at: datetime | None = None,
+    checkpoint_sink: Callable[[ReadinessPrefix], None] | None = None,
 ) -> SymbolReadiness:
     current_event = next(events, None)
     remaining_gaps = iter(gaps)
@@ -518,7 +576,53 @@ def _compute_symbol_readiness_stream(
     )
     digest.update(b",[")
     first_component = True
+    first_interval = None
+    last_interval = None
+    if prefix is not None:
+        digest = prefix.digest.copy()
+        first_component = False
+        first_interval = prefix.first_interval
+        last_interval = prefix.last_interval
+        contiguous_through = prefix.contiguous_through
+        latest_event = prefix.latest_event
+        blocking_interval = prefix.blocking_interval
+        blocking_gap_ids = prefix.blocking_gap_ids
+    checkpoint_emitted = False
+
+    def emit_checkpoint() -> None:
+        nonlocal checkpoint_emitted
+        if (
+            checkpoint_sink is not None
+            and checkpoint_at is not None
+            and first_interval is not None
+            and last_interval is not None
+            and last_interval.end_at <= checkpoint_at
+            and not checkpoint_emitted
+        ):
+            checkpoint_sink(
+                ReadinessPrefix(
+                    series,
+                    quality_policy.policy_hash,
+                    checkpoint_at,
+                    first_interval,
+                    last_interval,
+                    digest.copy(),
+                    contiguous_through,
+                    latest_event,
+                    blocking_interval,
+                    blocking_gap_ids,
+                )
+            )
+            checkpoint_emitted = True
+
     for interval in expected:
+        if prefix is not None and interval.start_at < prefix.resume_at:
+            raise ReadinessValidationError("readiness continuation overlaps its verified prefix")
+        if checkpoint_at is not None and interval.start_at >= checkpoint_at:
+            emit_checkpoint()
+        if first_interval is None:
+            first_interval = interval
+        last_interval = interval
         active_gaps = [gap for gap in active_gaps if gap.end_at > interval.start_at]
         while next_gap is not None and next_gap.start_at < interval.end_at:
             if next_gap.end_at > interval.start_at:
@@ -562,15 +666,19 @@ def _compute_symbol_readiness_stream(
             contiguous_through = interval.end_at
             latest_event = event
 
+    if first_interval is None or last_interval is None:
+        raise ReadinessValidationError("watermark computation requires expected intervals")
+
     # Exhaust any trailing batches so invalid ordering cannot hide past the range.
     for _ in events:
         pass
+    emit_checkpoint()
     digest.update(b"]]")
     quality_hash = digest.hexdigest()
     return SymbolReadiness(
         series=series,
-        range_start_at=expected[0].start_at,
-        range_end_at=expected[-1].end_at,
+        range_start_at=first_interval.start_at,
+        range_end_at=last_interval.end_at,
         contiguous_through=contiguous_through,
         latest_contiguous_event=latest_event,
         quality_hash=quality_hash,

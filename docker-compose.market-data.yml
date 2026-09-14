@@ -10,7 +10,7 @@ services:
       target: market-data
       args:
         AQA_SOURCE_URL: ${AQA_SOURCE_URL:-https://github.com/yudhiishvs/autonomous-quant-agent}
-        AQA_VCS_REF: ${AQA_VCS_REF:-local}
+        AQA_VCS_REF: ${AQA_VCS_REF:-unknown}
         AQA_VERSION: ${AQA_VERSION:-0.1.0}
     command: [python, -m, adaptive_trader.collection.cli, run]
     init: true

@@ -705,3 +705,26 @@ broker-free operations. No provider activation or external order is claimed.
   limits broker authority, but arbitrary Python sandboxing is outside scope.
 - PostgreSQL/Compose is the operational target. SQLite remains only for isolated tests, the
   deterministic offline path, and preserved legacy behavior.
+
+Deployment verification for REQ-PZ-014 includes registering immutable experiment
+metadata through the actual migration login after final ACL cleanup, then retrying
+without duplicate metadata or audit events. The registration-only INSERT exception
+must not grant UPDATE/DELETE/TRUNCATE or ordinary business-table writes.
+
+Local verification on 2026-09-12 covers default offline Compose startup, restricted-role
+worker completion/restart and full-platform logical restore. See
+[evidence](evidence/local-hardening-20260912.md). This does not upgrade live collection,
+long-history capacity or broker reconciliation compatibility to externally verified.
+
+## Readiness continuation acceptance (2026-09-13)
+
+An optimized readiness result must equal a full immutable-history scan, including its
+quality hash and blocking gaps. Cold start, historical corrections and changed earlier
+gaps must rebuild the affected prefix; concurrent writes must invalidate publication.
+Direct authorized external canonical projection writes must queue invalidation in the
+same PostgreSQL transaction, including aggregates and provenance changes. The local
+implementation and deterministic/PG tests cover these invariants. Archive measurements
+are a single-symbol synthetic read-path benchmark, not full-universe intake capacity.
+External streaming acceptance requires current bars after reconnect; authentication or
+a synthetic test-feed response alone cannot satisfy it. See
+[evidence](evidence/local-hardening-20260913.md).

@@ -616,3 +616,26 @@ public routes, persistence semantics, submission gates, failure recovery, audit 
 container/CI enforcement must update this document, [security-model.md](security-model.md), the
 corresponding requirement status, and behavioral tests in the same natural change. A control moves
 to `IMPLEMENTED_AND_VERIFIED` only after its stated test or procedure has actually run.
+
+The deployment migration owner retains the revision-0010 append-only registration
+exception: SELECT/INSERT on `aqa_experiments`, `aqa_experiment_symbols`, and
+`aqa_audit_events`. Final migration cleanup preserves this exception while retaining
+mutation triggers and denying ordinary business writes. This grants no new runtime
+service or broker authority.
+
+Local hardening (2026-09-12) adds a ten-second total request-body deadline and a 128-task
+Uvicorn concurrency bound to the private API. Revision 0016 exposes only the schema
+version through a security-barrier view; runtime services receive no new collector-schema
+access or write authority. Warning/error redaction remains active; routine third-party
+SQL INFO logging is suppressed. See [verification](evidence/local-hardening-20260912.md).
+
+## Local readiness implementation update (2026-09-13)
+
+Verified history continuation uses only in-memory hash state. Revision 0017 enforces
+transactional queue invalidation for external minute/aggregate projections, including
+provenance replacement, without SECURITY DEFINER or additional runtime grants. Cold
+restart rebuilds evidence; queue/gap changes prevent reuse and the publication fence
+rejects concurrent changes. The bounded data-only stream verifier is an explicitly
+authorized operator boundary, separate from offline tests and all broker authority.
+Its current evidence does not establish unattended readiness; see
+[validation](evidence/local-hardening-20260913.md).
