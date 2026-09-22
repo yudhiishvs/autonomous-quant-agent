@@ -21,6 +21,7 @@ export const baseRules: Rules = {
     maxDrawdown: 15,
 };
 export const defaultAuthority: Authority = {
+    baseline: structuredClone(baseRules),
     assets: ["VTI", "BND"],
     capital: 2500,
     exposure: 25,

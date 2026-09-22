@@ -47,6 +47,7 @@ export type Version = {
     report?: Report;
 };
 export type Authority = {
+    baseline: Rules;
     assets: Asset[];
     capital: number;
     exposure: number;
@@ -155,5 +156,42 @@ export function validRules(r: Rules) {
         Number.isFinite(r.maxDrawdown) &&
         r.maxDrawdown >= 1 &&
         r.maxDrawdown <= 50
+    );
+}
+
+export function validAuthority(a: Authority) {
+    return (
+        !!a &&
+        validRules(a.baseline) &&
+        Array.isArray(a.assets) &&
+        a.assets.length > 0 &&
+        a.assets.every((x) => assets.includes(x)) &&
+        new Set(a.assets).size === a.assets.length &&
+        Number.isFinite(a.capital) &&
+        a.capital >= 100 &&
+        a.capital <= 100000 &&
+        Number.isFinite(a.exposure) &&
+        a.exposure >= 1 &&
+        a.exposure <= 100 &&
+        Number.isFinite(a.minSizing) &&
+        Number.isFinite(a.maxSizing) &&
+        a.minSizing >= 1 &&
+        a.maxSizing <= a.exposure &&
+        a.minSizing <= a.maxSizing &&
+        Number.isInteger(a.minDays) &&
+        a.minDays >= 1 &&
+        a.minDays <= 365 &&
+        Number.isInteger(a.budget) &&
+        a.budget >= 1 &&
+        a.budget <= 100 &&
+        Number.isInteger(a.paperDays) &&
+        a.paperDays >= 5 &&
+        a.paperDays <= 365 &&
+        Array.isArray(a.requiredChecks) &&
+        a.requiredChecks.every((x) => typeof x === "string") &&
+        Array.isArray(a.alwaysManual) &&
+        a.alwaysManual.every((x) => typeof x === "string") &&
+        typeof a.existingHoldings === "boolean" &&
+        typeof a.timingChange === "boolean"
     );
 }

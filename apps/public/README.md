@@ -194,3 +194,12 @@ The normal browser suite now includes registration, verification and password re
 the local captured-mail service. It creates a unique synthetic identity, verifies that a saved
 strategy survives recovery, and checks old/replacement password behavior. It does not seed a
 real user, send external mail or claim public email delivery. See the workspace evidence.
+
+## Investing workspace design prototype
+
+The credential-free interactive prototype is separate from the authenticated application:
+run `npm run dev -- --port 5179` in `ui`, then open `/studio.html`. It uses only synthetic
+local state and scripted responses. `npm exec playwright test -- --config playwright.studio.config.ts`
+runs the isolated suite with installed Google Chrome. No backend stack is required for
+these tests. Full workflows, persistence/reset instructions and limitations are documented
+in [studio UX](../../docs/studio-ux.md).

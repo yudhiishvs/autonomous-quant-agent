@@ -1,4 +1,4 @@
-import { assets, modes, validRules, type State } from "./model";
+import { assets, modes, validRules, validAuthority, type State } from "./model";
 export const STORAGE_KEY = "aqa.studio.demo.v2";
 export function decode(raw: string | null): State | null {
     if (!raw || raw.length > 2000000) return null;
@@ -57,10 +57,15 @@ export function decode(raw: string | null): State | null {
             return null;
         if (
             !Array.isArray(s.strategies) ||
+            s.strategies.length === 0 ||
             s.strategies.length > 100 ||
             !s.strategies.every(
                 (p) =>
                     typeof p.id === "string" &&
+                    (p.lastAutomatic === undefined ||
+                        (Number.isFinite(p.lastAutomatic) &&
+                            p.lastAutomatic >= 0)) &&
+                    validAuthority(p.authority) &&
                     typeof p.name === "string" &&
                     typeof p.conversationId === "string" &&
                     p.accountId === "demo-account" &&

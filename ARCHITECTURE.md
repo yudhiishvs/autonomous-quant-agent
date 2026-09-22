@@ -146,3 +146,11 @@ external provenance. Aggregate creation can advance the generation and require a
 second idempotent drain; duplicate materialization does not create another revision.
 The trigger uses existing caller privileges and a fixed search path. See the
 [dated measurements](docs/evidence/local-hardening-20260913.md) for capacity limits.
+
+## Isolated investing workspace prototype
+
+`apps/public/ui/studio.html` is a separate Vite entry. Its `src/studio` modules own typed
+synthetic state, pure policy evaluation, immutable strategy transitions, fixture reports,
+validated local browser persistence and React views. They import no authenticated API or
+broker clients. The independent policy evaluator and account-capital guard demonstrate
+bounded approval/activation without financial side effects. See [studio UX](docs/studio-ux.md).

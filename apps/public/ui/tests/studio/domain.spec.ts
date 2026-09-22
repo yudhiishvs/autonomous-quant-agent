@@ -88,3 +88,31 @@ test("storage rejects malformed obsolete and structurally corrupt data", () => {
     const bad = { ...s, strategies: [{ id: "bad" }] };
     expect(decode(JSON.stringify(bad))).toBeNull();
 });
+
+test("automatic activation respects account capacity and other reserved allocations", () => {
+    const s = initialState();
+    s.portfolio = { ...s.portfolio, cash: 1000, holdings: [] };
+    const p = s.strategies[0];
+    p.mode = "Automatic Management";
+    p.versions.push(passingVersion());
+    const n = evaluateAndActivate(s, p.id, "fixture-pass");
+    expect(n.strategies[0].deployment).toBeUndefined();
+    expect(n.events[0].reason).toContain("capital");
+});
+test("locked risk boundaries require additional authority even with passing fixture checks", () => {
+    const s = initialState(),
+        p = s.strategies[0];
+    p.mode = "Automatic Management";
+    p.authority.baseline = { ...p.versions[0].rules, maxDrawdown: 10 };
+    expect(evaluate(p, passingVersion()).outcome).toBe("review");
+});
+test("empty strategies invalid timestamps and negative limits recover rather than crash or bypass policy", () => {
+    const s = initialState();
+    expect(decode(JSON.stringify({ ...s, strategies: [] }))).toBeNull();
+    const invalid = initialState();
+    (invalid.strategies[0] as any).lastAutomatic = "invalid";
+    expect(decode(JSON.stringify(invalid))).toBeNull();
+    const negative = initialState();
+    negative.strategies[0].authority.minDays = -1;
+    expect(decode(JSON.stringify(negative))).toBeNull();
+});

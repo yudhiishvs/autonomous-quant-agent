@@ -1,5 +1,11 @@
-import { checks, baseRules } from "./fixtures";
-import { fingerprint, validRules, type Strategy, type Version } from "./model";
+import { checks } from "./fixtures";
+import {
+    fingerprint,
+    validRules,
+    validAuthority,
+    type Strategy,
+    type Version,
+} from "./model";
 export type Decision = {
     outcome: "automatic" | "review" | "blocked";
     reason: string;
@@ -13,6 +19,8 @@ export function evaluate(s: Strategy, v: Version, now = Date.now()): Decision {
         outcome: "review",
         reason,
     });
+    if (!validAuthority(s.authority))
+        return blocked("Invalid authority; configure valid limits first.");
     const r = v.report,
         a = s.authority;
     if (
@@ -45,11 +53,15 @@ export function evaluate(s: Strategy, v: Version, now = Date.now()): Decision {
         return review(
             "The revision exceeds the granted asset, capital or sizing authority.",
         );
-    if (v.rules.entry !== baseRules.entry || v.rules.exit !== baseRules.exit)
+    if (
+        v.rules.entry !== a.baseline.entry ||
+        v.rules.exit !== a.baseline.exit ||
+        v.rules.maxDrawdown !== a.baseline.maxDrawdown
+    )
         return review(
-            "Changing entry or exit logic always requires human approval.",
+            "Changing entry, exit or risk-limit logic always requires human approval.",
         );
-    if (v.rules.timing !== baseRules.timing && !a.timingChange)
+    if (v.rules.timing !== a.baseline.timing && !a.timingChange)
         return review("Timing changes are outside the granted authority.");
     if (
         s.lastAutomatic !== undefined &&

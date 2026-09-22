@@ -8,8 +8,10 @@ import {
     type Mode,
     type Portfolio,
     type Asset,
+    type Strategy,
+    type Version,
 } from "./model";
-import { evaluate } from "./policy";
+import { evaluate, type Decision } from "./policy";
 export function event(
     s: State,
     action: string,
@@ -122,7 +124,7 @@ export function evaluateAndActivate(
     if (!p) return s;
     const v = p.versions.find((x) => x.id === versionId);
     if (!v || p.deployment?.versionId === versionId) return s;
-    const result = evaluate(p, v, now);
+    const result = activationDecision(s, p, v, now);
     v.review =
         result.outcome === "automatic"
             ? "approved"
@@ -154,4 +156,30 @@ export function evaluateAndActivate(
         s.notice = `${p.name} v${v.number} automatically approved and activated in simulation. Existing holdings were not changed.`;
     }
     return s;
+}
+
+export function activationDecision(
+    state: State,
+    p: Strategy,
+    v: Version,
+    now = Date.now(),
+): Decision {
+    const reserved = state.strategies
+        .filter((x) => x.id !== p.id && x.deployment)
+        .reduce(
+            (sum, x) =>
+                sum +
+                (x.versions.find((ver) => ver.id === x.deployment?.versionId)
+                    ?.rules.capital ?? 0),
+            0,
+        );
+    if (
+        cents(v.rules.capital + reserved) >
+        cents(portfolioTotal(state.portfolio))
+    )
+        return {
+            outcome: "blocked",
+            reason: "Insufficient account capital after other strategy allocations. Reduce the allocation before activation.",
+        };
+    return evaluate(p, v, now);
 }

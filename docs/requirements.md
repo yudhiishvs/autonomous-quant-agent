@@ -758,3 +758,15 @@ connection-generation invalidation and append-only revocation evidence. These re
 start execution. Account-wide risk/reservations and execution-time approval rechecks remain
 required before PUB-004/PUB-005 can be complete. See the
 [approval evidence](evidence/public-approvals-20260914.md).
+
+## Interactive investing workspace prototype
+
+`REQ-STUDIO-001` is an isolated synthetic prototype: six connected destinations, guided
+eligibility/demo entry, contextual conversations and artifacts, consistent portfolio
+arithmetic, immutable strategy versions, fixture-only evidence, three account-scoped
+modes, deterministic policy approval/escalation/rejection, simulated activation, local
+activity, provider previews and recoverable browser persistence. Passing fixture checks
+must not imply profitability or actual backtesting. Real keys, brokerage calls and live
+execution are excluded. See [studio UX](studio-ux.md) and the
+[implementation evidence](execution-plans/investing-workspace.md). This prototype does not
+advance production integration or release readiness.
