@@ -1203,3 +1203,10 @@ The September 14 public-release instruction supersedes the intervening planning 
 The linked product plan is the single active implementation plan; this document retains
 the private-platform evidence. Actual broker orders and public exposure still require
 separate authorization.
+
+## Investing workspace prototype — 2026-09-22
+
+The maintainer approved the complete interactive prototype and delegated incremental
+commits and pushes on `feature/investing-workspace`. The isolated browser implementation
+has no backend, credential or financial execution authority. See the
+[investing workspace plan](investing-workspace.md) for scope, invariants and verification.
