@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useWorkspace } from "./workspace";
 import { uid } from "./model";
 import { answer, safeText } from "./conversation";
@@ -27,6 +27,17 @@ export function Conversations() {
         [name, setName] = useState(""),
         [failed, setFailed] = useState(false),
         [retry, setRetry] = useState("");
+    const artifactClose = useRef<HTMLButtonElement>(null),
+        artifactTrigger = useRef<HTMLElement | null>(null);
+    useEffect(() => {
+        if (artifact) {
+            artifactTrigger.current = document.activeElement as HTMLElement;
+            artifactClose.current?.focus();
+        } else if (artifactTrigger.current?.isConnected) {
+            artifactTrigger.current.focus();
+            artifactTrigger.current = null;
+        }
+    }, [artifact]);
     const create = () => {
         const id = uid();
         set((s) => ({
@@ -292,6 +303,7 @@ export function Conversations() {
                     <div className="artifact-toolbar">
                         <span>In this conversation</span>
                         <button
+                            ref={artifactClose}
                             aria-label="Close artifact"
                             onClick={() => setArtifact(null)}
                         >

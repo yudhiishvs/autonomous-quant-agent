@@ -761,7 +761,7 @@ required before PUB-004/PUB-005 can be complete. See the
 
 ## Interactive investing workspace prototype
 
-`REQ-STUDIO-001` is an isolated synthetic prototype: six connected destinations, guided
+`REQ-STUDIO-001` is `IMPLEMENTED_AND_VERIFIED` within the isolated synthetic prototype boundary: six connected destinations, guided
 eligibility/demo entry, contextual conversations and artifacts, consistent portfolio
 arithmetic, immutable strategy versions, fixture-only evidence, three account-scoped
 modes, deterministic policy approval/escalation/rejection, simulated activation, local

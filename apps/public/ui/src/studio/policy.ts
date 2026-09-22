@@ -26,6 +26,10 @@ export function evaluate(s: Strategy, v: Version, now = Date.now()): Decision {
     if (
         !validRules(v.rules) ||
         !r ||
+        !r.checks ||
+        typeof r.checks !== "object" ||
+        !Number.isInteger(r.paperDays) ||
+        r.paperDays < 0 ||
         r.versionId !== v.id ||
         r.fingerprint !== fingerprint(v.rules)
     )

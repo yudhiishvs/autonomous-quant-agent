@@ -1,6 +1,22 @@
 import { test, expect, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { STORAGE_KEY } from "../../src/studio/persistence";
+const requests = new Map<Page, string[]>();
+test.beforeEach(async ({ page }) => {
+    const calls: string[] = [];
+    requests.set(page, calls);
+    page.on("request", (r) => {
+        if (
+            ["fetch", "xhr"].includes(r.resourceType()) ||
+            !r.url().startsWith("http://127.0.0.1:5179/")
+        )
+            calls.push(r.url());
+    });
+});
+test.afterEach(async ({ page }) => {
+    expect(requests.get(page)).toEqual([]);
+    requests.delete(page);
+});
 const enter = async (page: Page) => {
     await page.goto("/studio.html");
     await page
@@ -292,4 +308,153 @@ test("dialogs and artifacts support keyboard focus, responsive layout, and acces
         ),
     ).toBe(true);
     await page.screenshot({ path: "/tmp/aqa-report-390.png", fullPage: true });
+});
+
+test("unsupported questions cancellation and retry never invent a model answer", async ({
+    page,
+}) => {
+    await enter(page);
+    await nav(page, "Conversations");
+    await page
+        .getByLabel("Message", { exact: true })
+        .fill("Tell me tomorrow’s price");
+    await nav(page, "Send ↑");
+    await nav(page, "Cancel");
+    await page.waitForTimeout(1100);
+    expect((await read(page)).conversations[0].messages).toHaveLength(2);
+    await page.getByText("Demo recovery", { exact: true }).click();
+    await nav(page, "Simulate response error");
+    await expect(page.getByRole("alert")).toContainText("could not finish");
+    await nav(page, "Retry response");
+    await expect(page.getByText(/Let’s make an idea specific/)).toBeVisible();
+    await page
+        .getByLabel("Message", { exact: true })
+        .fill("What is tomorrow’s price?");
+    await nav(page, "Send ↑");
+    await expect(page.getByText(/cannot generate a real answer/)).toBeVisible();
+    await page
+        .getByLabel("Message", { exact: true })
+        .fill("sk-demonstration_only_not_a_real_key_1234");
+    expect(await page.getByLabel("Message", { exact: true }).inputValue()).toBe(
+        "[credential-shaped text removed]",
+    );
+});
+test("cross-tab changes cancel pending activation and preserve the external state", async ({
+    page,
+    context,
+}) => {
+    await enter(page);
+    await nav(page, "Strategies");
+    await mode(page, "Automatic Management");
+    const other = await context.newPage();
+    await other.goto("/studio.html");
+    await other.evaluate((key) => {
+        const s = JSON.parse(localStorage.getItem(key)!);
+        s.settings.budget = 23;
+        localStorage.setItem(key, JSON.stringify(s));
+    }, STORAGE_KEY);
+    await expect(page.getByRole("alert")).toContainText("another tab");
+    await page.waitForTimeout(1900);
+    expect((await read(page)).strategies[0].deployment).toBeUndefined();
+    expect((await read(page)).settings.budget).toBe(23);
+    await other.close();
+    await nav(page, "Try passing revision");
+    await page.waitForTimeout(1900);
+    await expect(
+        page.getByText("Running v3", { exact: true }),
+    ).not.toBeVisible();
+    await expect(
+        page.getByText("Not activated", { exact: true }),
+    ).toBeVisible();
+});
+test("activity links retain the exact version instead of silently opening latest", async ({
+    page,
+}) => {
+    await enter(page);
+    await nav(page, "Strategies");
+    await nav(page, "Try passing revision");
+    await expect(
+        page.getByRole("button", { name: "Review simulated activation" }),
+    ).toBeEnabled();
+    await nav(page, "Try failing revision");
+    await expect(page.getByText("Collaborative · blocked")).toBeVisible();
+    await nav(page, "Activity");
+    const completion = page
+        .locator(".activity-item")
+        .filter({
+            has: page.getByRole("heading", {
+                name: "Test completed",
+                exact: true,
+            }),
+        })
+        .last();
+    await completion
+        .getByRole("button", { name: "Open associated strategy ↗" })
+        .click();
+    await expect(
+        page.getByRole("heading", { name: "Version 2. In plain language." }),
+    ).toBeVisible();
+    await nav(page, "Evidence");
+    await expect(page.getByText("The demonstrated checks pass.")).toBeVisible();
+});
+test("browser storage failure keeps the workspace usable with a clear warning", async ({
+    page,
+}) => {
+    await page.addInitScript(() => {
+        Storage.prototype.setItem = function () {
+            throw new DOMException("full", "QuotaExceededError");
+        };
+    });
+    await enter(page);
+    await expect(page.getByRole("alert")).toContainText("could not be saved");
+    await nav(page, "Strategies");
+    await nav(page, "New strategy");
+    await page.getByLabel("Strategy name").fill("Still in memory");
+    await nav(page, "Create strategy");
+    await expect(
+        page.getByRole("heading", { name: "Still in memory" }),
+    ).toBeVisible();
+});
+
+test("version capacity fails visibly without scheduling a missing revision", async ({
+    page,
+}) => {
+    await enter(page);
+    await page.evaluate((key) => {
+        const s = JSON.parse(localStorage.getItem(key)!);
+        const first = s.strategies[0].versions[0];
+        s.strategies[0].versions = Array.from({ length: 200 }, (_, i) => ({
+            ...first,
+            id: `limit-${i}`,
+            number: i + 1,
+        }));
+        localStorage.setItem(key, JSON.stringify(s));
+    }, STORAGE_KEY);
+    await page.reload();
+    await nav(page, "Strategies");
+    await nav(page, "Try passing revision");
+    await expect(page.getByRole("alert")).toContainText("200-version");
+    expect((await read(page)).strategies[0].versions).toHaveLength(200);
+    await expect(
+        page.getByText("Researching a sample revision"),
+    ).not.toBeVisible();
+});
+test("notification preference affects proposal summaries but keeps mandatory activation notice", async ({
+    page,
+}) => {
+    await enter(page);
+    await nav(page, "Settings");
+    await page
+        .getByLabel("Show optional demo notification summaries.")
+        .uncheck();
+    await nav(page, "Strategies");
+    await mode(page, "Automatic Research");
+    await expect(
+        page.getByText("Automatic Research · needs approval"),
+    ).toBeVisible();
+    expect((await read(page)).notice).toBe("");
+    await mode(page, "Automatic Management");
+    await expect(
+        page.getByText(/automatically approved and activated in simulation/),
+    ).toBeVisible();
 });

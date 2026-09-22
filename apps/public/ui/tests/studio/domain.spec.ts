@@ -116,3 +116,51 @@ test("empty strategies invalid timestamps and negative limits recover rather tha
     negative.strategies[0].authority.minDays = -1;
     expect(decode(JSON.stringify(negative))).toBeNull();
 });
+
+test("malformed cross references and report shapes are recoverable", () => {
+    const s = initialState();
+    s.strategies[0].conversationId = "missing";
+    expect(decode(JSON.stringify(s))).toBeNull();
+    const r = initialState();
+    r.strategies[0].versions = [passingVersion()];
+    (r.strategies[0].versions[0].report as any).checks = {
+        "Drawdown limit": "yes",
+    };
+    expect(decode(JSON.stringify(r))).toBeNull();
+    const artifact = initialState();
+    (artifact.conversations[0].messages[0] as any).artifact = "unsupported";
+    expect(decode(JSON.stringify(artifact))).toBeNull();
+});
+test("budget frequency and observation limits fail closed", () => {
+    const s = initialState(),
+        p = s.strategies[0];
+    p.mode = "Automatic Management";
+    const v = passingVersion();
+    p.lastAutomatic = 100000000;
+    expect(evaluate(p, v, 100000001).outcome).toBe("blocked");
+    p.lastAutomatic = undefined;
+    p.authority.paperDays = 8;
+    expect(evaluate(p, v).outcome).toBe("blocked");
+    p.authority.paperDays = 5;
+    p.researchUsed = 6;
+    expect(evaluate(p, v).outcome).toBe("blocked");
+});
+test("other strategies reserve capital even when their new orders are paused", () => {
+    const s = initialState();
+    s.portfolio = { ...s.portfolio, cash: 3000, holdings: [] };
+    const p = s.strategies[0];
+    p.mode = "Automatic Management";
+    p.versions.push(passingVersion());
+    const other = structuredClone(p);
+    other.id = "other";
+    other.deployment = {
+        versionId: "fixture-pass",
+        paused: true,
+        positions: [],
+        activatedAt: 1,
+    };
+    s.strategies.push(other);
+    expect(
+        evaluateAndActivate(s, p.id, "fixture-pass").strategies[0].deployment,
+    ).toBeUndefined();
+});

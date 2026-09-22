@@ -60,7 +60,14 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         timer = useRef<ReturnType<typeof setTimeout> | null>(null),
         storageLocked = useRef(false);
     const set = (f: (s: State) => State) => {
+        if (storageLocked.current) return;
         const next = f(stateRef.current);
+        if (!decode(JSON.stringify(next))) {
+            setWarning(
+                "This demo reached its local data limits or rejected an invalid change. Your last valid state is preserved. Export your work, then reset the demo to continue.",
+            );
+            return;
+        }
         stateRef.current = next;
         setState(next);
     };
@@ -125,6 +132,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         };
     }, []);
     const run = (j: Job, complete: (s: State) => State) => {
+        if (storageLocked.current) {
+            setError(
+                "Reload or reset this demo before continuing; this tab has stale or unreadable state.",
+            );
+            return;
+        }
         cancel();
         setError("");
         jobRef.current = j;
@@ -148,9 +161,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         scenario: "pass" | "fail" | "outside",
         fail = false,
     ) => {
+        if (storageLocked.current) {
+            setError(
+                "Reload or reset this demo before continuing; this tab has stale or unreadable state.",
+            );
+            return;
+        }
         cancel();
         const p = stateRef.current.strategies.find((x) => x.id === id);
         if (!p) return;
+        if (p.versions.length >= 200) {
+            setError(
+                "This strategy reached the 200-version demo limit. Export your work and reset the demo to continue.",
+            );
+            return;
+        }
         if (p.researchPaused || p.researchUsed >= p.authority.budget) {
             setError(
                 "Research is paused or the configured research budget has been used. Update the strategy settings before trying again.",
@@ -237,7 +262,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         );
                         return n;
                     }
-                    const v = t.versions.find((x) => x.id === version.id)!;
+                    const v = t.versions.find((x) => x.id === version.id);
+                    if (!v) return n;
                     v.report = evidence;
                     event(
                         n,
@@ -256,7 +282,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
                         artifact: "report",
                         strategyId: id,
                     });
-                    return evaluateAndActivate(n, id, v.id);
+                    const result = evaluateAndActivate(n, id, v.id);
+                    const reviewed = result.strategies
+                        .find((x) => x.id === id)!
+                        .versions.find((x) => x.id === v.id)!;
+                    if (
+                        result.settings.notifications &&
+                        reviewed.review !== "approved"
+                    )
+                        result.notice = `${t.name} v${v.number}: ${reviewed.review}. Open Evidence or Activity to review the decision.`;
+                    return result;
                 });
             }, 1000);
         }, 700);

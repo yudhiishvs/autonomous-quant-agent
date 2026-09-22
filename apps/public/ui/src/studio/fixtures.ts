@@ -13,8 +13,8 @@ export const checks = [
 ];
 export const baseRules: Rules = {
     assets: ["VTI"],
-    entry: "Invest when the monthly trend is positive.",
-    exit: "Move the strategy allocation to cash when the trend turns negative.",
+    entry: "Buy when the previous close is above the average of the prior 100 daily closes.",
+    exit: "Exit to cash when the previous close is at or below the average of the prior 100 daily closes.",
     timing: "Monthly",
     sizing: 20,
     capital: 2000,

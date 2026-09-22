@@ -26,7 +26,7 @@ Changing authority or mode cancels pending work. Pausing research, stopping revi
 
 ## State and recovery
 
-`aqa.studio.demo.v2` holds only local demo state. Missing state seeds a fresh demo; malformed/obsolete state shows recovery instructions and is not silently overwritten. Settings reset clears only this namespace. Storage failures preserve in-memory work with a warning. Cross-tab changes cancel pending work and stop this tab from saving until reload/reset. Local JSON export includes synthetic strategies and settings, not credentials.
+`aqa.studio.demo.v2` holds only local demo state. Missing state seeds a fresh demo; malformed/obsolete state shows recovery instructions and is not silently overwritten. Settings reset clears only this namespace. Storage failures preserve in-memory work with a warning. Cross-tab changes cancel pending work and stop this tab from mutating or activating until reload/reset. Local JSON export includes synthetic strategies and settings, not credentials.
 
 Provider choices are preview preferences. The API-key field is disabled, and demo connection stores a boolean only. A consumer chat subscription must not be assumed to include API usage. No credential or session storage is read by this entry. Free text is rendered by React; common credential-shaped text is removed from conversation input. Users are instructed not to enter personal information. This is not a general secret-detection guarantee or secure custody system.
 
@@ -44,7 +44,7 @@ npm exec playwright test -- --config playwright.studio.config.ts
 
 Open `http://127.0.0.1:5179/studio.html`. The isolated suite uses installed Google Chrome and no authenticated backend. Normal application tests retain their existing configuration and require their separate service prerequisites. No dependency changes are needed.
 
-On 2026-09-22: 23 isolated tests passed, including domain, eligibility, conversations, portfolio, version invalidation, modes, cancellation/retry, recovery, export, keyboard focus and axe checks across six destinations at 1440/768/390px. TypeScript, production build, frontend formatting and 61-file freeze verification passed. Further final review evidence belongs in the [execution plan](execution-plans/investing-workspace.md).
+On 2026-09-22: 32 isolated tests passed, including domain, eligibility, conversations, portfolio, version invalidation, modes, cancellation/retry, recovery, export, keyboard focus and axe checks across six destinations at 1440/768/390px. TypeScript, production build, frontend formatting and 61-file freeze verification passed. Final review evidence, the 127 passing safety/architecture tests and responsive follow-up are recorded in the [execution plan](execution-plans/investing-workspace.md).
 
 ## Limitations
 

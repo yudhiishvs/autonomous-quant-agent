@@ -47,6 +47,11 @@ export function Report({ version }: { version: Version }) {
                 capital={version.rules.capital}
                 label="Strategy and broad-market benchmark"
             />
+            <p className="small muted">
+                Predefined thresholds: 100% sample data coverage; drawdown at
+                most {version.rules.maxDrawdown}%; nonnegative holdout return;
+                nonnegative return with doubled transaction costs.
+            </p>
             <div className="report-checks">
                 {Object.entries(r.checks).map(([name, ok]) => (
                     <div className="row" key={name}>

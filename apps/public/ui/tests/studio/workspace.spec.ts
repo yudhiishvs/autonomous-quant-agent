@@ -117,4 +117,21 @@ for (const width of [1440, 768, 390])
                 fullPage: true,
             });
         }
+        await page.getByRole("button", { name: "Open portfolio ↗" }).click();
+        expect((await new AxeBuilder({ page }).analyze()).violations).toEqual(
+            [],
+        );
+        expect(
+            await page.evaluate(
+                () => document.documentElement.scrollWidth <= innerWidth,
+            ),
+        ).toBe(true);
+        if (width === 1440) {
+            const composer = await page.locator(".composer").boundingBox();
+            expect(composer!.y + composer!.height).toBeLessThanOrEqual(1000);
+        }
+        await page.screenshot({
+            path: `/tmp/aqa-artifact-${width}.png`,
+            fullPage: true,
+        });
     });
