@@ -1190,3 +1190,87 @@ completed the 21-slot/21-reconciliation/six-fake-fill session and restart with a
 services healthy. Both legacy regressions, format/lint/type/freeze and configured
 Bandit checks passed. Disposable services were removed and Compose volumes retained.
 No publication or order was performed. External acceptance items above remain open.
+
+## Container Python security update — 2026-09-23
+
+The maintainer authorized updating PR #27's Python pin, rebuilding its images, and
+verifying all container security checks. Scoped commit and push delegation covers
+`fix/container-python-security`, publishing only this fix to the existing PR branch
+`dependabot/docker/chainguard/wolfi-base-1d95114038f76513a9ace6fca107d5582b08c65981f81f61cb56bf7fd2ef216d`.
+Merge, image publication, deployment, and unrelated working-tree changes are excluded.
+
+For REQ-CI-002/004/005, change the shared signed Wolfi Python APK pin from
+`3.11.16-r5` to `3.11.16-r7` and update the existing declarative pin assertion.
+Trivy artifacts from PR run `35604626886` identify CVE-2026-7210 in both
+`python-3.11` and `python-3.11-base` in all three final images, with r7 as the fix.
+All builders and final targets inherit the shared pin, including the application
+alias; no separate Python install bypasses it. Retain Python 3.11 compatibility,
+the frozen dependency lock, SQLite pin, numeric non-root identity, immutable code,
+absent global installers, runtime separation, and the strict HIGH/CRITICAL gate.
+
+No application input, public API, secret access, privileges, data ownership,
+network authority, broker authority, logging, replay, or concurrency behavior is
+changed. This corrects the packaged XML parser dependency; scanner evidence does
+not establish an application-level exploit. No finding suppression or new runtime
+abstraction is needed. The residual risk is future advisories or changed transitive
+OS packages, which remain inventoried and scanned on each build. Recovery must use
+another verified patched package rather than restoring the known-vulnerable pin.
+
+Baseline: the 20 tests in `test_devsecops_configuration.py`,
+`test_market_data_deployment.py`, and `test_container_entrypoint.py` pass locally.
+The local Docker daemon is unavailable; image verification ran in GitHub Actions
+on Ubuntu 24.04. Status: `IMPLEMENTED_AND_VERIFIED` for this container remediation.
+
+Local validation on this revision, with `PYTHONPATH=src` and the existing locked
+environment's Python: `python -m pytest -q tests/safety tests/architecture` passed
+127 tests. `ruff check .`, `ruff format --check .` (426 files),
+`mypy src docker` (151 source files),
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies),
+and `git diff --check` passed. The complete three-file diff introduces no new
+secret, persistent state, API, or financial side effect. Independent investigation
+and candidate review found no surviving shared-image bypass or compatibility defect.
+
+Remote evidence for commit `3bd1aa44f4290732879e9296c8746eb8962f0239`:
+[PR run 35880970570](https://github.com/yudhiishvs/autonomous-quant-agent/actions/runs/35880970570)
+and [push run 35880964502](https://github.com/yudhiishvs/autonomous-quant-agent/actions/runs/35880964502)
+both passed all four Container workflow jobs. All three images built, passed
+non-root/immutable-code/global-installer probes and Python/SQLite FTS5 checks,
+generated SPDX inventories, and passed the unchanged HIGH/CRITICAL scan. Collector
+SDK exclusion, isolated execution imports, and platform fixture ingest/aggregate/
+freeze probes passed. Python CycloneDX generation also passed in both runs.
+
+Downloaded PR-run SPDX artifacts show `python-3.11` and `python-3.11-base` at
+`3.11.16-r7` in every image. All three vulnerability JSON artifacts contain zero
+HIGH/CRITICAL findings, so CVE-2026-7210 no longer appears under the original gate.
+This is scanner and credential-free runtime evidence, not an exploit reproduction,
+ARM64 result, deployment acceptance, or guarantee against future vulnerabilities.
+The PR remains unmerged; unrelated repository acceptance status is unchanged.
+
+## CodeQL workflow compatibility — 2026-09-23
+
+The maintainer authorized repairing PR #28, including scoped commits and pushes
+from `fix/codeql-workflow-compatibility` to its existing branch
+`dependabot/github_actions/github/codeql-action/init-4.38.1`. Incorporate current
+`main` without rewriting history to include the merged Python package fix from
+PR #27. Do not merge PR #28, deploy, publish images, or alter unrelated work.
+
+PR run `35604754656` failed because initialization used CodeQL action 4.38.1
+while analysis used 4.37.9. For REQ-CI-002/004, pin both steps to the same immutable
+4.38.1 revision. A regression test checks compatibility between the actual workflow
+references without hard-coding a release; it fails on the original mismatched pair.
+Keep the action pair aligned in future dependency updates. No workflow permissions,
+scan criteria, application code, secrets, broker authority, or frozen dependencies
+change. This is a workflow configuration failure, not a reported code vulnerability.
+
+Local verification used the existing locked environment with `PYTHONPATH=src`.
+The existing 12 DevSecOps tests passed before the repair; the new compatibility
+test reproduced the mismatch and passes after alignment. `python -m pytest -q
+tests/safety tests/architecture` passed 128 tests. `ruff check .`, `ruff format
+--check .` (426 files), `mypy src docker` (151 files), and
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies)
+passed. Complete diff review preserves least privilege, immutable action pins,
+credentials, state ownership, and scan failure behavior; no additional abstractions
+or dependency changes are needed. Hosted CodeQL, container and remaining CI runs
+on [PR #28](https://github.com/yudhiishvs/autonomous-quant-agent/pull/28/checks)
+provide revision-specific remote acceptance evidence; local configuration tests
+do not execute CodeQL or Docker. Reverting the pair together preserves compatibility.
