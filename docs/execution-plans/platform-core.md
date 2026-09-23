@@ -1218,10 +1218,8 @@ another verified patched package rather than restoring the known-vulnerable pin.
 
 Baseline: the 20 tests in `test_devsecops_configuration.py`,
 `test_market_data_deployment.py`, and `test_container_entrypoint.py` pass locally.
-The local Docker daemon is unavailable. GitHub Actions must build all three final
-images, run their credential-free runtime probes and SBOM generation, and pass the
-unmodified Trivy 0.72.0 scan before the remediation is reported as verified.
-Status: `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` pending those results.
+The local Docker daemon is unavailable; image verification ran in GitHub Actions
+on Ubuntu 24.04. Status: `IMPLEMENTED_AND_VERIFIED` for this container remediation.
 
 Local validation on this revision, with `PYTHONPATH=src` and the existing locked
 environment's Python: `python -m pytest -q tests/safety tests/architecture` passed
@@ -1229,5 +1227,21 @@ environment's Python: `python -m pytest -q tests/safety tests/architecture` pass
 `mypy src docker` (151 source files),
 `python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies),
 and `git diff --check` passed. The complete three-file diff introduces no new
-secret, persistent state, API, or financial side effect. Existing runtime probes
-and fresh vulnerability artifacts remain the required remote acceptance evidence.
+secret, persistent state, API, or financial side effect. Independent investigation
+and candidate review found no surviving shared-image bypass or compatibility defect.
+
+Remote evidence for commit `3bd1aa44f4290732879e9296c8746eb8962f0239`:
+[PR run 35880970570](https://github.com/yudhiishvs/autonomous-quant-agent/actions/runs/35880970570)
+and [push run 35880964502](https://github.com/yudhiishvs/autonomous-quant-agent/actions/runs/35880964502)
+both passed all four Container workflow jobs. All three images built, passed
+non-root/immutable-code/global-installer probes and Python/SQLite FTS5 checks,
+generated SPDX inventories, and passed the unchanged HIGH/CRITICAL scan. Collector
+SDK exclusion, isolated execution imports, and platform fixture ingest/aggregate/
+freeze probes passed. Python CycloneDX generation also passed in both runs.
+
+Downloaded PR-run SPDX artifacts show `python-3.11` and `python-3.11-base` at
+`3.11.16-r7` in every image. All three vulnerability JSON artifacts contain zero
+HIGH/CRITICAL findings, so CVE-2026-7210 no longer appears under the original gate.
+This is scanner and credential-free runtime evidence, not an exploit reproduction,
+ARM64 result, deployment acceptance, or guarantee against future vulnerabilities.
+The PR remains unmerged; unrelated repository acceptance status is unchanged.
