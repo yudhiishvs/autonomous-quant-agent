@@ -195,7 +195,7 @@ def test_dockerfile_is_locked_multistage_and_nonroot(project_root: Path) -> None
     text = (project_root / "Dockerfile").read_text(encoding="utf-8")
     assert "ghcr.io/astral-sh/uv:0.11.7@sha256:" in text
     assert "cgr.dev/chainguard/wolfi-base@sha256:" in text
-    assert "python-3.11=3.11.16-r5 sqlite-libs=3.53.4-r2" in text
+    assert "python-3.11=3.11.16-r7 sqlite-libs=3.53.4-r2" in text
     assert text.count("FROM python-base AS") == 4
     assert "uv sync --locked --no-dev --extra dashboard --no-editable" in text
     assert "uv sync --locked --only-group market-data-runtime --no-install-project" in text

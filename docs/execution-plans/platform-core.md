@@ -1190,3 +1190,44 @@ completed the 21-slot/21-reconciliation/six-fake-fill session and restart with a
 services healthy. Both legacy regressions, format/lint/type/freeze and configured
 Bandit checks passed. Disposable services were removed and Compose volumes retained.
 No publication or order was performed. External acceptance items above remain open.
+
+## Container Python security update — 2026-09-23
+
+The maintainer authorized updating PR #27's Python pin, rebuilding its images, and
+verifying all container security checks. Scoped commit and push delegation covers
+`fix/container-python-security`, publishing only this fix to the existing PR branch
+`dependabot/docker/chainguard/wolfi-base-1d95114038f76513a9ace6fca107d5582b08c65981f81f61cb56bf7fd2ef216d`.
+Merge, image publication, deployment, and unrelated working-tree changes are excluded.
+
+For REQ-CI-002/004/005, change the shared signed Wolfi Python APK pin from
+`3.11.16-r5` to `3.11.16-r7` and update the existing declarative pin assertion.
+Trivy artifacts from PR run `35604626886` identify CVE-2026-7210 in both
+`python-3.11` and `python-3.11-base` in all three final images, with r7 as the fix.
+All builders and final targets inherit the shared pin, including the application
+alias; no separate Python install bypasses it. Retain Python 3.11 compatibility,
+the frozen dependency lock, SQLite pin, numeric non-root identity, immutable code,
+absent global installers, runtime separation, and the strict HIGH/CRITICAL gate.
+
+No application input, public API, secret access, privileges, data ownership,
+network authority, broker authority, logging, replay, or concurrency behavior is
+changed. This corrects the packaged XML parser dependency; scanner evidence does
+not establish an application-level exploit. No finding suppression or new runtime
+abstraction is needed. The residual risk is future advisories or changed transitive
+OS packages, which remain inventoried and scanned on each build. Recovery must use
+another verified patched package rather than restoring the known-vulnerable pin.
+
+Baseline: the 20 tests in `test_devsecops_configuration.py`,
+`test_market_data_deployment.py`, and `test_container_entrypoint.py` pass locally.
+The local Docker daemon is unavailable. GitHub Actions must build all three final
+images, run their credential-free runtime probes and SBOM generation, and pass the
+unmodified Trivy 0.72.0 scan before the remediation is reported as verified.
+Status: `IMPLEMENTED_NOT_EXTERNALLY_VALIDATED` pending those results.
+
+Local validation on this revision, with `PYTHONPATH=src` and the existing locked
+environment's Python: `python -m pytest -q tests/safety tests/architecture` passed
+127 tests. `ruff check .`, `ruff format --check .` (426 files),
+`mypy src docker` (151 source files),
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies),
+and `git diff --check` passed. The complete three-file diff introduces no new
+secret, persistent state, API, or financial side effect. Existing runtime probes
+and fresh vulnerability artifacts remain the required remote acceptance evidence.
