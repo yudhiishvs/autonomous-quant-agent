@@ -238,3 +238,6 @@ df56acfa403e785348c3ba2e80263576260a5325:.secrets.baseline:generic-api-key:979
 df56acfa403e785348c3ba2e80263576260a5325:.secrets.baseline:generic-api-key:987
 df56acfa403e785348c3ba2e80263576260a5325:.secrets.baseline:generic-api-key:995
 df56acfa403e785348c3ba2e80263576260a5325:docs/evidence/market-data-release-166ce790b282.json:generic-api-key:266
+# Reviewed SHA-1 detector fingerprint of the approved public uv.lock SHA-256.
+b350e3b4c8b8297a837f152f5ceadced0272a01e:.secrets.baseline:generic-api-key:1405
+5312f0cbedac8cba758e535cdd8c6fdf69e62f99:.secrets.baseline:generic-api-key:1405
