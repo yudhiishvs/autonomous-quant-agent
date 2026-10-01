@@ -29,8 +29,11 @@ does not contain the trading SDK.
 ## Versions and locking
 
 `pyproject.toml` declares supported ranges and `uv.lock` fixes the resolved graph. CI and
-images use locked synchronization. At the current lock, representative versions include uv
-0.11.7 in CI/images, Alembic 1.19.1, SQLAlchemy 2.0.51, psycopg 3.3.5, requests 2.34.2,
+images use locked synchronization. CI uses uv 0.11.7, while the digest-pinned image
+builder uses uv 0.12.19. Container updates preserve an explicit numeric release tag,
+the official uv image, a full SHA256 digest, and the frozen lock; configuration tests
+enforce that contract rather than one historical tool release. At the current lock,
+representative versions include Alembic 1.19.1, SQLAlchemy 2.0.51, psycopg 3.3.5, requests 2.34.2,
 websockets 17.0.1, exchange-calendars 4.13.2, Ruff 0.16.2, mypy 2.3.0, pytest 9.1.1,
 and pytest-cov 7.1.0.
 

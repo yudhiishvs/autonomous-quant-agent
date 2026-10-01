@@ -1252,6 +1252,38 @@ services healthy. Both legacy regressions, format/lint/type/freeze and configure
 Bandit checks passed. Disposable services were removed and Compose volumes retained.
 No publication or order was performed. External acceptance items above remain open.
 
+## Container tool pin validation — 2026-10-01
+
+The maintainer authorized fixing PR #32, including scoped commits and pushes from
+`fix/uv-container-pin-contract` to `dependabot/docker/astral-sh/uv-0.12.19`.
+Do not merge to main, deploy, publish images, or include unrelated working-tree edits.
+Runs `36427371681` and `36427371555` fail only because the Dockerfile safety test
+requires uv 0.11.7 while the reviewed image update selects 0.12.19. The failing
+assertion is reproduced locally; no vulnerability scanner finding caused these jobs
+to fail. Existing image builds passed, but the new revision still needs fresh CI.
+
+For REQ-CI-002/004, validate the actual invariant: the official uv build stage must
+use a numeric release tag and a full 64-character SHA256 digest. The previous
+substring both rejected newer releases and accepted empty digests. Keep all other
+runtime isolation assertions and vulnerability gates. Document the distinct CI and
+image-builder versions; neither policy nor the lock requires changing CI's tool pin.
+No dependency resolution, frozen file, runtime input, credential, persistence,
+financial side effect, or privilege changes. Review adds no abstraction or exception.
+
+Verify the existing test against the real pin and mutated invalid Dockerfiles, then
+run safety/architecture, lint/format/type/freeze and diff checks. Fresh container,
+security and full CI evidence belongs to the exact revision on
+[PR #32](https://github.com/yudhiishvs/autonomous-quant-agent/pull/32/checks).
+
+Local validation with the existing locked environment: `PYTHONPATH=src python -m
+pytest -q tests/safety tests/architecture` passed 127 tests. The actual Dockerfile
+test also accepted the real pin and rejected eight mutations: floating tag,
+missing/empty/short digest, wrong registry/stage, commented stage, and trailing
+content. `ruff check .`, `ruff format --check .` (426 files), `mypy src docker`
+(151 files), and `python3 scripts/verify_main_ai_freeze.py` (61 protected files and
+dependencies) passed. Release compatibility remains covered by real image builds
+and runtime probes, not this syntax check. No scanner gate or lock guard is relaxed.
+
 ## Container Python security update — 2026-09-23
 
 The maintainer authorized updating PR #27's Python pin, rebuilding its images, and
@@ -1307,13 +1339,42 @@ This is scanner and credential-free runtime evidence, not an exploit reproductio
 ARM64 result, deployment acceptance, or guarantee against future vulnerabilities.
 The PR remains unmerged; unrelated repository acceptance status is unchanged.
 
+## CodeQL workflow compatibility — 2026-09-23
+
+The maintainer authorized repairing PR #28, including scoped commits and pushes
+from `fix/codeql-workflow-compatibility` to its existing branch
+`dependabot/github_actions/github/codeql-action/init-4.38.1`. Incorporate current
+`main` without rewriting history to include the merged Python package fix from
+PR #27. Do not merge PR #28, deploy, publish images, or alter unrelated work.
+
+PR run `35604754656` failed because initialization used CodeQL action 4.38.1
+while analysis used 4.37.9. For REQ-CI-002/004, pin both steps to the same immutable
+4.38.1 revision. A regression test checks compatibility between the actual workflow
+references without hard-coding a release; it fails on the original mismatched pair.
+Keep the action pair aligned in future dependency updates. No workflow permissions,
+scan criteria, application code, secrets, broker authority, or frozen dependencies
+change. This is a workflow configuration failure, not a reported code vulnerability.
+
+Local verification used the existing locked environment with `PYTHONPATH=src`.
+The existing 12 DevSecOps tests passed before the repair; the new compatibility
+test reproduced the mismatch and passes after alignment. `python -m pytest -q
+tests/safety tests/architecture` passed 128 tests. `ruff check .`, `ruff format
+--check .` (426 files), `mypy src docker` (151 files), and
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies)
+passed. Complete diff review preserves least privilege, immutable action pins,
+credentials, state ownership, and scan failure behavior; no additional abstractions
+or dependency changes are needed. Hosted CodeQL, container and remaining CI runs
+on [PR #28](https://github.com/yudhiishvs/autonomous-quant-agent/pull/28/checks)
+provide revision-specific remote acceptance evidence; local configuration tests
+do not execute CodeQL or Docker. Reverting the pair together preserves compatibility.
+
 ## CodeQL paired updates — 2026-10-01
 
 The maintainer authorized fixing PR #33, including scoped commits and pushes from
 `fix/codeql-release-pair` to
 `dependabot/github_actions/github/codeql-action/analyze-4.38.2`. No default-branch
-merge, deployment, or unrelated work is authorized. PR #28's earlier pair repair
-is still unmerged, so its compatibility regression is included here independently.
+merge, deployment, or unrelated work is authorized. At the initial repair, PR #28
+was still unmerged, so its compatibility regression was included here independently.
 
 Run `36427409929` reports configuration from 4.37.9 being consumed by 4.38.2.
 Align init and analyze on the immutable 4.38.2 revision already selected by this PR.
@@ -1335,3 +1396,27 @@ passed 128 tests using the existing locked environment. `ruff check .`, `ruff fo
 passed. Review preserves immutable references and least privilege; the existing
 pair test rejects absent or mismatched steps. Grouping changes future proposals
 only and grants no merge or runtime authority. Revert the pair together if needed.
+
+## PR #33 conflict reconciliation — 2026-10-01
+
+The maintainer reported merge conflicts after PRs #28, #31 and #32 entered `main`.
+Continue the existing PR #33 repair delegation on `fix/codeql-release-pair`, with
+a normal merge of `origin/main` at `ecc7d93` into this PR branch and a push to its
+existing remote branch. No default-branch merge, force-push or deployment is part
+of this repair. Preserve the matched CodeQL 4.38.2 references and Dependabot group;
+retain the newly merged setup-uv 10.2.0 references, uv 0.12.19 image, approved
+security lock and both historical verification sections.
+
+The reproduced conflicts are limited to the CodeQL version pair and adjacent
+execution-plan additions. Application code, the protected-file manifest, dependency
+resolution, financial authority, secrets and scan thresholds do not change. Verify
+the combined tree with safety/architecture tests, formatting, lint, typing, frozen
+file checks and diff review, then rerun the hosted checks on the published merge.
+
+Local verification of the combined tree passed 128 safety/architecture tests under
+the network-denial wrapper, Ruff lint/format checks (426 files), mypy (151 files),
+and the freeze verifier (61 protected files and the approved dependency fingerprint).
+The resulting PR diff against `ecc7d93` contains only the CodeQL pair, Dependabot
+group and their documentation; application code, tests, image pins, lockfile and
+secret-scanner metadata match current `main`. Fresh hosted checks remain required
+on the published merge commit.
