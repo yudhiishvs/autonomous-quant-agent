@@ -193,7 +193,10 @@ def test_compose_keeps_paper_submission_default_denied(project_root: Path) -> No
 
 def test_dockerfile_is_locked_multistage_and_nonroot(project_root: Path) -> None:
     text = (project_root / "Dockerfile").read_text(encoding="utf-8")
-    assert "ghcr.io/astral-sh/uv:0.11.7@sha256:" in text
+    assert re.fullmatch(
+        r"FROM ghcr\.io/astral-sh/uv:[0-9]+\.[0-9]+\.[0-9]+@sha256:[0-9a-f]{64} AS uv",
+        text.splitlines()[0],
+    )
     assert "cgr.dev/chainguard/wolfi-base@sha256:" in text
     assert "python-3.11=3.11.16-r7 sqlite-libs=3.53.4-r2" in text
     assert text.count("FROM python-base AS") == 4

@@ -1066,6 +1066,67 @@ groups, and default-deny paper execution. Final image builds, offline behavior a
 hosted checks remain pending; candidate scan success is not final-image acceptance.
 
 
+## Approved dependency security exception — 2026-10-01
+
+The maintainer explicitly approved a two-package freeze exception for PRs #32 and
+#33: `urllib3` 2.7.0 → 2.8.0 and `virtualenv` 21.7.8 → 21.7.13. This scoped
+delegation authorizes implementation, verification, commits and pushes to those
+existing PR branches; it does not authorize merging, deployment or provider calls.
+The shared repair is prepared on `fix/dependency-security-exception` and applied
+to `fix/uv-container-pin-contract` and `fix/codeql-release-pair` before publication.
+
+Fresh CI audits reported urllib3 CVE-2026-97687, CVE-2026-97688 and CVE-2026-97689,
+and virtualenv PYSEC-2026-4011, PYSEC-2026-4012, PYSEC-2026-4013 and PYSEC-2026-4014.
+All three container targets also reported the two HIGH urllib3 findings.
+Requests consumes external response bytes before application payload validation;
+fixed hosts, disabled environment proxies and bounded socket timeouts do not prove
+immunity to response-decoding flaws. Virtualenv is used by pre-commit in security
+tooling, not imported by the application runtime. The upstream
+[urllib3 release](https://github.com/urllib3/urllib3/releases/tag/2.8.0) and
+[virtualenv release](https://github.com/pypa/virtualenv/releases/tag/21.7.13)
+identify the selected fixes. Direct application exploitability was not demonstrated.
+
+The lock was regenerated with `uv lock --upgrade-package urllib3==2.8.0
+--upgrade-package virtualenv==21.7.13`. All 146 package records remain present;
+only the two approved records change, with no dependency-edge changes. Existing
+declarations already permit both versions, so `pyproject.toml` remains byte-identical.
+The explicitly authorized `uv.lock` SHA-256 transition is:
+
+- Previous: `77003707ed87a7681b504ce8b4cd0465495425f47d20cac7b1dc77fcc283045d`
+- Approved: `d711f1f2afcd7776a02e92ec42378be1e92de3114813320346c66a2f9ec4228c`
+
+Only that dependency fingerprint changes in `non-ai-freeze-baseline.json`.
+The original protected manifest, its hash, all 61 protected files, protected
+inventory, project fingerprint and verifier remain unchanged. The dependency
+freeze continues with this single recorded exception; no advisory is ignored and
+no severity gate is lowered.
+
+The secret-scanner baseline's existing reviewed false positive for that public
+checksum is updated to the new checksum's detection fingerprint. No additional
+path, pattern, detector or credential exception is introduced.
+
+Hosted history scanning subsequently identified that same detector metadata in
+the two published dependency-update commits. Its SHA-1 was recomputed from the
+approved public lock checksum and matched both committed lines. The Gitleaks
+record adds only those exact commit/file/rule/line fingerprints; all detector
+rules and full-history scanning remain enabled.
+
+Local candidate validation uses a separate environment with both patched versions:
+locked resolution and installation pass; the hashed full dependency export passes
+pip-audit with no known vulnerabilities; 283 socket-denied provider, paper-adapter,
+runtime, safety and architecture tests and 64 additional freeze, credential and
+execution-broker tests pass. Ruff lint/format and mypy pass
+(426 formatted files, 151 typed files). Virtualenv creates a usable Python 3.11
+environment without downloads; every pinned pre-commit hook passes, as does the
+configured Bandit gate. The full socket-denied suite passes: 3,065 tests, with ten
+database-dependent skips deferred to hosted PostgreSQL integration. An initial
+subprocess import failure came from a relative test-environment path; setting an
+absolute `PYTHONPATH` corrected the setup without changing source or tests, and
+the complete rerun passed. Synthetic backtest and deterministic replay commands
+also pass in disposable state. Independent review found no concrete bypass or
+regression. Fresh hosted PostgreSQL, coverage, dependency and image-scan results
+remain required at this commit before declaring both PRs verified.
+
 ## Heartbeat completion race follow-up
 
 A hosted branch run reproduced a real race: the final completion checkpoint was taken
@@ -1190,6 +1251,38 @@ completed the 21-slot/21-reconciliation/six-fake-fill session and restart with a
 services healthy. Both legacy regressions, format/lint/type/freeze and configured
 Bandit checks passed. Disposable services were removed and Compose volumes retained.
 No publication or order was performed. External acceptance items above remain open.
+
+## Container tool pin validation — 2026-10-01
+
+The maintainer authorized fixing PR #32, including scoped commits and pushes from
+`fix/uv-container-pin-contract` to `dependabot/docker/astral-sh/uv-0.12.19`.
+Do not merge to main, deploy, publish images, or include unrelated working-tree edits.
+Runs `36427371681` and `36427371555` fail only because the Dockerfile safety test
+requires uv 0.11.7 while the reviewed image update selects 0.12.19. The failing
+assertion is reproduced locally; no vulnerability scanner finding caused these jobs
+to fail. Existing image builds passed, but the new revision still needs fresh CI.
+
+For REQ-CI-002/004, validate the actual invariant: the official uv build stage must
+use a numeric release tag and a full 64-character SHA256 digest. The previous
+substring both rejected newer releases and accepted empty digests. Keep all other
+runtime isolation assertions and vulnerability gates. Document the distinct CI and
+image-builder versions; neither policy nor the lock requires changing CI's tool pin.
+No dependency resolution, frozen file, runtime input, credential, persistence,
+financial side effect, or privilege changes. Review adds no abstraction or exception.
+
+Verify the existing test against the real pin and mutated invalid Dockerfiles, then
+run safety/architecture, lint/format/type/freeze and diff checks. Fresh container,
+security and full CI evidence belongs to the exact revision on
+[PR #32](https://github.com/yudhiishvs/autonomous-quant-agent/pull/32/checks).
+
+Local validation with the existing locked environment: `PYTHONPATH=src python -m
+pytest -q tests/safety tests/architecture` passed 127 tests. The actual Dockerfile
+test also accepted the real pin and rejected eight mutations: floating tag,
+missing/empty/short digest, wrong registry/stage, commented stage, and trailing
+content. `ruff check .`, `ruff format --check .` (426 files), `mypy src docker`
+(151 files), and `python3 scripts/verify_main_ai_freeze.py` (61 protected files and
+dependencies) passed. Release compatibility remains covered by real image builds
+and runtime probes, not this syntax check. No scanner gate or lock guard is relaxed.
 
 ## Container Python security update — 2026-09-23
 
