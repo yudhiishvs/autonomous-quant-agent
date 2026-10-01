@@ -1245,3 +1245,32 @@ HIGH/CRITICAL findings, so CVE-2026-7210 no longer appears under the original ga
 This is scanner and credential-free runtime evidence, not an exploit reproduction,
 ARM64 result, deployment acceptance, or guarantee against future vulnerabilities.
 The PR remains unmerged; unrelated repository acceptance status is unchanged.
+
+## CodeQL workflow compatibility — 2026-09-23
+
+The maintainer authorized repairing PR #28, including scoped commits and pushes
+from `fix/codeql-workflow-compatibility` to its existing branch
+`dependabot/github_actions/github/codeql-action/init-4.38.1`. Incorporate current
+`main` without rewriting history to include the merged Python package fix from
+PR #27. Do not merge PR #28, deploy, publish images, or alter unrelated work.
+
+PR run `35604754656` failed because initialization used CodeQL action 4.38.1
+while analysis used 4.37.9. For REQ-CI-002/004, pin both steps to the same immutable
+4.38.1 revision. A regression test checks compatibility between the actual workflow
+references without hard-coding a release; it fails on the original mismatched pair.
+Keep the action pair aligned in future dependency updates. No workflow permissions,
+scan criteria, application code, secrets, broker authority, or frozen dependencies
+change. This is a workflow configuration failure, not a reported code vulnerability.
+
+Local verification used the existing locked environment with `PYTHONPATH=src`.
+The existing 12 DevSecOps tests passed before the repair; the new compatibility
+test reproduced the mismatch and passes after alignment. `python -m pytest -q
+tests/safety tests/architecture` passed 128 tests. `ruff check .`, `ruff format
+--check .` (426 files), `mypy src docker` (151 files), and
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies)
+passed. Complete diff review preserves least privilege, immutable action pins,
+credentials, state ownership, and scan failure behavior; no additional abstractions
+or dependency changes are needed. Hosted CodeQL, container and remaining CI runs
+on [PR #28](https://github.com/yudhiishvs/autonomous-quant-agent/pull/28/checks)
+provide revision-specific remote acceptance evidence; local configuration tests
+do not execute CodeQL or Docker. Reverting the pair together preserves compatibility.
