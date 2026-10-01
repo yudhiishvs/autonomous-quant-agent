@@ -1105,6 +1105,12 @@ The secret-scanner baseline's existing reviewed false positive for that public
 checksum is updated to the new checksum's detection fingerprint. No additional
 path, pattern, detector or credential exception is introduced.
 
+Hosted history scanning subsequently identified that same detector metadata in
+the two published dependency-update commits. Its SHA-1 was recomputed from the
+approved public lock checksum and matched both committed lines. The Gitleaks
+record adds only those exact commit/file/rule/line fingerprints; all detector
+rules and full-history scanning remain enabled.
+
 Local candidate validation uses a separate environment with both patched versions:
 locked resolution and installation pass; the hashed full dependency export passes
 pip-audit with no known vulnerabilities; 283 socket-denied provider, paper-adapter,
