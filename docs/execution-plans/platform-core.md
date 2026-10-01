@@ -1191,6 +1191,38 @@ services healthy. Both legacy regressions, format/lint/type/freeze and configure
 Bandit checks passed. Disposable services were removed and Compose volumes retained.
 No publication or order was performed. External acceptance items above remain open.
 
+## Container tool pin validation — 2026-10-01
+
+The maintainer authorized fixing PR #32, including scoped commits and pushes from
+`fix/uv-container-pin-contract` to `dependabot/docker/astral-sh/uv-0.12.19`.
+Do not merge to main, deploy, publish images, or include unrelated working-tree edits.
+Runs `36427371681` and `36427371555` fail only because the Dockerfile safety test
+requires uv 0.11.7 while the reviewed image update selects 0.12.19. The failing
+assertion is reproduced locally; no vulnerability scanner finding caused these jobs
+to fail. Existing image builds passed, but the new revision still needs fresh CI.
+
+For REQ-CI-002/004, validate the actual invariant: the official uv build stage must
+use a numeric release tag and a full 64-character SHA256 digest. The previous
+substring both rejected newer releases and accepted empty digests. Keep all other
+runtime isolation assertions and vulnerability gates. Document the distinct CI and
+image-builder versions; neither policy nor the lock requires changing CI's tool pin.
+No dependency resolution, frozen file, runtime input, credential, persistence,
+financial side effect, or privilege changes. Review adds no abstraction or exception.
+
+Verify the existing test against the real pin and mutated invalid Dockerfiles, then
+run safety/architecture, lint/format/type/freeze and diff checks. Fresh container,
+security and full CI evidence belongs to the exact revision on
+[PR #32](https://github.com/yudhiishvs/autonomous-quant-agent/pull/32/checks).
+
+Local validation with the existing locked environment: `PYTHONPATH=src python -m
+pytest -q tests/safety tests/architecture` passed 127 tests. The actual Dockerfile
+test also accepted the real pin and rejected eight mutations: floating tag,
+missing/empty/short digest, wrong registry/stage, commented stage, and trailing
+content. `ruff check .`, `ruff format --check .` (426 files), `mypy src docker`
+(151 files), and `python3 scripts/verify_main_ai_freeze.py` (61 protected files and
+dependencies) passed. Release compatibility remains covered by real image builds
+and runtime probes, not this syntax check. No scanner gate or lock guard is relaxed.
+
 ## Container Python security update — 2026-09-23
 
 The maintainer authorized updating PR #27's Python pin, rebuilding its images, and
