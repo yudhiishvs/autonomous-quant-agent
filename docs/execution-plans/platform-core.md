@@ -1245,3 +1245,32 @@ HIGH/CRITICAL findings, so CVE-2026-7210 no longer appears under the original ga
 This is scanner and credential-free runtime evidence, not an exploit reproduction,
 ARM64 result, deployment acceptance, or guarantee against future vulnerabilities.
 The PR remains unmerged; unrelated repository acceptance status is unchanged.
+
+## CodeQL paired updates — 2026-10-01
+
+The maintainer authorized fixing PR #33, including scoped commits and pushes from
+`fix/codeql-release-pair` to
+`dependabot/github_actions/github/codeql-action/analyze-4.38.2`. No default-branch
+merge, deployment, or unrelated work is authorized. PR #28's earlier pair repair
+is still unmerged, so its compatibility regression is included here independently.
+
+Run `36427409929` reports configuration from 4.37.9 being consumed by 4.38.2.
+Align init and analyze on the immutable 4.38.2 revision already selected by this PR.
+The compatibility test reproduces the old mismatch. Group future CodeQL version
+updates using Dependabot's documented `groups.patterns` option and record the
+paired-step requirement in the dependency policy. This repairs REQ-CI-002/004
+without changing permissions, scan criteria, application input, secrets, persistent
+state, financial authority, or frozen dependencies. No new abstraction is needed.
+
+Acceptance requires safety/architecture tests, lint/format/type/freeze and diff
+checks locally, followed by the CodeQL, security, container and full CI checks on
+the exact pushed revision. Hosted evidence remains attached to
+[PR #33](https://github.com/yudhiishvs/autonomous-quant-agent/pull/33/checks).
+
+Local verification: `PYTHONPATH=src python -m pytest -q tests/safety tests/architecture`
+passed 128 tests using the existing locked environment. `ruff check .`, `ruff format
+--check .` (426 files), `mypy src docker` (151 files), and
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies)
+passed. Review preserves immutable references and least privilege; the existing
+pair test rejects absent or mismatched steps. Grouping changes future proposals
+only and grants no merge or runtime authority. Revert the pair together if needed.

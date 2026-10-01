@@ -273,6 +273,16 @@ def test_verification_configuration_is_publishable_but_private_state_is_ignored(
     assert all((project_root / name).is_file() for name in public)
 
 
+def test_codeql_initialization_and_analysis_use_compatible_revisions(project_root: Path) -> None:
+    workflow = _yaml(project_root / ".github" / "workflows" / "codeql.yml")
+    references = {
+        step["uses"].split("@", 1)[0]: step["uses"].split("@", 1)[1]
+        for step in workflow["jobs"]["codeql"]["steps"]
+        if step.get("uses", "").startswith("github/codeql-action/")
+    }
+    assert references["github/codeql-action/init"] == references["github/codeql-action/analyze"]
+
+
 def test_security_container_and_codeql_gates_are_wired(project_root: Path) -> None:
     workflow_paths = sorted((project_root / ".github" / "workflows").glob("*.yml"))
     workflows = {path.name: _yaml(path) for path in workflow_paths}

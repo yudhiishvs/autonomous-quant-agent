@@ -86,6 +86,11 @@ current checked-in exceptions.
 Dependency updates should be grouped by purpose. Security corrections may be isolated for
 fast review, but must not silently change application behavior or bypass the locked graph.
 
+CodeQL initialization and analysis exchange versioned configuration and must use the
+same immutable action revision. Dependabot groups `github/codeql-action/*` version
+updates so those steps move together; the workflow compatibility test rejects a
+mixed pair independently of the hosted scan. Keep the group when adding another CodeQL step.
+
 While the Main AI dependency freeze is active, routine uv version-update PRs are paused
 with `open-pull-requests-limit: 0`. Security updates and the blocking locked dependency
 audit remain active; a vulnerable frozen dependency requires a separately reviewed freeze
