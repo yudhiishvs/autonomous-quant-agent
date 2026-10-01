@@ -1367,3 +1367,56 @@ or dependency changes are needed. Hosted CodeQL, container and remaining CI runs
 on [PR #28](https://github.com/yudhiishvs/autonomous-quant-agent/pull/28/checks)
 provide revision-specific remote acceptance evidence; local configuration tests
 do not execute CodeQL or Docker. Reverting the pair together preserves compatibility.
+
+## CodeQL paired updates — 2026-10-01
+
+The maintainer authorized fixing PR #33, including scoped commits and pushes from
+`fix/codeql-release-pair` to
+`dependabot/github_actions/github/codeql-action/analyze-4.38.2`. No default-branch
+merge, deployment, or unrelated work is authorized. At the initial repair, PR #28
+was still unmerged, so its compatibility regression was included here independently.
+
+Run `36427409929` reports configuration from 4.37.9 being consumed by 4.38.2.
+Align init and analyze on the immutable 4.38.2 revision already selected by this PR.
+The compatibility test reproduces the old mismatch. Group future CodeQL version
+updates using Dependabot's documented `groups.patterns` option and record the
+paired-step requirement in the dependency policy. This repairs REQ-CI-002/004
+without changing permissions, scan criteria, application input, secrets, persistent
+state, financial authority, or frozen dependencies. No new abstraction is needed.
+
+Acceptance requires safety/architecture tests, lint/format/type/freeze and diff
+checks locally, followed by the CodeQL, security, container and full CI checks on
+the exact pushed revision. Hosted evidence remains attached to
+[PR #33](https://github.com/yudhiishvs/autonomous-quant-agent/pull/33/checks).
+
+Local verification: `PYTHONPATH=src python -m pytest -q tests/safety tests/architecture`
+passed 128 tests using the existing locked environment. `ruff check .`, `ruff format
+--check .` (426 files), `mypy src docker` (151 files), and
+`python3 scripts/verify_main_ai_freeze.py` (61 protected files and dependencies)
+passed. Review preserves immutable references and least privilege; the existing
+pair test rejects absent or mismatched steps. Grouping changes future proposals
+only and grants no merge or runtime authority. Revert the pair together if needed.
+
+## PR #33 conflict reconciliation — 2026-10-01
+
+The maintainer reported merge conflicts after PRs #28, #31 and #32 entered `main`.
+Continue the existing PR #33 repair delegation on `fix/codeql-release-pair`, with
+a normal merge of `origin/main` at `ecc7d93` into this PR branch and a push to its
+existing remote branch. No default-branch merge, force-push or deployment is part
+of this repair. Preserve the matched CodeQL 4.38.2 references and Dependabot group;
+retain the newly merged setup-uv 10.2.0 references, uv 0.12.19 image, approved
+security lock and both historical verification sections.
+
+The reproduced conflicts are limited to the CodeQL version pair and adjacent
+execution-plan additions. Application code, the protected-file manifest, dependency
+resolution, financial authority, secrets and scan thresholds do not change. Verify
+the combined tree with safety/architecture tests, formatting, lint, typing, frozen
+file checks and diff review, then rerun the hosted checks on the published merge.
+
+Local verification of the combined tree passed 128 safety/architecture tests under
+the network-denial wrapper, Ruff lint/format checks (426 files), mypy (151 files),
+and the freeze verifier (61 protected files and the approved dependency fingerprint).
+The resulting PR diff against `ecc7d93` contains only the CodeQL pair, Dependabot
+group and their documentation; application code, tests, image pins, lockfile and
+secret-scanner metadata match current `main`. Fresh hosted checks remain required
+on the published merge commit.
