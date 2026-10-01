@@ -1066,6 +1066,61 @@ groups, and default-deny paper execution. Final image builds, offline behavior a
 hosted checks remain pending; candidate scan success is not final-image acceptance.
 
 
+## Approved dependency security exception — 2026-10-01
+
+The maintainer explicitly approved a two-package freeze exception for PRs #32 and
+#33: `urllib3` 2.7.0 → 2.8.0 and `virtualenv` 21.7.8 → 21.7.13. This scoped
+delegation authorizes implementation, verification, commits and pushes to those
+existing PR branches; it does not authorize merging, deployment or provider calls.
+The shared repair is prepared on `fix/dependency-security-exception` and applied
+to `fix/uv-container-pin-contract` and `fix/codeql-release-pair` before publication.
+
+Fresh CI audits reported urllib3 CVE-2026-97687, CVE-2026-97688 and CVE-2026-97689,
+and virtualenv PYSEC-2026-4011, PYSEC-2026-4012, PYSEC-2026-4013 and PYSEC-2026-4014.
+All three container targets also reported the two HIGH urllib3 findings.
+Requests consumes external response bytes before application payload validation;
+fixed hosts, disabled environment proxies and bounded socket timeouts do not prove
+immunity to response-decoding flaws. Virtualenv is used by pre-commit in security
+tooling, not imported by the application runtime. The upstream
+[urllib3 release](https://github.com/urllib3/urllib3/releases/tag/2.8.0) and
+[virtualenv release](https://github.com/pypa/virtualenv/releases/tag/21.7.13)
+identify the selected fixes. Direct application exploitability was not demonstrated.
+
+The lock was regenerated with `uv lock --upgrade-package urllib3==2.8.0
+--upgrade-package virtualenv==21.7.13`. All 146 package records remain present;
+only the two approved records change, with no dependency-edge changes. Existing
+declarations already permit both versions, so `pyproject.toml` remains byte-identical.
+The explicitly authorized `uv.lock` SHA-256 transition is:
+
+- Previous: `77003707ed87a7681b504ce8b4cd0465495425f47d20cac7b1dc77fcc283045d`
+- Approved: `d711f1f2afcd7776a02e92ec42378be1e92de3114813320346c66a2f9ec4228c`
+
+Only that dependency fingerprint changes in `non-ai-freeze-baseline.json`.
+The original protected manifest, its hash, all 61 protected files, protected
+inventory, project fingerprint and verifier remain unchanged. The dependency
+freeze continues with this single recorded exception; no advisory is ignored and
+no severity gate is lowered.
+
+The secret-scanner baseline's existing reviewed false positive for that public
+checksum is updated to the new checksum's detection fingerprint. No additional
+path, pattern, detector or credential exception is introduced.
+
+Local candidate validation uses a separate environment with both patched versions:
+locked resolution and installation pass; the hashed full dependency export passes
+pip-audit with no known vulnerabilities; 283 socket-denied provider, paper-adapter,
+runtime, safety and architecture tests and 64 additional freeze, credential and
+execution-broker tests pass. Ruff lint/format and mypy pass
+(426 formatted files, 151 typed files). Virtualenv creates a usable Python 3.11
+environment without downloads; every pinned pre-commit hook passes, as does the
+configured Bandit gate. The full socket-denied suite passes: 3,065 tests, with ten
+database-dependent skips deferred to hosted PostgreSQL integration. An initial
+subprocess import failure came from a relative test-environment path; setting an
+absolute `PYTHONPATH` corrected the setup without changing source or tests, and
+the complete rerun passed. Synthetic backtest and deterministic replay commands
+also pass in disposable state. Independent review found no concrete bypass or
+regression. Fresh hosted PostgreSQL, coverage, dependency and image-scan results
+remain required at this commit before declaring both PRs verified.
+
 ## Heartbeat completion race follow-up
 
 A hosted branch run reproduced a real race: the final completion checkpoint was taken
