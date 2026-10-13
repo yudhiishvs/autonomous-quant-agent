@@ -136,7 +136,7 @@ jobs:
 
       - name: Upload vulnerability findings even when the gate fails
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}-vulnerabilities-${{ github.run_id }}
           path: ${{ matrix.target }}.vulnerabilities.json
@@ -145,7 +145,7 @@ jobs:
 
       - name: Upload image SBOM
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.target }}-spdx-${{ github.run_id }}
           path: ${{ matrix.target }}.spdx.json
@@ -183,7 +183,7 @@ jobs:
           --output-format JSON --output-file python.cdx.json .venv/bin/python
 
       - name: Upload Python SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: python-cyclonedx-${{ github.run_id }}
           path: python.cdx.json

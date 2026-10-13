@@ -122,7 +122,7 @@ jobs:
         run: make coverage-offline
 
       - name: Upload offline coverage data
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-offline-${{ github.run_id }}
           path: .coverage
@@ -219,7 +219,7 @@ jobs:
         run: make coverage-postgres
 
       - name: Upload PostgreSQL coverage data
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-postgres-${{ github.run_id }}
           path: .coverage
@@ -265,7 +265,7 @@ jobs:
           make coverage-report
       - name: Upload combined coverage evidence
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-combined-${{ github.run_id }}
           path: |
